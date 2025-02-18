@@ -311,6 +311,9 @@ if __name__ == "__main__":
     # using tarball buffer
     if use_tarball_buffer:
 
+        # change directory to temporary storage directory
+        chdir(temporary_storage_dir)
+
         # iterate over subdirectories
         for i, subdirectory in enumerate(subdirectories):
 
@@ -323,19 +326,24 @@ if __name__ == "__main__":
             # name of temporary storage subdirectory
             temporary_storage_subdir_name = "-".join(subdirectory.split("/")[-2:]) # name of temporary directory
 
+            # subdirectory tarball filepath (filepath to tarball on deepfreeze)
+            subdirectory_tarball_filepath = f"{subdirectory}.tar"
+
             # message for this subdirectory
             message = f"{temporary_storage_subdir_name} ({i + 1} of {len(subdirectories)})"
 
             # check if this subdirectory is already complete
-            if exists(subdirectory) and not (reset or reset_tables):
+            if exists(subdirectory_tarball_filepath) and not (reset or reset_tables):
                 logging.info(f"{message} already complete.")
                 continue
 
             # get subdirectory temporary storage directory name
             temporary_storage_subdir = f"{temporary_storage_dir}/{temporary_storage_subdir_name}" # full path of temporary directory
-            if exists(temporary_storage_subdir):
-                rmtree(temporary_storage_subdir)
-            mkdir(temporary_storage_subdir)
+            # if exists(temporary_storage_subdir):
+            #     rmtree(temporary_storage_subdir, ignore_errors = True)
+            # mkdir(temporary_storage_subdir)
+            if not exists(temporary_storage_subdir):
+                mkdir(temporary_storage_subdir)
 
             # iterate over indicies in subdirectory
             for j in tqdm(
@@ -347,28 +355,27 @@ if __name__ == "__main__":
 
             # tar directory (no need to gzip, it's unclear how much compression will help)
             logging.info("Tarballing.")
-            chdir(temporary_storage_dir) # change working directory to temporary storage directory
+            # chdir(temporary_storage_dir) # change working directory to temporary storage directory
             temporary_storage_subdir_tarball_filepath = f"{temporary_storage_subdir}.tar"
+            if exists(temporary_storage_subdir_tarball_filepath):
+                remove(temporary_storage_subdir_tarball_filepath)
             subprocess.run(args = ["tar", "-cf", basename(temporary_storage_subdir_tarball_filepath), basename(temporary_storage_subdir)], check = True)
             rmtree(temporary_storage_subdir) # remove temporary tree directory to save storage
 
             # move onto deepfreeze
             logging.info("Copying tarball to DeepFreeze.")
-            subdirectory_dirname, subdirectory_basename = dirname(subdirectory), basename(subdirectory)
-            nas_tarball_dir = f"{subdirectory_dirname}/{subdirectory_basename}"
-            nas_tarball_filepath = f"{nas_tarball_dir}.tar"
-            subprocess.run(args = ["rsync", temporary_storage_subdir_tarball_filepath, nas_tarball_filepath], check = True)
-            # copy2(src = temporary_storage_subdir_tarball_filepath, dst = nas_tarball_filepath)
+            subprocess.run(args = ["rsync", temporary_storage_subdir_tarball_filepath, subdirectory_tarball_filepath], check = True)
+            # copy2(src = temporary_storage_subdir_tarball_filepath, dst = subdirectory_tarball_filepath)
             remove(temporary_storage_subdir_tarball_filepath) # remove tar file
 
             # untar file on deepfreeze
-            logging.info("Extracting tarball.")
-            chdir(subdirectory_dirname) # change directory to on the nas
-            subprocess.run(args = ["tar", "-xf", basename(nas_tarball_filepath)], check = True)
-            remove(nas_tarball_filepath) # remove tar file on deepfreeze
+            # logging.info("Extracting tarball.")
+            # chdir(dirname(subdirectory)) # change directory to on the nas
+            # subprocess.run(args = ["tar", "-xf", basename(subdirectory_tarball_filepath)], check = True)
+            # remove(subdirectory_tarball_filepath) # remove tar file on deepfreeze
 
             # change working directory back to temporary storage directory
-            chdir(temporary_storage_dir)
+            # chdir(temporary_storage_dir)
                 
         # print a line
         logging.info(LINE)

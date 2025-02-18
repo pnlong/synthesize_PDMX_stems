@@ -11,7 +11,7 @@
 ##################################################
 
 import argparse
-from os.path import exists, dirname, expanduser
+from os.path import exists, dirname, expanduser, realpath
 from os import mkdir, makedirs
 import pandas as pd
 import logging
@@ -124,7 +124,7 @@ if __name__ == "__main__":
     # create temporary storage directory
     if args.use_tarball_buffer:
         if exists(args.temporary_storage_dir):
-            rmtree(args.temporary_storage_dir)
+            rmtree(args.temporary_storage_dir, ignore_errors = True)
         makedirs(args.temporary_storage_dir)
     
     # job level song-level output filepaths
@@ -257,10 +257,12 @@ if __name__ == "__main__":
     ##################################################
 
     # concatenate job outputs into megafiles
-    logging.info(f"# CONCATENATE JOB OUTPUTS")
+    logging.info(f"# WRANGLE TEMPORARY OUTPUTS")
     logging.info(f"cat {job_output_filepaths_dir}/* >> {output_filepath} # concatenate song-level dataset") # create song-level dataset
     logging.info(f"cat {job_stems_output_filepaths_dir}/* >> {stems_output_filepath} # concatenate stem-level dataset") # create song-level dataset
-    
+    if args.use_tarball_buffer:
+        logging.info(f"bash {dirname(realpath(__file__))}/synthesize_helper_extractor.sh {output_dir} # extract tarballs")
+
     # easier to read
     logging.info(LINE)
 
@@ -270,6 +272,8 @@ if __name__ == "__main__":
     logging.info(f"rm -rf {job_output_filepaths_dir} # remove song-level job outputs")
     logging.info(f"rm -rf {job_stems_output_filepaths_dir} # remove stem-level job outputs")
     logging.info(f"rm {dataset_temporary_filepath} # remove temporary dataset")
+    if args.use_tarball_buffer:
+        logging.info(f"find {data_dir} -name \"*.tar\" | xargs rm # remove tarballs after extraction")
 
     ##################################################
     
