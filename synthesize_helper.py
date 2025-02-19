@@ -31,7 +31,7 @@ import sys
 sys.path.insert(0, dirname(realpath(__file__)))
 sys.path.insert(0, dirname(dirname(realpath(__file__))))
 
-from synthesize_manager import NA_STRING, STEMS_TABLE_COLUMNS, SONGS_TABLE_COLUMNS, SAMPLE_RATE, GAIN, LINE
+from synthesize_manager import NA_STRING, STEMS_TABLE_COLUMNS, SONGS_TABLE_COLUMNS, SAMPLE_RATE, GAIN, LINE, TEMPORARY_STORAGE_DIR, SOUNDFONT_PATH
 from model_musescore import load, MusicRender
 
 ##################################################
@@ -44,6 +44,8 @@ def parse_args(args = None, namespace = None):
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(prog = "Synthesize Helper", description = "Helper for synthesizing PDMX as audio waveforms stored in tensors.")
     parser.add_argument("-i", "--instructions_filepath", type = str, required = True, help = "Filepath to pickled instructions information")
+    parser.add_argument("-s", "--soundfont_filepath", type = str, default = SOUNDFONT_PATH, help = "Filepath to soundfont")
+    parser.add_argument("-t", "--temporary_storage_dir", type = str, default = TEMPORARY_STORAGE_DIR, help = "Filepath to directory where files can be temporarily stored")
     return parser.parse_args(args = args, namespace = namespace)
 
 ##################################################
@@ -60,17 +62,17 @@ if __name__ == "__main__":
     # parse the command-line arguments
     args = parse_args()
 
-    # load in instructions
-    with open(args.instructions_filepath, "rb") as instructions_file:
+    # get necessary variables (either from command-line arguments or instructions pickle file)
+    temporary_storage_dir = args.temporary_storage_dir
+    soundfont_filepath = args.soundfont_filepath
+    with open(args.instructions_filepath, "rb") as instructions_file: # load in instructions
         instructions = pickle.load(instructions_file)
         dataset_filepath = instructions["dataset_filepath"]
-        soundfont_filepath = instructions["soundfont_filepath"]
         output_filepath = instructions["output_filepath"]
         stems_output_filepath = instructions["stems_output_filepath"]
         subdirectories = instructions["subdirectories"]
         reset = instructions["reset"]
         reset_tables = instructions["reset_tables"]
-        temporary_storage_dir = instructions["temporary_storage_dir"]
         use_tarball_buffer = instructions["use_tarball_buffer"]
         del instructions
 

@@ -32,7 +32,7 @@ sys.path.insert(0, dirname(dirname(realpath(__file__))))
 # some filepaths
 PDMX_FILEPATH = "/deepfreeze/pnlong/PDMX/PDMX.csv"
 OUTPUT_DIR = "/deepfreeze/pnlong"
-SOUNDFONT_PATH = "/data3/pnlong/musescore/soundfonts/airfont_380_final.sf2"
+SOUNDFONT_PATH = "/home/pnlong/soundfonts/airfont_380_final.sf2"
 TEMPORARY_STORAGE_DIR = "/home/pnlong/temp_stems_storage" # MUST BE ON LOCAL DRIVES, NOT DEEPFREEZE
 
 # multiprocessing chunk size
@@ -234,18 +234,20 @@ if __name__ == "__main__":
             pickle.dump(
                 obj = {
                     "dataset_filepath": dataset_temporary_filepath,
-                    "soundfont_filepath": args.soundfont_filepath,
                     "output_filepath": job_output_filepaths[i],
                     "stems_output_filepath": job_stems_output_filepaths[i],
                     "subdirectories": data_subdirectories[start_indicies[i]:end_indicies[i]], # list of relevant subdirectories for this job
                     "reset": args.reset,
                     "reset_tables": args.reset_tables,
-                    "temporary_storage_dir": args.temporary_storage_dir,
                     "use_tarball_buffer": args.use_tarball_buffer,
                 }, 
                 file = instructions_file
             )
-        logging.info(f"conda activate base; cd {software_dir}; python {software_filepath} -i {job_instructions_filepath}") # output command to call
+        logging.info(
+            f"conda activate base; " +
+            f"cd {software_dir}; " +
+            f"python {software_filepath} --instructions_filepath {job_instructions_filepath} --soundfont_filepath {args.soundfont_filepath} --temporary_storage_dir {args.temporary_storage_dir}"
+        ) # output command to call
 
     # easier to read
     logging.info(LINE)
