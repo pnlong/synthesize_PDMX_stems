@@ -5,7 +5,7 @@
 # Synthesize data as audio.
 
 # python /home/pnlong/synthesize_audio/synthesize_manager.py
-# python synthesize_manager.py --dataset_filepath "/deepfreeze/pnlong/PDMX/PDMX.csv" --output_dir "/deepfreeze/user_shares/pnlong" --soundfont_filepath "/home/pnlong/synthesize_audio/soundfonts/SGM-V2.01.sf2" --temporary_storage_dir "/home/pnlong/temp_stems_storage" --jobs 10
+# python synthesize_manager.py --dataset_filepath "/deepfreeze/pnlong/PDMX/PDMX/PDMX.csv" --output_dir "/deepfreeze/user_shares/pnlong" --soundfont_filepath "/home/pnlong/soundfonts/SGM-V2.01.sf2" --temporary_storage_dir "/home/pnlong/temp_stems_storage" --jobs 10
 
 # IMPORTS
 ##################################################
@@ -246,7 +246,7 @@ if __name__ == "__main__":
         logging.info(
             f"conda activate base; " +
             f"cd {software_dir}; " +
-            f"python {software_filepath} --instructions_filepath {job_instructions_filepath} --soundfont_filepath {args.soundfont_filepath} --temporary_storage_dir {args.temporary_storage_dir}"
+            f"python {software_filepath} --soundfont_filepath {args.soundfont_filepath} --temporary_storage_dir {args.temporary_storage_dir} --instructions_filepath {job_instructions_filepath}"
         ) # output command to call
 
     # easier to read
