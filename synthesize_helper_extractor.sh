@@ -73,7 +73,8 @@ for i in "${!subdirectories[@]}"; do
         # extract tarball
         tarball_extracted_dir=($(basename "${tarball}" ".tar")) # relative path to resulting extracted directory
         if ! test -f "${tarball_extracted_dir}"; then # check that resulting extracted directory doesn't exist already (avoid redundant extractions)
-            # tar -xf "${tarball}"
+            # tar -xf "${tarball}" # for normal tarballs
+            # tar -xfz "${tarball}" # for gzipped tarballs
             sleep .2
         fi
 
