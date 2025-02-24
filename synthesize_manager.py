@@ -74,6 +74,10 @@ GAIN = 1.0
 SONG_LEVEL_FILENAME = "data"
 STEM_LEVEL_FILENAME = "stems"
 
+# filetype of tarballs
+TARBALL_FILETYPE = "tar.gz"
+TARBALL_IS_GZIPPED = TARBALL_FILETYPE.endswith("gz")
+
 # line to separate outputs
 LINE = "".join(("=" for _ in range(150)))
 
