@@ -74,10 +74,6 @@ GAIN = 1.0
 SONG_LEVEL_FILENAME = "data"
 STEM_LEVEL_FILENAME = "stems"
 
-# filetype of tarballs
-GZIP_TARBALLS = False
-TARBALL_FILETYPE = "tar.gz" if GZIP_TARBALLS else "tar"
-
 # line to separate outputs
 LINE = "".join(("=" for _ in range(150)))
 
@@ -96,6 +92,7 @@ def parse_args(args = None, namespace = None):
     parser.add_argument("-r", "--reset", action = "store_true", help = "Whether or not to recreate files")
     parser.add_argument("-rt", "--reset_tables", action = "store_true", help = "Whether or not to reset data table(s) without recreating files")
     parser.add_argument("-ut", "--use_tarball_buffer", action = "store_true", help = "Whether or not to use tarball buffering approach to create data")
+    parser.add_argument("-gz", "--gzip_tarballs", action = "store_true", help = "Whether or not to GZIP tarballs if tarball buffering approach is in use")
     parser.add_argument("-t", "--temporary_storage_dir", default = TEMPORARY_STORAGE_DIR, type = str, help = "Temporary storage directory, must be specified if use_tarball_buffer flag is set")
     parser.add_argument("-j", "--jobs", default = 10, type = int, help = "Number of Jobs")
     return parser.parse_args(args = args, namespace = namespace)
@@ -244,6 +241,7 @@ if __name__ == "__main__":
                     "reset": args.reset,
                     "reset_tables": args.reset_tables,
                     "use_tarball_buffer": args.use_tarball_buffer,
+                    "gzip_tarballs": args.gzip_tarballs,
                 }, 
                 file = instructions_file
             )

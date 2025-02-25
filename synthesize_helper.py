@@ -37,7 +37,6 @@ from synthesize_manager import (
     SAMPLE_RATE, GAIN, LINE,
     TEMPORARY_STORAGE_DIR,
     SOUNDFONT_PATH,
-    GZIP_TARBALLS, TARBALL_FILETYPE,
 )
 from model_musescore import load, MusicRender
 
@@ -81,7 +80,9 @@ if __name__ == "__main__":
         reset = instructions["reset"]
         reset_tables = instructions["reset_tables"]
         use_tarball_buffer = instructions["use_tarball_buffer"]
+        gzip_tarballs = instructions["gzip_tarballs"]
         del instructions
+    tarball_filetype = "tar" + (".gz" if gzip_tarballs else "")
 
     # set up logger
     logging.basicConfig(level = logging.INFO, format = "%(message)s")
@@ -335,7 +336,7 @@ if __name__ == "__main__":
             temporary_storage_subdir_name = "-".join(subdirectory.split("/")[-2:]) # name of temporary directory
 
             # subdirectory tarball filepath (filepath to tarball on deepfreeze)
-            subdirectory_tarball_filepath = f"{subdirectory}.{TARBALL_FILETYPE}"
+            subdirectory_tarball_filepath = f"{subdirectory}.{tarball_filetype}"
 
             # message for this subdirectory
             message = f"{temporary_storage_subdir_name} ({i + 1} of {len(subdirectories)})"
@@ -364,10 +365,10 @@ if __name__ == "__main__":
             # tar directory (no need to gzip, it's unclear how much compression will help)
             logging.info("Tarballing.")
             # chdir(temporary_storage_dir) # change working directory to temporary storage directory
-            temporary_storage_subdir_tarball_filepath = f"{temporary_storage_subdir}.{TARBALL_FILETYPE}"
+            temporary_storage_subdir_tarball_filepath = f"{temporary_storage_subdir}.{tarball_filetype}"
             if exists(temporary_storage_subdir_tarball_filepath):
                 remove(temporary_storage_subdir_tarball_filepath)
-            subprocess.run(args = ["tar", ("-czf" if GZIP_TARBALLS else "-cf"), basename(temporary_storage_subdir_tarball_filepath), basename(temporary_storage_subdir)], check = True)
+            subprocess.run(args = ["tar", ("-czf" if gzip_tarballs else "-cf"), basename(temporary_storage_subdir_tarball_filepath), basename(temporary_storage_subdir)], check = True)
             rmtree(temporary_storage_subdir) # remove temporary tree directory to save storage
 
             # move onto deepfreeze
@@ -379,7 +380,7 @@ if __name__ == "__main__":
             # untar file on deepfreeze
             # logging.info("Extracting tarball.")
             # chdir(dirname(subdirectory)) # change directory to on the nas
-            # subprocess.run(args = ["tar", ("-xzf" if GZIP_TARBALLS else "-xf"), basename(subdirectory_tarball_filepath)], check = True)
+            # subprocess.run(args = ["tar", ("-xzf" if gzip_tarballs else "-xf"), basename(subdirectory_tarball_filepath)], check = True)
             # remove(subdirectory_tarball_filepath) # remove tar file on deepfreeze
 
             # change working directory back to temporary storage directory
