@@ -368,7 +368,7 @@ if __name__ == "__main__":
             temporary_storage_subdir_tarball_filepath = f"{temporary_storage_subdir}.{TARBALL_FILETYPE}"
             if exists(temporary_storage_subdir_tarball_filepath):
                 remove(temporary_storage_subdir_tarball_filepath)
-            subprocess.run(args = ["tar", "-cf" + ("z" if TARBALL_IS_GZIPPED else ""), basename(temporary_storage_subdir_tarball_filepath), basename(temporary_storage_subdir)], check = True)
+            subprocess.run(args = ["tar", ("-czf" if TARBALL_IS_GZIPPED else "-cf"), basename(temporary_storage_subdir_tarball_filepath), basename(temporary_storage_subdir)], check = True)
             rmtree(temporary_storage_subdir) # remove temporary tree directory to save storage
 
             # move onto deepfreeze
@@ -380,7 +380,7 @@ if __name__ == "__main__":
             # untar file on deepfreeze
             # logging.info("Extracting tarball.")
             # chdir(dirname(subdirectory)) # change directory to on the nas
-            # subprocess.run(args = ["tar", "-xf" + ("z" if TARBALL_IS_GZIPPED else ""), basename(subdirectory_tarball_filepath)], check = True)
+            # subprocess.run(args = ["tar", ("-xzf" if TARBALL_IS_GZIPPED else "-xf"), basename(subdirectory_tarball_filepath)], check = True)
             # remove(subdirectory_tarball_filepath) # remove tar file on deepfreeze
 
             # change working directory back to temporary storage directory
