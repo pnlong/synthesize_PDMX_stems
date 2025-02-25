@@ -75,8 +75,8 @@ SONG_LEVEL_FILENAME = "data"
 STEM_LEVEL_FILENAME = "stems"
 
 # filetype of tarballs
-TARBALL_FILETYPE = "tar.gz"
-TARBALL_IS_GZIPPED = TARBALL_FILETYPE.endswith("gz")
+GZIP_TARBALLS = False
+TARBALL_FILETYPE = "tar.gz" if GZIP_TARBALLS else "tar"
 
 # line to separate outputs
 LINE = "".join(("=" for _ in range(150)))
