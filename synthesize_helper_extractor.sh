@@ -71,7 +71,7 @@ for i in "${!subdirectories[@]}"; do
         tarball=($(basename ${tarball})) # get just basename of tarball
 
         # extract tarball
-        tarball_extracted_dir=($(basename ${tarball} ".tar")) # relative path to resulting extracted directory, removing file extension
+        tarball_extracted_dir=(${tarball%%.*}) # relative path to resulting extracted directory, removing file extension
         if [ ! -d ${tarball_extracted_dir} ]; then # check that resulting extracted directory doesn't exist already (avoid redundant extractions)
             if [[ ${tarball} == *.tar ]]; then # for normal tarballs
                 # tar -xf "${tarball}"
