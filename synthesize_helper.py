@@ -145,10 +145,12 @@ if __name__ == "__main__":
 
         # remove midi file
         remove(midi_path)
+        del midi_path # free up memory
 
         # decode bytes to waveform
         waveform = np.frombuffer(result.stdout, dtype = np.int16).reshape(-1, 2).transpose() # transpose so channels are first dimension, time is second dimension
-        waveform = torch.from_numpy(waveform.copy())
+        del result # free up memory
+        waveform = torch.from_numpy(waveform)
 
         # return the stereo waveform
         return waveform
@@ -260,6 +262,7 @@ if __name__ == "__main__":
             # load music object if necessary
             if not loaded_music:
                 music = load(path = dataset.at[i, "path"])
+                loaded_music = True
 
             # write stems info to file
             stems_info = pd.DataFrame(
@@ -295,6 +298,11 @@ if __name__ == "__main__":
 
             # add to already completed paths
             already_completed_paths.add(path_output)
+
+        # free up memory
+        if loaded_music:
+            del music
+        del loaded_music, create_safetensor
 
     def synthesize_song_helper(i: int, path_output: str):
         """
