@@ -368,9 +368,7 @@ if __name__ == "__main__":
                 desc = message,
                 total = len(indicies_for_subdirectory),
             ):
-                path_output = f"{temporary_storage_subdir}/{basename(dataset.at[j, 'path_output'])}"
-                if not exists(path_output):
-                    synthesize_song_helper(i = j, path_output = path_output)
+                synthesize_song_helper(i = j, path_output = f"{temporary_storage_subdir}/{basename(dataset.at[j, 'path_output'])}")
 
             # tar directory (no need to gzip, it's unclear how much compression will help)
             logging.info("Tarballing.")
