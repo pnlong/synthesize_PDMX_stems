@@ -150,7 +150,7 @@ if __name__ == "__main__":
         # decode bytes to waveform
         waveform = np.frombuffer(result.stdout, dtype = np.int16).reshape(-1, 2).transpose() # transpose so channels are first dimension, time is second dimension
         del result # free up memory
-        waveform = torch.from_numpy(waveform.copy())
+        waveform = torch.from_numpy(waveform.copy()) # to avoid: https://discuss.pytorch.org/t/userwarning-the-given-numpy-array-is-not-writeable/78748/11
 
         # return the stereo waveform
         return waveform
