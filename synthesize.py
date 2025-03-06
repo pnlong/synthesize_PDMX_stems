@@ -77,6 +77,9 @@ SONGS_TABLE_COLUMNS = [
 SAMPLE_RATE = 44100
 GAIN = 1.0
 
+# truncate overly-long stems to avoid memory errors
+MAX_N_NOTES_IN_STEM = 100000
+
 ##################################################
 
 
@@ -226,6 +229,11 @@ if __name__ == "__main__":
             # loop through stems
             for i in range(len(music.tracks)):
 
+                # get single-track music object
+                track = music.tracks[i]
+                if len(track.notes) > MAX_N_NOTES_IN_STEM:
+                    track.notes = track.notes[:MAX_N_NOTES_IN_STEM]
+
                 # get waveform for this stem
                 waveform = get_waveform_tensor(
                     music = MusicRender(
@@ -238,7 +246,7 @@ if __name__ == "__main__":
                         beats = music.beats,
                         lyrics = music.lyrics,
                         annotations = music.annotations,
-                        tracks = [music.tracks[i]],
+                        tracks = [track],
                         song_length = music.song_length,
                         infer_velocity = music.infer_velocity,
                         absolute_time = music.absolute_time,
