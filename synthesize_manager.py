@@ -70,6 +70,9 @@ SONGS_TABLE_COLUMNS = [
 SAMPLE_RATE = 44100
 GAIN = 1.0
 
+# truncate overly-long stems to avoid memory errors
+MAX_N_NOTES_IN_STEM = 100000
+
 # what to name CSV files in resulting dataset
 SONG_LEVEL_FILENAME = "data"
 STEM_LEVEL_FILENAME = "stems"
