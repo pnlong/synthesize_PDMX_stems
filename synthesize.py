@@ -19,7 +19,6 @@ import pandas as pd
 import torch
 import numpy as np
 import tempfile
-import logging
 import subprocess
 import multiprocessing
 from tqdm import tqdm
