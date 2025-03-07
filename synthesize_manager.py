@@ -72,7 +72,7 @@ SAMPLE_RATE = 44100
 GAIN = 1.0
 
 # truncate overly-long stems to avoid memory errors
-MAX_N_NOTES_IN_STEM = 100000
+MAX_N_NOTES_IN_STEM = 50000 # 0.99997812562 quantile for stem lengths
 
 # what to name CSV files in resulting dataset
 SONG_LEVEL_FILENAME = "data"
