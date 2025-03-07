@@ -29,8 +29,8 @@ from model_musescore import load, read_musescore
 # CONSTANTS
 ##################################################
 
-MUSIC_FILEPATH = "/data2/pnlong/musescore/test_data/debussy/clair_de_lune.mscz"
-SOUNDFONTS_DIR = "/data3/pnlong/musescore/soundfonts"
+MUSIC_FILEPATH = "/deepfreeze/pnlong/PDMX_experiments/test_data/debussy/clair_de_lune.mscz"
+SOUNDFONTS_DIR = "/deepfreeze/pnlong/soundfonts"
 
 ##################################################
 
@@ -44,7 +44,7 @@ def parse_args(args = None, namespace = None):
     parser.add_argument("-p", "--path", default = MUSIC_FILEPATH, type = str, help = "Music path for which we want to generate audio")
     parser.add_argument("-s", "--soundfonts_dir", default = SOUNDFONTS_DIR, type = str, help = "Path of the soundfont")
     parser.add_argument("-r", "--reset", action = "store_true", help = "Whether or not to recreate files")
-    parser.add_argument("-j", "--jobs", default = int(multiprocessing.cpu_count() / 4), type = int, help = "Number of Jobs")
+    parser.add_argument("-j", "--jobs", default = int(multiprocessing.cpu_count() / 4), type = int, help = "Number of jobs")
     return parser.parse_args(args = args, namespace = namespace)
 
 ##################################################

@@ -17,6 +17,7 @@ import pandas as pd
 import logging
 from shutil import rmtree
 import pickle
+from multiprocessing import cpu_count
 
 from os.path import dirname, realpath
 import sys
@@ -30,8 +31,8 @@ sys.path.insert(0, dirname(dirname(realpath(__file__))))
 ##################################################
 
 # some filepaths
-PDMX_FILEPATH = "/deepfreeze/pnlong/PDMX/PDMX.csv"
-OUTPUT_DIR = "/deepfreeze/pnlong"
+PDMX_FILEPATH = "/deepfreeze/pnlong/PDMX/PDMX/PDMX.csv"
+OUTPUT_DIR = "/deepfreeze/pnlong/PDMX"
 SOUNDFONT_PATH = "/home/pnlong/soundfonts/airfont_380_final.sf2"
 TEMPORARY_STORAGE_DIR = "/home/pnlong/temp_stems_storage" # MUST BE ON LOCAL DRIVES, NOT DEEPFREEZE
 
@@ -97,7 +98,7 @@ def parse_args(args = None, namespace = None):
     parser.add_argument("-ut", "--use_tarball_buffer", action = "store_true", help = "Whether or not to use tarball buffering approach to create data")
     parser.add_argument("-gz", "--gzip_tarballs", action = "store_true", help = "Whether or not to GZIP tarballs if tarball buffering approach is in use")
     parser.add_argument("-t", "--temporary_storage_dir", default = TEMPORARY_STORAGE_DIR, type = str, help = "Temporary storage directory, must be specified if use_tarball_buffer flag is set")
-    parser.add_argument("-j", "--jobs", default = 10, type = int, help = "Number of Jobs")
+    parser.add_argument("-j", "--jobs", default = int(cpu_count() / 4), type = int, help = "Number of jobs")
     return parser.parse_args(args = args, namespace = namespace)
 
 ##################################################

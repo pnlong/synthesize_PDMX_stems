@@ -37,8 +37,8 @@ from model_musescore import load, MusicRender
 ##################################################
 
 # some filepaths
-PDMX_FILEPATH = "/deepfreeze/pnlong/PDMX/PDMX.csv"
-OUTPUT_DIR = "/deepfreeze/pnlong"
+PDMX_FILEPATH = "/deepfreeze/pnlong/PDMX/PDMX/PDMX.csv"
+OUTPUT_DIR = "/deepfreeze/pnlong/PDMX"
 SOUNDFONT_PATH = "/data3/pnlong/musescore/soundfonts/airfont_380_final.sf2"
 
 # multiprocessing chunk size
@@ -93,7 +93,7 @@ def parse_args(args = None, namespace = None):
     parser.add_argument("-sf", "--soundfont_filepath", default = SOUNDFONT_PATH, type = str, help = "Filepath to soundfont")
     parser.add_argument("-r", "--reset", action = "store_true", help = "Whether or not to recreate files")
     parser.add_argument("-rt", "--reset_tables", action = "store_true", help = "Whether or not to reset data table(s) without recreating files")
-    parser.add_argument("-j", "--jobs", default = 10, type = int, help = "Number of Jobs")
+    parser.add_argument("-j", "--jobs", default = int(multiprocessing.cpu_count() / 4), type = int, help = "Number of jobs")
     return parser.parse_args(args = args, namespace = namespace)
 
 ##################################################

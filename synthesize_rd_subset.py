@@ -60,7 +60,7 @@ def parse_args(args = None, namespace = None):
     parser.add_argument("-sf", "--soundfont_filepath", default = SOUNDFONT_PATH, type = str, help = "Filepath to soundfont")
     # parser.add_argument("-em", "--exclude_metadata", action = "store_true", help = "Whether to copy over metadata")
     parser.add_argument("-r", "--reset", action = "store_true", help = "Whether or not to recreate files")
-    parser.add_argument("-j", "--jobs", default = int(multiprocessing.cpu_count() / 4), type = int, help = "Number of Jobs")
+    parser.add_argument("-j", "--jobs", default = int(multiprocessing.cpu_count() / 4), type = int, help = "Number of jobs")
     return parser.parse_args(args = args, namespace = namespace)
 
 ##################################################
