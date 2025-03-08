@@ -191,7 +191,7 @@ if __name__ == "__main__":
         for i, track in enumerate(midi.tracks): # no metatracks in PDMX MIDI files
 
             # create new midi file for this track
-            track_midi = mido.MidiFile(ticks_per_beat = midi.ticks_per_beat)
+            track_midi = mido.MidiFile(ticks_per_beat = midi.ticks_per_beat, charset = "utf8")
 
             # add current track
             track_midi_track = mido.MidiTrack()
