@@ -5,7 +5,7 @@
 # Synthesize data as audio.
 
 # python /home/pnlong/synthesize_audio/synthesize.py
-# python synthesize.py --dataset_filepath "/deepfreeze/pnlong/PDMX/PDMX/PDMX.csv" --output_dir "/deepfreeze/pnlong/PDMX" --jobs 10 --soundfont_filepath "/data3/pnlong/soundfonts/SGM-V2.01.sf2"
+# python synthesize.py --dataset_filepath "/deepfreeze/pnlong/PDMX/PDMX/PDMX.csv" --output_dir "/deepfreeze/pnlong/PDMX" --soundfont_filepath "/data3/pnlong/soundfonts/SGM-V2.01.sf2" --jobs 10
 
 # IMPORTS
 ##################################################
