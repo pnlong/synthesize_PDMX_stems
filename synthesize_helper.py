@@ -123,7 +123,7 @@ if __name__ == "__main__":
     # helper function to get the waveform of a given music object
     def get_waveform_tensor(music: MusicRender, temp_dir: tempfile.TemporaryDirectory) -> torch.tensor:
         """
-        Given a music object, return it's waveform.
+        Given a music object, return its waveform.
         """
 
         # write temporary midi file
