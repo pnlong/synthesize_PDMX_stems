@@ -38,6 +38,7 @@ from synthesize_manager import (
     TEMPORARY_STORAGE_DIR,
     SOUNDFONT_PATH,
     MAX_N_NOTES_IN_STEM,
+    MAX_N_SAMPLES_IN_STEM,
 )
 from model_musescore import load, MusicRender
 
@@ -204,6 +205,8 @@ if __name__ == "__main__":
                         absolute_time = music.absolute_time,
                     ), 
                     temp_dir = temp_dir)
+                if waveform.shape[-1] > MAX_N_SAMPLES_IN_STEM: # truncate overly long waveforms
+                    waveform = waveform[:, :MAX_N_SAMPLES_IN_STEM]
                 
                 # update max waveform length
                 if waveform.shape[-1] > max_waveform_length:

@@ -5,7 +5,7 @@
 # Synthesize data as audio.
 
 # python /home/pnlong/synthesize_audio/synthesize.py
-# python synthesize.py --dataset_filepath "/deepfreeze/pnlong/PDMX/PDMX/PDMX.csv" --output_dir "/deepfreeze/pnlong/PDMX" --soundfont_filepath "/data3/pnlong/soundfonts/SGM-V2.01.sf2" --jobs 10
+# python synthesize.py --dataset_filepath "/deepfreeze/pnlong/PDMX/PDMX/PDMX.csv" --output_dir "/deepfreeze/user_shares/pnlong" --jobs 10 --soundfont_filepath "/data3/pnlong/soundfonts/SGM-V2.01.sf2"
 
 # IMPORTS
 ##################################################
@@ -23,14 +23,6 @@ import subprocess
 import multiprocessing
 from tqdm import tqdm
 import mido
-from typing import List
-
-from os.path import dirname, realpath
-import sys
-sys.path.insert(0, dirname(realpath(__file__)))
-sys.path.insert(0, dirname(dirname(realpath(__file__))))
-
-from model_musescore import load
 
 ##################################################
 
@@ -40,7 +32,7 @@ from model_musescore import load
 
 # some filepaths
 PDMX_FILEPATH = "/deepfreeze/pnlong/PDMX/PDMX/PDMX.csv"
-OUTPUT_DIR = "/deepfreeze/pnlong/PDMX"
+OUTPUT_DIR = "/deepfreeze/user_shares/pnlong"
 SOUNDFONT_PATH = "/data3/pnlong/soundfonts/SGM-V2.01.sf2"
 
 # multiprocessing chunk size
@@ -51,10 +43,12 @@ NA_STRING = "NA"
 
 # name of dataset
 DATASET_NAME = "sPDMX_stems"
+DATA_DIR_NAME = "data"
+STEMS_FILE_NAME = "stems"
 
 # for stems data table
 STEMS_TABLE_COLUMNS = [
-    "path", "track", "program", "is_drum", "name", "has_annotations", "has_lyrics"
+    "path", "track", "program", "is_drum", "name", "has_lyrics",
 ]
 
 # for songs data table
@@ -79,7 +73,9 @@ SAMPLE_RATE = 44100
 GAIN = 1.0
 
 # truncate overly-long stems to avoid memory errors
-MAX_N_NOTES_IN_STEM = 100000
+MAX_N_NOTES_IN_STEM = 50_000 # 0.99997812562 quantile for stem lengths
+MAX_STEM_DURATION = 30 * 60 # in seconds
+MAX_N_SAMPLES_IN_STEM = int(MAX_STEM_DURATION * SAMPLE_RATE)
 
 ##################################################
 
@@ -116,9 +112,9 @@ if __name__ == "__main__":
     output_dir = f"{args.output_dir}/{DATASET_NAME}"
     if not exists(output_dir) or args.reset:
         makedirs(output_dir, exist_ok = True)
-    output_filepath = f"{output_dir}/data.csv"
-    stems_output_filepath = f"{output_dir}/stems.csv"
-    data_dir = f"{output_dir}/data"
+    output_filepath = f"{output_dir}/{DATA_DIR_NAME}.csv"
+    stems_output_filepath = f"{output_dir}/{STEMS_FILE_NAME}.csv"
+    data_dir = f"{output_dir}/{DATA_DIR_NAME}"
     if not exists(data_dir) or args.reset:
         mkdir(data_dir)
 
@@ -171,55 +167,6 @@ if __name__ == "__main__":
     ##################################################
 
 
-    # HELPER FUNCTION TO WRITE MIDI FILES FOR EACH TRACK IN A GIVEN FILEPATH
-    ##################################################
-
-    def create_midi_track_files(path: str, directory: str) -> List[str]:
-        """
-        Given a path to a MIDI file, write a file for each track in that file in 
-        the provided directory. Returns a list of the absolute filepaths to the
-        MIDI files for each track.
-        """
-
-        # load in the MIDI file
-        midi = mido.MidiFile(filename = path, charset = "utf8")
-
-        # initialize return list
-        track_paths = [f"{directory}/{i}.mid" for i in range(len(midi.tracks))] # do not include meta track
-
-        # iterate through tracks
-        for i, track in enumerate(midi.tracks): # no metatracks in PDMX MIDI files
-
-            # create new midi file for this track
-            track_midi = mido.MidiFile(ticks_per_beat = midi.ticks_per_beat, charset = "utf8")
-
-            # add current track
-            track_midi_track = mido.MidiTrack()
-            n_notes = 0 # track the number of notes seen so far
-            for message in track: # copy the messages from the original track to the new track
-                if message.type == "note_on" and message.velocity > 0: # if this is a note on event
-                    if n_notes > MAX_N_NOTES_IN_STEM: # truncate stem if there are too many notes
-                        break 
-                    else: # otherwise, increment the number of notes seen so far
-                        n_notes += 1
-                track_midi_track.append(message)
-            track_midi.tracks.append(track_midi_track)
-
-            # write track midi file to temporary path
-            track_midi.save(track_paths[i])
-
-            # free up memory
-            del track_midi, track_midi_track
-
-        # free up memory
-        del midi
-
-        # return list of track paths
-        return track_paths
-
-    ##################################################
-
-
     # HELPER FUNCTION TO GET WAVEFORM GIVEN A MIDI FILEPATH
     ##################################################
 
@@ -253,72 +200,9 @@ if __name__ == "__main__":
     ##################################################
 
 
-    # HELPER FUNCTION TO WRITE THE SAFETENSOR CONTAINING ALL STEMS OF A GIVEN MUSICRENDER OBJECT
+    # SYNTHESIZE STEMS FOR A GIVEN INDEX
     ##################################################
 
-    # helper function to convert a music object into a safetensor
-    def write_safetensor(path: str, path_output: str):
-        """
-        Given the path to a MIDI file, write the desired 
-        information to a safetensor file at path_output.
-        """
-
-        # synthesize 
-        with tempfile.TemporaryDirectory() as temp_dir: # create a temporary directory
-            
-            # create a MIDI file for each track in the given path
-            track_paths = create_midi_track_files(path = path, directory = temp_dir)
-
-            # list of waveforms
-            waveforms = [None] * len(track_paths)
-
-            # keep track of longest tensor (most samples)
-            max_waveform_length = -1
-
-            # loop through stems
-            for i, track_path in enumerate(track_paths):
-
-                # get waveform for this stem
-                waveform = get_waveform_tensor(path = track_path)
-                
-                # update max waveform length
-                if waveform.shape[-1] > max_waveform_length:
-                    max_waveform_length = waveform.shape[-1]
-
-                # add waveform to stems tensors dictionary
-                waveforms[i] = waveform
-
-                # free up space and memory
-                remove(track_path) # remove temporary midi file
-                del waveform
-
-        # transform waveforms
-        for i in range(len(waveforms)):
-
-            # zero pad the end so all stems are the same length
-            waveforms[i] = torch.nn.functional.pad(
-                input = waveforms[i], 
-                pad = (0, max_waveform_length - waveforms[i].shape[-1]), 
-                mode = "constant", 
-                value = 0,
-            )
-
-            # peak normalize
-            waveforms[i] = waveforms[i].type(torch.float) / torch.max(input = waveforms[i])
-
-        # save safetensor to output path
-        tensors = {str(i): waveform for i, waveform in enumerate(waveforms)} # keys need to be strings in safetensors
-        del waveforms, max_waveform_length # free up memory
-        save_file(tensors = tensors, filename = path_output) # save safetensor
-        del tensors # free up memory
-        
-    ##################################################
-
-
-    # USE MULTIPROCESSING TO ITERATE OVER ALL SONGS IN DATASET
-    ##################################################
-            
-    # helper function to save safetensors given an index
     def synthesize_song_at_index(i: int):
         """
         Given the dataset index, read the song as a music object, and 
@@ -330,49 +214,146 @@ if __name__ == "__main__":
         path_output = dataset.at[i, "path_output"]
 
         # save safetensor if necessary
-        if not exists(path_output) or args.reset:
-            write_safetensor(path = dataset.at[i, "mid"], path_output = path_output) # write safetensor from midi file
-
-        # write tables info to file
         if path_output not in completed_paths:
 
-            # load music object
-            music = load(path = dataset.at[i, "path"])
+            # READ IN MIDI FILE AND CREATE STEM MIDI FILES
+            ##################################################
 
-            # write stems info to file
-            stems_info = pd.DataFrame(
-                data = [(
-                    path_output, # path at which this stem can be found
-                    j, # index of stem in safetensor
-                    track.program, # MIDI program of stem
-                    track.is_drum, # whether the track is a drum
-                    " ".join(track.name.replace(",", " ").split()) if track.name is not None else None, # name of track, cleaning up the string a bit
-                    len(track.annotations) > 0, # whether the track has annotations
-                    len(track.lyrics) > 0, # whether the track has lyrics
+            # load in the MIDI file
+            midi = mido.MidiFile(filename = dataset.at[i, "mid"], charset = "utf8")
+
+            # determine whether we are synthesizing (or the song has already been synthesized)
+            need_to_synthesize = not exists(path_output) or args.reset            
+
+            # initialize paths for each stem MIDI file list
+            if need_to_synthesize:
+                temp_dir = tempfile.TemporaryDirectory() # create temporary directory
+                track_paths = [f"{temp_dir.name}/{i}.mid" for i in range(len(midi.tracks))] # track paths in temporary directory
+
+            # iterate through tracks
+            for j, track in enumerate(midi.tracks): # no metatracks in PDMX MIDI files
+
+                # create new midi file for this track
+                if need_to_synthesize:
+                    track_midi = mido.MidiFile(ticks_per_beat = midi.ticks_per_beat, charset = "utf8")
+                    track_midi_track = mido.MidiTrack() # add current track
+
+                # set defaults
+                program = 0
+                is_drum = False
+                track_name = None
+                has_lyrics = False
+
+                # iterate through track and parse information
+                n_notes = 0 # track the number of notes seen so far
+                determined_whether_track_is_drum = False
+                for message in track: # copy the messages from the original track to the new track
+                    if message.type == "note_on" and message.velocity > 0: # if this is a note on event
+                        n_notes += 1
+                    elif message.type == "program_change":
+                        program = message.program
+                    elif message.type == "track_name":
+                        track_name = message.name
+                        track_name = " ".join(track_name.replace(",", " ").split()) # clean up track name
+                    elif message.type == "lyrics":
+                        has_lyrics = True
+                    if not determined_whether_track_is_drum and hasattr(message, "channel"):
+                        is_drum = (message.channel == 9)
+                        determined_whether_track_is_drum = True
+                    if need_to_synthesize and n_notes <= MAX_N_NOTES_IN_STEM: # if we are synthesizing, add to the track midi track
+                        track_midi_track.append(message)
+                del n_notes, determined_whether_track_is_drum # free up memory
+
+                # write track midi file to temporary path
+                if need_to_synthesize:
+                    track_midi.tracks.append(track_midi_track)
+                    track_midi.save(track_paths[j])
+                    del track_midi, track_midi_track # free up memory
+
+                # write stem info
+                pd.DataFrame( # create dataframe with one row
+                    data = [dict(zip(STEMS_TABLE_COLUMNS, (
+                        path_output, # path at which this stem can be found
+                        j, # index of stem in safetensor
+                        program, # MIDI program of stem
+                        is_drum, # whether the track is a drum
+                        track_name if len(track_name) > 0 else None, # name of track
+                        has_lyrics, # whether the track has lyrics
+                    )))],
+                    columns = STEMS_TABLE_COLUMNS,
+                ).to_csv( # append line to stems output filepath
+                    path_or_buf = stems_output_filepath, sep = ",", na_rep = NA_STRING, header = False, index = False, mode = "a",
+                )
+                del program, is_drum, track_name, has_lyrics # free up memory
+
+            # free up memory
+            del midi
+
+            ##################################################
+
+            # SYNTHESIZE STEMS AS SAFETENSOR IF NECESSARY
+            ##################################################
+
+            # synthesize waveforms if necessary
+            if need_to_synthesize:
+
+                # initialize list of waveforms
+                waveforms = [None] * len(track_paths)
+                max_waveform_length = -1 # keep track of longest tensor (most samples)
+
+                # loop through stems
+                for j, track_path in enumerate(track_paths): 
+                # for j, track_path in tqdm(iterable = enumerate(track_paths), desc = "Generating Waveforms for Stem", total = len(track_paths)):
+                    waveform = get_waveform_tensor(path = track_path) # get waveform for this stem
+                    if waveform.shape[-1] > MAX_N_SAMPLES_IN_STEM: # truncate overly long waveforms
+                        waveform = waveform[:, :MAX_N_SAMPLES_IN_STEM]
+                    if waveform.shape[-1] > max_waveform_length: # update waveform length tracker
+                        max_waveform_length = waveform.shape[-1]
+                    waveforms[j] = waveform # add waveform to stems tensors dictionary
+                    remove(track_path) # remove temporary midi file
+                    del waveform # free up memory
+                
+                # free up memory
+                temp_dir.cleanup() # delete temporary directory properly
+                del track_paths, temp_dir
+
+                # transform waveforms
+                for j in range(len(waveforms)):
+                    waveforms[j] = torch.nn.functional.pad( # zero pad the end so all stems are the same length
+                        input = waveforms[j], 
+                        pad = (0, max_waveform_length - waveforms[j].shape[-1]), 
+                        mode = "constant", 
+                        value = 0,
                     )
-                    for j, track in enumerate(music.tracks)],
-                columns = STEMS_TABLE_COLUMNS,
-            )
-            stems_info.to_csv(
-                path_or_buf = stems_output_filepath, sep = ",", na_rep = NA_STRING, header = False, index = False, mode = "a",
-            )
-            del stems_info
+                    waveforms[j] = waveforms[j].type(torch.float) / torch.max(input = waveforms[j]) # peak normalize
+
+                # save safetensor to output path
+                tensors = {str(j): waveform for j, waveform in enumerate(waveforms)} # keys need to be strings in safetensors
+                del waveforms, max_waveform_length # free up memory
+                save_file(tensors = tensors, filename = path_output) # save safetensor
+                del tensors # free up memory
+
+            ##################################################
+
+            # SAVE SONG INFO
+            ##################################################
 
             # write line of song info to file
             song_info = dataset.loc[i].to_dict() # get row of dataset as dictionary
             song_info["path"] = path_output # set path to the new output path
             del song_info["path_output"], song_info["mid"]
-            song_info = pd.DataFrame(
+            pd.DataFrame( # create dataframe with one row
                 data = [song_info],
                 columns = SONGS_TABLE_COLUMNS,
-            )
-            song_info.to_csv(
+            ).to_csv( # append line to output filepath
                 path_or_buf = output_filepath, sep = ",", na_rep = NA_STRING, header = False, index = False, mode = "a",
             )
             del song_info
 
             # add output path to completed paths
             completed_paths.add(path_output)
+
+            ##################################################
 
     ##################################################
 
@@ -383,7 +364,7 @@ if __name__ == "__main__":
     # use multiprocessing
     with multiprocessing.Pool(processes = args.jobs) as pool:
         _ = list(tqdm(
-            iterable = pool.imap_unordered(
+            iterable = pool.imap(
                 func = synthesize_song_at_index,
                 iterable = dataset.index,
                 chunksize = CHUNK_SIZE,
