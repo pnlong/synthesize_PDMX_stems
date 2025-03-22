@@ -140,7 +140,8 @@ if __name__ == "__main__":
     get_statistic_string = lambda statistic, n: f"{statistic.title()}: {100 * (n / len(results)):.4f}% ({n:,} songs)."
     for statistic, n in zip(("Valid", "Invalid", "Complete", "Incomplete"), (n_valid, n_invalid, n_complete, n_incomplete)):
         logging.info(get_statistic_string(statistic = statistic, n = n))
-    logging.info(f"Missing: {n_missing_values}")
+    if not (len(n_missing_values) == 1 and n_missing_values[0] == 0): # print missing values if there are any
+        logging.info(f"Missing: {n_missing_values}")
 
     ##################################################
     
