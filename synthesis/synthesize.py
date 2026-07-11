@@ -44,6 +44,7 @@ from synthesis.paths import (
     full_stems_dir,
     full_stems_realify_dir,
 )
+from shared.repo_symlinks import link_ablations_in_repo
 
 
 def parse_args(args=None, namespace=None):
@@ -66,19 +67,20 @@ def synthesize_song_at_index(
     dataset: pd.DataFrame,
     completed_paths: set[str],
     args,
-    output_filepath: str,
-    stems_output_filepath: str,
-):
+) -> tuple[dict | None, list[dict]]:
+    """Synthesize one song. Returns (song_row, stem_rows) for main-process CSV writes."""
     path_output = dataset.at[i, "path_output"]
     song_dir = Path(path_output)
 
-    if path_output in completed_paths and song_is_complete(song_dir, n_tracks):
-        return
-
     midi = mido.MidiFile(filename=dataset.at[i, "mid"], charset="utf8")
     n_tracks = len(midi.tracks)
+
+    if path_output in completed_paths and song_is_complete(song_dir, n_tracks) and not args.reset:
+        del midi
+        return None, []
     stems_complete = all(stem_flac_path(song_dir, j).exists() for j in range(n_tracks))
     need_to_synthesize = args.reset or not stems_complete
+    stem_rows: list[dict] = []
 
     if need_to_synthesize:
         temp_dir = tempfile.TemporaryDirectory()
@@ -121,17 +123,11 @@ def synthesize_song_at_index(
                 )
             track_midi.save(track_paths[j])
 
-        pd.DataFrame(
-            data=[dict(zip(STEMS_TABLE_COLUMNS, (
-                path_output, j, program, is_drum,
-                track_name if track_name and len(track_name) > 0 else None,
-                has_lyrics,
-            )))],
-            columns=STEMS_TABLE_COLUMNS,
-        ).to_csv(
-            path_or_buf=stems_output_filepath,
-            sep=",", na_rep=NA_STRING, header=False, index=False, mode="a",
-        )
+        stem_rows.append(dict(zip(STEMS_TABLE_COLUMNS, (
+            path_output, j, program, is_drum,
+            track_name if track_name and len(track_name) > 0 else None,
+            has_lyrics,
+        ))))
 
     del midi
 
@@ -157,9 +153,27 @@ def synthesize_song_at_index(
     song_info = dataset.loc[i].to_dict()
     song_info["path"] = path_output
     del song_info["path_output"], song_info["mid"]
-    pd.DataFrame(data=[song_info], columns=SONGS_TABLE_COLUMNS).to_csv(
-        path_or_buf=output_filepath,
-        sep=",", na_rep=NA_STRING, header=False, index=False, mode="a",
+    return song_info, stem_rows
+
+
+_WORKER_CTX: dict = {}
+
+
+def _init_synthesis_worker(dataset, completed_paths, args):
+    global _WORKER_CTX
+    _WORKER_CTX = {
+        "dataset": dataset,
+        "completed_paths": completed_paths,
+        "args": args,
+    }
+
+
+def _synthesis_worker(i: int) -> tuple[dict | None, list[dict]]:
+    return synthesize_song_at_index(
+        i,
+        _WORKER_CTX["dataset"],
+        _WORKER_CTX["completed_paths"],
+        _WORKER_CTX["args"],
     )
 
 
@@ -208,17 +222,33 @@ def run_synthesis(args, output_dir: str):
             stems_output_filepath, sep=",", na_rep=NA_STRING, header=True, index=False, mode="w",
         )
 
-    def worker(i: int):
-        synthesize_song_at_index(
-            i, dataset, completed_paths, args, output_filepath, stems_output_filepath,
-        )
+    work_indices = [
+        i for i in dataset.index
+        if args.reset or dataset.at[i, "path_output"] not in completed_paths
+    ]
 
-    with multiprocessing.Pool(processes=args.jobs) as pool:
-        list(tqdm(
-            pool.imap(worker, dataset.index, chunksize=CHUNK_SIZE),
-            desc="Generating Stems",
-            total=len(dataset),
-        ))
+    with multiprocessing.Pool(
+        processes=args.jobs,
+        initializer=_init_synthesis_worker,
+        initargs=(dataset, completed_paths, args),
+    ) as pool:
+        for song_info, stem_rows in tqdm(
+            pool.imap(_synthesis_worker, work_indices, chunksize=CHUNK_SIZE),
+            desc="Synthesizing songs",
+            total=len(work_indices),
+            unit="song",
+        ):
+            if song_info is None:
+                continue
+            pd.DataFrame(data=[song_info], columns=SONGS_TABLE_COLUMNS).to_csv(
+                output_filepath,
+                sep=",", na_rep=NA_STRING, header=False, index=False, mode="a",
+            )
+            if stem_rows:
+                pd.DataFrame(stem_rows, columns=STEMS_TABLE_COLUMNS).to_csv(
+                    stems_output_filepath,
+                    sep=",", na_rep=NA_STRING, header=False, index=False, mode="a",
+                )
 
 
 def run_realify_pass(args, source_dir: str, dest_dir: str):
@@ -231,6 +261,7 @@ def run_realify_pass(args, source_dir: str, dest_dir: str):
         output_dir=dest_dir,
         model=args.model,
         limit=args.realify_limit,
+        gpus=args.realify_gpus,
     )
 
 
@@ -244,11 +275,21 @@ def main():
         dest_dir = ablation_realify_dir(args.output_dir, args.render_mode)
 
     if args.realify:
-        if not Path(source_dir, "data.csv").exists():
+        if args.realify_only:
+            if not Path(source_dir, "data.csv").exists():
+                raise RuntimeError(
+                    f"--realify-only requires synthesized stems at {source_dir} "
+                    "(run synthesis pass first without --realify-only)."
+                )
+        elif not Path(source_dir, "data.csv").exists():
             run_synthesis(args, source_dir)
         run_realify_pass(args, source_dir, dest_dir)
     else:
+        if args.realify_only:
+            raise RuntimeError("--realify-only requires --realify.")
         run_synthesis(args, source_dir)
+
+    link_ablations_in_repo(args.output_dir)
 
 
 if __name__ == "__main__":

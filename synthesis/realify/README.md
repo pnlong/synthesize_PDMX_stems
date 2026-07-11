@@ -16,7 +16,13 @@ Stable Audio 3 (SA3) audio-to-audio “realification” of synthesized stems.
 
 ## Usage
 
-Normally invoked via `python -m synthesis.synthesize --realify`. Standalone:
+Realify is a **GPU second pass** after CPU multiprocessing synthesis. Use `--realify-gpus 0,1,...` (default: all visible GPUs) to run one SA3 model per GPU in parallel.
+
+```bash
+python -m synthesis.synthesize --render-mode basic --realify --realify-only --realify-gpus 0,1
+```
+
+Standalone:
 
 ```bash
 python -m synthesis.realify.captions.generate --dataset_dir .../dev/ablations/basic

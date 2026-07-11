@@ -95,7 +95,22 @@ uv sync --group dev
 
 This creates `.venv/` and installs spdmx, torch, analysis deps, pytest, etc.
 
-### Step A2. Verify Track A
+### Step A2. Symlink dev outputs into the repo
+
+After editing paths in `shared/config.py` if needed:
+
+```bash
+uv run python -m shared.setup_symlinks
+```
+
+Creates gitignored symlinks:
+
+- `analysis/output/` → `{OUTPUT_DIR}/dev/analysis/`
+- `synthesis/ablations_output/` → `{OUTPUT_DIR}/dev/ablations/`
+
+Re-run when you change `OUTPUT_DIR` or set up a fresh clone. Individual CLIs (`synthesize`, `analyze_song_lengths`) also refresh their symlinks.
+
+### Step A3. Verify Track A
 
 ```bash
 uv run python --version          # Python 3.10.x
@@ -109,15 +124,15 @@ Optional — song-length analysis (reads PDMX CSV, no synthesis):
 uv run python -m analysis.analyze_song_lengths
 ```
 
-Outputs go to `{OUTPUT_DIR}/dev/analysis/song_lengths/` and symlink to `analysis/output/` in the repo.
+Outputs go to `{OUTPUT_DIR}/dev/analysis/song_lengths/` and symlink to `analysis/output/` in the repo (gitignored).
 
-### Step A3. Run synthesis (smoke test)
+### Step A4. Run synthesis (smoke test)
 
 ```bash
 uv run python -m synthesis.synthesize --render-mode basic
 ```
 
-Default: 100-song ablation sample → `{OUTPUT_DIR}/dev/ablations/basic/`.
+Default: 100-song ablation sample → `{OUTPUT_DIR}/dev/ablations/basic/`. Browsable in-repo via gitignored symlink `synthesis/ablations_output/` (from Step A2 or `synthesize`).
 
 ---
 

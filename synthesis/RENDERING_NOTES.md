@@ -29,7 +29,11 @@ Development artifacts live under `{OUTPUT_DIR}/dev/`. The shipped dataset is `{O
 {OUTPUT_DIR}/dev/analysis/song_lengths/
 ```
 
-Output symlinked in-repo at [`analysis/output/`](../analysis/output/) → `{OUTPUT_DIR}/dev/analysis/`.
+Output symlinked in-repo at [`analysis/output/`](../analysis/output/) → `{OUTPUT_DIR}/dev/analysis/` (gitignored).
+
+Ablation outputs symlinked at [`synthesis/ablations_output/`](../synthesis/ablations_output/) → `{OUTPUT_DIR}/dev/ablations/` (gitignored).
+
+Create both after clone: `uv run python -m shared.setup_symlinks`
 
 **Assembled sPDMX dataset** (via `build_spdmx.py`, not implemented yet):
 
@@ -57,6 +61,39 @@ Constant across all ablations (A1–B2), basic and slakh, synthesis and realify:
 4. Write `mixture.flac` (stem files on disk unchanged).
 
 Implemented in [`audio.py`](audio.py). Called from `synthesize.py` after stems and from `realify.py` after realify completes.
+
+## Two-pass pipeline (synthesis + realify)
+
+Synthesis and realify are intentionally separate passes with different hardware profiles:
+
+| Pass | Work | Parallelism | Hardware |
+|------|------|-------------|----------|
+| 1 — Synthesis | Fluidsynth render (basic or slakh) | `-j` / `--jobs` multiprocessing pool | CPU |
+| 2 — Realify | SA3 audio-to-audio per stem | One process per GPU (`--realify-gpus`); model loaded once per GPU | GPU |
+
+Pass 1 writes raw stems under `dev/ablations/{basic,slakh}/` or `dev/stems/`. Pass 2 reads those stems, runs captions + SA3, and writes to `{mode}_realify/` (or `stems_realify/`).
+
+Each GPU worker loads SA3 once and processes stems from a shared queue. Stems vary in duration so true multi-stem batching within a GPU is not used — parallelism is across GPUs, not batched inference.
+
+```bash
+# Pass 1 — CPU multiprocessing
+python -m synthesis.synthesize --render-mode basic -j 8
+
+# Pass 2 — GPU only, all visible GPUs
+python -m synthesis.synthesize --render-mode basic --realify --realify-only
+
+# Pass 2 — specific GPUs
+python -m synthesis.synthesize --render-mode basic --realify --realify-only --realify-gpus 0,1,2
+```
+
+Standalone realify after pass 1:
+
+```bash
+python -m synthesis.realify.captions.generate --dataset_dir .../dev/ablations/basic
+python -m synthesis.realify.realify \
+  --source-dir .../dev/ablations/basic \
+  --output-dir .../dev/ablations/basic_realify
+```
 
 ## Commands
 

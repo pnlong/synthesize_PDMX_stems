@@ -95,7 +95,10 @@ Writes to `{OUTPUT_DIR}/dev/analysis/song_lengths/`:
 - `song_length_percentiles.png` — empirical CDF (percentile curve)
 - `song_length_report.json` — stats, duration percentiles, SA3 limit percentiles, and model recommendation
 
-Also symlinks [`analysis/output/`](analysis/output/) in this repo to `{OUTPUT_DIR}/dev/analysis/` (report, plots, and future analysis artifacts).
+Also symlinks in-repo dev output (both gitignored; run `uv run python -m shared.setup_symlinks` after clone):
+
+- [`analysis/output/`](analysis/output/) → `{OUTPUT_DIR}/dev/analysis/`
+- [`synthesis/ablations_output/`](synthesis/ablations_output/) → `{OUTPUT_DIR}/dev/ablations/`
 
 ## Repository layout
 
@@ -108,6 +111,7 @@ Also symlinks [`analysis/output/`](analysis/output/) in this repo to `{OUTPUT_DI
 | `synthesis/realify/captions/` | Caption generation from PDMX metadata |
 | `analysis/` | Duration analysis and SA3 model recommendation — see [`analysis/README.md`](analysis/README.md) |
 | `shared/config.py` | Paths, ablation sample size, constants — see [`shared/README.md`](shared/README.md) |
+| `shared/setup_symlinks.py` | Create in-repo symlinks after clone (`python -m shared.setup_symlinks`) |
 
 See [`synthesis/RENDERING_NOTES.md`](synthesis/RENDERING_NOTES.md) for Slakh alignment, ablation design, and listening test plans. Synthesis layout: [`synthesis/README.md`](synthesis/README.md).
 

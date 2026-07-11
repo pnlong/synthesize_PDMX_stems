@@ -34,7 +34,18 @@ def add_synthesis_args(parser: argparse.ArgumentParser):
         help="Synthesize all valid PDMX songs (default: random ablation sample from rated_deduplicated).",
     )
     parser.add_argument("--realify", action="store_true")
+    parser.add_argument(
+        "--realify-only",
+        action="store_true",
+        help="Skip synthesis; run captions + SA3 realify on existing stems (requires --realify).",
+    )
     parser.add_argument("-m", "--model", default="medium", choices=["small-music", "medium"])
     parser.add_argument("--realify-limit", default=None, type=int)
+    parser.add_argument(
+        "--realify-gpus",
+        default=None,
+        type=str,
+        help="Comma-separated GPU ids for realify (default: all visible GPUs). Use '0' for a single GPU.",
+    )
     parser.add_argument("--sample-size", default=ABLATION_SAMPLE_SIZE, type=int)
     parser.add_argument("--sample-seed", default=ABLATION_SAMPLE_SEED, type=int)

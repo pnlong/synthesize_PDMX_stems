@@ -29,11 +29,15 @@ See also [`RENDERING_NOTES.md`](RENDERING_NOTES.md) for ablation design, Slakh a
 
 ## Output layout (development)
 
+On deepfreeze:
+
 ```
 {OUTPUT_DIR}/dev/
 ├── ablations/{basic,basic_realify,slakh,slakh_realify}/
 ├── stems/              # synthesize --full
 └── stems_realify/
 ```
+
+Browsable in-repo via gitignored symlink [`ablations_output/`](ablations_output/) (created by `shared.setup_symlinks` or `synthesize`).
 
 Final dataset: `{OUTPUT_DIR}/SPDMX/` (via `build_spdmx`).

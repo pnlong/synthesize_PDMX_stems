@@ -12,13 +12,8 @@ from analysis.pdmx_lengths import load_pdmx_song_lengths, percentile_table, sa3_
 from analysis.plots import plot_histogram, plot_percentiles
 from analysis.report import recommend_model
 from shared.config import OUTPUT_DIR, PDMX_FILEPATH
-from synthesis.paths import analysis_root, song_lengths_dir
-
-REPO_ANALYSIS_SYMLINK = Path(__file__).resolve().parent / "output"
-LEGACY_SYMLINKS = (
-    Path(__file__).resolve().parent / "song_lengths",
-    Path(__file__).resolve().parent / "song_length_report.json",
-)
+from shared.repo_symlinks import link_analysis_in_repo
+from synthesis.paths import song_lengths_dir
 
 
 def parse_args(args=None, namespace=None):
@@ -45,22 +40,6 @@ def build_report(durations: pd.Series) -> dict:
     }
 
 
-def link_analysis_in_repo(output_dir: str = OUTPUT_DIR):
-    """Symlink {OUTPUT_DIR}/dev/analysis into analysis/output in this repo."""
-    target = Path(analysis_root(output_dir)).resolve()
-    target.mkdir(parents=True, exist_ok=True)
-    for legacy in LEGACY_SYMLINKS:
-        if legacy.is_symlink() or legacy.is_file():
-            legacy.unlink()
-        elif legacy.is_dir():
-            raise RuntimeError(f"Refusing to replace real directory {legacy}")
-    if REPO_ANALYSIS_SYMLINK.is_symlink() or REPO_ANALYSIS_SYMLINK.is_file():
-        REPO_ANALYSIS_SYMLINK.unlink()
-    elif REPO_ANALYSIS_SYMLINK.is_dir():
-        raise RuntimeError(f"Refusing to replace real directory {REPO_ANALYSIS_SYMLINK}")
-    REPO_ANALYSIS_SYMLINK.symlink_to(target, target_is_directory=True)
-
-
 def main():
     args = parse_args()
     output_dir = Path(args.output_dir)
@@ -79,11 +58,11 @@ def main():
     with open(report_path, "w") as f:
         json.dump(report, f, indent=2)
 
-    link_analysis_in_repo(OUTPUT_DIR)
+    link, target = link_analysis_in_repo(OUTPUT_DIR)
 
     print(json.dumps(report["summary"], indent=2))
     print(f"Wrote {report_path}")
-    print(f"Symlinked {REPO_ANALYSIS_SYMLINK} -> {Path(analysis_root(OUTPUT_DIR)).resolve()}")
+    print(f"Symlinked {link} -> {target}")
     print(f"Wrote {histogram_path}")
     print(f"Wrote {percentile_path}")
 

@@ -2,7 +2,7 @@
 
 Tools for understanding PDMX / sPDMX dataset characteristics and choosing a Stable Audio 3 model.
 
-Generated artifacts live on deepfreeze at `{OUTPUT_DIR}/dev/analysis/` and are browsable in-repo via the symlink [`output/`](output/) → `/deepfreeze/pnlong/SPDMX/dev/analysis/`.
+Output symlinked in-repo at [`analysis/output/`](output/) → `{OUTPUT_DIR}/dev/analysis/` (gitignored; created by `shared.setup_symlinks` or `analyze_song_lengths`).
 
 ## Which tool do I use?
 

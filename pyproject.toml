@@ -38,6 +38,7 @@ explicit = true
 
 [tool.pytest.ini_options]
 testpaths = [
+    "shared/tests",
     "synthesis/tests",
     "synthesis/realify/captions/tests",
     "synthesis/realify/tests",

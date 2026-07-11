@@ -57,7 +57,7 @@ def test_build_report_recommends_medium():
 
 
 def test_link_analysis_in_repo(tmp_path: Path, monkeypatch):
-    from analysis import analyze_song_lengths
+    from shared.repo_symlinks import link_analysis_in_repo
     from synthesis.paths import analysis_root, song_lengths_dir
 
     spdmx_root = str(tmp_path / "SPDMX")
@@ -68,10 +68,10 @@ def test_link_analysis_in_repo(tmp_path: Path, monkeypatch):
 
     symlink = tmp_path / "repo" / "analysis" / "output"
     symlink.parent.mkdir(parents=True)
-    monkeypatch.setattr(analyze_song_lengths, "REPO_ANALYSIS_SYMLINK", symlink)
-    monkeypatch.setattr(analyze_song_lengths, "LEGACY_SYMLINKS", ())
+    monkeypatch.setattr("shared.repo_symlinks.REPO_ANALYSIS_SYMLINK", symlink)
+    monkeypatch.setattr("shared.repo_symlinks.LEGACY_ANALYSIS_SYMLINKS", ())
 
-    analyze_song_lengths.link_analysis_in_repo(spdmx_root)
+    link_analysis_in_repo(spdmx_root)
     assert symlink.is_symlink()
     assert symlink.resolve() == analysis_dir.resolve()
     assert (symlink / "song_lengths" / "song_length_report.json").exists()
