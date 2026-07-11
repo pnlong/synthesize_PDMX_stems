@@ -250,11 +250,13 @@ We use **[stable-audio-3-medium](https://huggingface.co/stabilityai/stable-audio
 
 ### Step B5. Realify smoke test
 
-After A1 stems exist (or any dir with `stem_*.flac`):
+Requires completed A1 stems (`Step A4`). Realify is GPU-only and does **not** re-synthesize:
 
 ```bash
 uv run python -m synthesis.synthesize --render-mode basic --realify --realify-limit 2
 ```
+
+If `basic/` is incomplete, this prints an error with the command to run first.
 
 Or standalone:
 

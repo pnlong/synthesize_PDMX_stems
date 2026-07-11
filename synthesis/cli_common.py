@@ -20,9 +20,19 @@ def add_synthesis_args(parser: argparse.ArgumentParser):
     parser.add_argument("-df", "--dataset_filepath", default=PDMX_FILEPATH, type=str)
     parser.add_argument("-o", "--output_dir", default=OUTPUT_DIR, type=str)
     parser.add_argument("-sf", "--soundfont_filepath", default=SOUNDFONT_PATH, type=str)
-    parser.add_argument("-r", "--reset", action="store_true")
-    parser.add_argument("-rt", "--reset_tables", action="store_true")
-    parser.add_argument("-j", "--jobs", default=int(multiprocessing.cpu_count() / 4), type=int)
+    parser.add_argument(
+        "--reset",
+        action="store_true",
+        help="Delete the ablation output directory and re-synthesize all songs from scratch (default: resume incomplete songs).",
+    )
+    parser.add_argument(
+        "-j",
+        "--jobs",
+        "--workers",
+        default=int(multiprocessing.cpu_count() / 4),
+        type=int,
+        help="CPU workers for synthesis and CPU realify (small-music, no GPU visible).",
+    )
     parser.add_argument(
         "--render-mode",
         default=RENDER_MODE_BASIC,
@@ -34,18 +44,23 @@ def add_synthesis_args(parser: argparse.ArgumentParser):
         help="Synthesize all valid PDMX songs (default: random ablation sample from rated_deduplicated).",
     )
     parser.add_argument("--realify", action="store_true")
-    parser.add_argument(
-        "--realify-only",
-        action="store_true",
-        help="Skip synthesis; run captions + SA3 realify on existing stems (requires --realify).",
-    )
     parser.add_argument("-m", "--model", default="medium", choices=["small-music", "medium"])
-    parser.add_argument("--realify-limit", default=None, type=int)
     parser.add_argument(
-        "--realify-gpus",
+        "--realify-limit",
         default=None,
-        type=str,
-        help="Comma-separated GPU ids for realify (default: all visible GPUs). Use '0' for a single GPU.",
+        type=int,
+        help="Realify only the first N stems (smoke tests); default: all stems.",
     )
-    parser.add_argument("--sample-size", default=ABLATION_SAMPLE_SIZE, type=int)
+    parser.add_argument(
+        "-n",
+        "--sample-size",
+        default=ABLATION_SAMPLE_SIZE,
+        type=int,
+        help="Ablation sample size (default: from shared/config).",
+    )
+    parser.add_argument(
+        "--mp3",
+        action="store_true",
+        help="Write stems and mixtures as MP3 instead of FLAC (prototyping; smaller files).",
+    )
     parser.add_argument("--sample-seed", default=ABLATION_SAMPLE_SEED, type=int)

@@ -16,10 +16,17 @@ Stable Audio 3 (SA3) audio-to-audio “realification” of synthesized stems.
 
 ## Usage
 
-Realify is a **GPU second pass** after CPU multiprocessing synthesis. Use `--realify-gpus 0,1,...` (default: all visible GPUs) to run one SA3 model per GPU in parallel.
+Realify reads stems from the matching non-realify ablation (`basic/` → `basic_realify/`) and **errors if that ablation has not been synthesized first**.
+
+- **`medium`**: requires a visible GPU (`CUDA_VISIBLE_DEVICES` selects device(s); one SA3 model per GPU)
+- **`small-music`**: uses GPU when visible; otherwise CPU multiprocessing with `-j`
 
 ```bash
-python -m synthesis.synthesize --render-mode basic --realify --realify-only --realify-gpus 0,1
+# After basic/ exists with complete stems:
+CUDA_VISIBLE_DEVICES=0,1 python -m synthesis.synthesize --render-mode basic --realify
+
+# CPU fallback (small-music only):
+python -m synthesis.synthesize --render-mode basic --realify -m small-music -j 4
 ```
 
 Standalone:

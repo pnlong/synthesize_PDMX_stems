@@ -38,7 +38,11 @@ Default behavior: random sample from `subset:rated_deduplicated` (N=100, seed=42
 uv run python -m synthesis.synthesize --render-mode basic
 uv run python -m synthesis.synthesize --render-mode slakh
 
-# A2 / B2 — realify (uses existing stems or synthesizes first)
+# Prototyping: MP3 instead of FLAC (smaller; use same flag for realify)
+uv run python -m synthesis.synthesize --render-mode basic --mp3
+uv run python -m synthesis.synthesize --render-mode basic --mp3 --realify
+
+# A2 / B2 — realify (GPU only; requires A1 / B1 stems first)
 uv run python -m synthesis.synthesize --render-mode basic --realify
 uv run python -m synthesis.synthesize --render-mode slakh --realify
 ```

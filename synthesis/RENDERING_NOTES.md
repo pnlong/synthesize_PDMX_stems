@@ -45,17 +45,19 @@ Create both after clone: `uv run python -m shared.setup_symlinks`
 
 ```
 data/<mirrored-song-path>/
-├── stem_0.flac
+├── stem_0.flac   # or stem_0.mp3 with --mp3
 ├── stem_1.flac
 ├── ...
-└── mixture.flac
+└── mixture.flac  # or mixture.mp3 with --mp3
 ```
+
+Default on-disk format is FLAC (PCM_16). Pass `--mp3` to write MP3 stems and mixtures for prototyping (less storage). Use the same `--mp3` flag for realify so it reads and writes the matching format.
 
 ## Mixture procedure
 
 Constant across all ablations (A1–B2), basic and slakh, synthesis and realify:
 
-1. Stems are BS.1770-normalized to −23 LUFS and padded to equal length.
+1. Stems are loudness-normalized toward −23 LUFS (BS.1770) with per-stem peak limiting at 1.0, then padded to equal length.
 2. Sum stems sample-wise.
 3. If mixture peak > `MIXTURE_PEAK_LIMIT` (1.0), apply uniform gain `limit / peak`.
 4. Write `mixture.flac` (stem files on disk unchanged).
@@ -69,21 +71,21 @@ Synthesis and realify are intentionally separate passes with different hardware 
 | Pass | Work | Parallelism | Hardware |
 |------|------|-------------|----------|
 | 1 — Synthesis | Fluidsynth render (basic or slakh) | `-j` / `--jobs` multiprocessing pool | CPU |
-| 2 — Realify | SA3 audio-to-audio per stem | One process per GPU (`--realify-gpus`); model loaded once per GPU | GPU |
+| 2 — Realify | SA3 audio-to-audio per stem | One process per visible GPU, or `-j` CPU workers for `small-music` | GPU / CPU |
 
-Pass 1 writes raw stems under `dev/ablations/{basic,slakh}/` or `dev/stems/`. Pass 2 reads those stems, runs captions + SA3, and writes to `{mode}_realify/` (or `stems_realify/`).
+Pass 1 writes raw stems under `dev/ablations/{basic,slakh}/` or `dev/stems/`. Pass 2 reads those stems, runs captions + SA3, and writes to `{mode}_realify/` (or `stems_realify/`). **Pass 2 never re-synthesizes** — it errors if the raw ablation is incomplete.
 
-Each GPU worker loads SA3 once and processes stems from a shared queue. Stems vary in duration so true multi-stem batching within a GPU is not used — parallelism is across GPUs, not batched inference.
+Use `CUDA_VISIBLE_DEVICES` to select GPU(s). `medium` requires a visible GPU. `small-music` uses GPU when available, otherwise CPU multiprocessing with `-j`.
 
 ```bash
-# Pass 1 — CPU multiprocessing
+# Pass 1 — CPU multiprocessing (required first)
 python -m synthesis.synthesize --render-mode basic -j 8
 
-# Pass 2 — GPU only, all visible GPUs
-python -m synthesis.synthesize --render-mode basic --realify --realify-only
+# Pass 2 — GPU (medium); limit devices with CUDA_VISIBLE_DEVICES
+CUDA_VISIBLE_DEVICES=0,1 python -m synthesis.synthesize --render-mode basic --realify
 
-# Pass 2 — specific GPUs
-python -m synthesis.synthesize --render-mode basic --realify --realify-only --realify-gpus 0,1,2
+# Pass 2 — CPU smoke test (small-music, no GPU)
+python -m synthesis.synthesize --render-mode basic --realify -m small-music -j 4
 ```
 
 Standalone realify after pass 1:

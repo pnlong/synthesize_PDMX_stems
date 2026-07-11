@@ -11,18 +11,36 @@ import soundfile as sf
 import torch
 
 from shared.config import (
+    DEFAULT_AUDIO_FORMAT,
+    FLAC_SUBTYPE,
     GAIN,
-    MIXTURE_FILE_NAME,
+    MAX_N_SAMPLES_IN_STEM,
     MIXTURE_PEAK_LIMIT,
+    PROTOTYPE_AUDIO_FORMAT,
     SAMPLE_RATE,
-    STEM_FILE_PATTERN,
     TARGET_LOUDNESS_LUFS,
 )
 
+# fluidsynth raw output: stereo int16 = 4 bytes per frame
+_MAX_RAW_PCM_BYTES = MAX_N_SAMPLES_IN_STEM * 4
+
+
+def truncate_waveform(
+    waveform: torch.Tensor,
+    max_samples: int = MAX_N_SAMPLES_IN_STEM,
+) -> torch.Tensor:
+    if waveform.shape[-1] <= max_samples:
+        return waveform
+    return waveform[:, :max_samples]
+
 
 def get_waveform_tensor(midi_path: str, soundfont_filepath: str) -> torch.Tensor:
-    """Synthesize a MIDI file to a mono float waveform tensor (1, samples)."""
-    result = subprocess.run(
+    """Synthesize a MIDI file to a mono float waveform tensor (1, samples).
+
+    fluidsynth output is capped at MAX_N_SAMPLES_IN_STEM so pathological MIDIs
+    (missing note-offs, extreme length) cannot allocate multi-gigabyte buffers.
+    """
+    proc = subprocess.Popen(
         args=[
             "fluidsynth",
             "-T", "raw",
@@ -30,13 +48,28 @@ def get_waveform_tensor(midi_path: str, soundfont_filepath: str) -> torch.Tensor
             "-i", soundfont_filepath,
             midi_path,
         ],
-        check=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
     )
-    stereo = np.frombuffer(result.stdout, dtype=np.int16).reshape(-1, 2)
+    assert proc.stdout is not None
+    try:
+        raw = proc.stdout.read(_MAX_RAW_PCM_BYTES)
+    finally:
+        proc.terminate()
+        try:
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+
+    if len(raw) < 4:
+        return torch.zeros((1, 0))
+
+    frame_bytes = 4
+    n_frames = len(raw) // frame_bytes
+    stereo = np.frombuffer(raw[: n_frames * frame_bytes], dtype=np.int16).reshape(-1, 2)
     mono = stereo.mean(axis=1, keepdims=True).astype(np.float32) / np.iinfo(np.int16).max
-    return torch.from_numpy(mono.T.copy())  # (1, samples)
+    return truncate_waveform(torch.from_numpy(mono.T.copy()))
 
 
 def to_mono_numpy(waveform: torch.Tensor) -> np.ndarray:
@@ -53,8 +86,13 @@ def loudness_normalize(
     waveform: torch.Tensor,
     sample_rate: int = SAMPLE_RATE,
     target_lufs: float = TARGET_LOUDNESS_LUFS,
+    peak_limit: float = MIXTURE_PEAK_LIMIT,
 ) -> torch.Tensor:
-    """Normalize integrated loudness to target LUFS (ITU-R BS.1770-4 via pyloudnorm)."""
+    """Normalize integrated loudness toward target LUFS without clipping peaks.
+
+    pyloudnorm's ``normalize.loudness`` applies unlimited gain, which often pushes
+    sparse MIDI stems above 1.0. We apply the LUFS gain only up to the peak limit.
+    """
     audio = to_mono_numpy(waveform).astype(np.float64)
     if audio.size == 0 or np.max(np.abs(audio)) == 0:
         return waveform.type(torch.float)
@@ -68,7 +106,11 @@ def loudness_normalize(
     if np.isinf(loudness):
         return waveform.type(torch.float)
 
-    normalized = pyln.normalize.loudness(audio, loudness, target_lufs)
+    peak = float(np.max(np.abs(audio)))
+    loudness_gain = float(np.power(10.0, (target_lufs - loudness) / 20.0))
+    peak_gain = peak_limit / peak if peak > 0 else 1.0
+    gain = min(loudness_gain, peak_gain)
+    normalized = audio * gain
     return torch.from_numpy(normalized.astype(np.float32)).unsqueeze(0)
 
 
@@ -105,55 +147,172 @@ def build_mixture(
     return torch.from_numpy(audio).unsqueeze(0)
 
 
-def load_stem_flac(path: Path) -> torch.Tensor:
-    audio, _ = sf.read(str(path), dtype="float32", always_2d=True)
+def synthesis_audio_format(use_mp3: bool) -> str:
+    return PROTOTYPE_AUDIO_FORMAT if use_mp3 else DEFAULT_AUDIO_FORMAT
+
+
+def stem_filename(track: int, audio_format: str = DEFAULT_AUDIO_FORMAT) -> str:
+    return f"stem_{track}.{audio_format}"
+
+
+def mixture_filename(audio_format: str = DEFAULT_AUDIO_FORMAT) -> str:
+    return f"mixture.{audio_format}"
+
+
+def stem_path(song_dir: Path, track: int, audio_format: str = DEFAULT_AUDIO_FORMAT) -> Path:
+    return song_dir / stem_filename(track, audio_format)
+
+
+def mixture_path(song_dir: Path, audio_format: str = DEFAULT_AUDIO_FORMAT) -> Path:
+    return song_dir / mixture_filename(audio_format)
+
+
+def _stem_frame_count(path: Path) -> tuple[int, int]:
+    if path.suffix.lower() == f".{PROTOTYPE_AUDIO_FORMAT}":
+        import torchaudio
+        info = torchaudio.info(str(path))
+        return int(info.num_frames), int(info.sample_rate)
+    info = sf.info(str(path))
+    return int(info.frames), int(info.samplerate)
+
+
+def stem_is_valid(path: Path) -> bool:
+    """True when a stem file exists and is within MAX_N_SAMPLES_IN_STEM."""
+    if not path.is_file():
+        return False
+    try:
+        frames, _ = _stem_frame_count(path)
+        return 0 < frames <= MAX_N_SAMPLES_IN_STEM
+    except (RuntimeError, OSError, ValueError):
+        return False
+
+
+def stem_flac_is_valid(path: Path) -> bool:
+    return stem_is_valid(path)
+
+
+def stem_duration_seconds(path: Path) -> float:
+    """Duration in seconds, capped at MAX_N_SAMPLES_IN_STEM."""
+    frames, sample_rate = _stem_frame_count(path)
+    frames = min(frames, MAX_N_SAMPLES_IN_STEM)
+    return frames / sample_rate
+
+
+def load_stem(path: Path) -> torch.Tensor:
+    """Load mono stem as float32 tensor (1, samples), capped at MAX_N_SAMPLES_IN_STEM."""
+    frames, _ = _stem_frame_count(path)
+    frames = min(frames, MAX_N_SAMPLES_IN_STEM)
+    if frames <= 0:
+        return torch.zeros((1, 0))
+    if path.suffix.lower() == f".{PROTOTYPE_AUDIO_FORMAT}":
+        import torchaudio
+        audio, _ = torchaudio.load(str(path), num_frames=frames)
+        if audio.ndim == 2:
+            audio = audio.mean(dim=0, keepdim=True)
+        return truncate_waveform(audio.to(torch.float32))
+    audio, _ = sf.read(str(path), frames=frames, dtype="float32", always_2d=True)
     if audio.ndim == 2:
         audio = audio.mean(axis=1)
-    return torch.from_numpy(audio).unsqueeze(0)
+    return torch.from_numpy(np.asarray(audio, dtype=np.float32)).unsqueeze(0)
+
+
+def load_stem_flac(path: Path) -> torch.Tensor:
+    return load_stem(path)
+
+
+def write_mp3(waveform: torch.Tensor, path: Path) -> Path:
+    import torchaudio
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    audio = to_mono_numpy(waveform).astype(np.float32)
+    tensor = torch.from_numpy(audio).unsqueeze(0)
+    torchaudio.save(str(path), tensor, SAMPLE_RATE, format=PROTOTYPE_AUDIO_FORMAT)
+    return path
+
+
+def write_flac(waveform: torch.Tensor, path: Path) -> Path:
+    """Write mono float32 waveform to FLAC using FLAC_SUBTYPE (PCM_16 on disk)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    audio = to_mono_numpy(waveform).astype(np.float32)
+    sf.write(str(path), audio, SAMPLE_RATE, format="FLAC", subtype=FLAC_SUBTYPE)
+    return path
+
+
+def write_audio(
+    waveform: torch.Tensor,
+    path: Path,
+    audio_format: str = DEFAULT_AUDIO_FORMAT,
+) -> Path:
+    if audio_format == PROTOTYPE_AUDIO_FORMAT:
+        return write_mp3(waveform, path)
+    if audio_format == DEFAULT_AUDIO_FORMAT:
+        return write_flac(waveform, path)
+    raise ValueError(f"Unsupported audio format: {audio_format}")
+
+
+def save_stem(
+    waveform: torch.Tensor,
+    song_dir: Path,
+    track: int,
+    audio_format: str = DEFAULT_AUDIO_FORMAT,
+) -> Path:
+    return write_audio(waveform, stem_path(song_dir, track, audio_format), audio_format)
+
+
+def save_mixture(
+    waveform: torch.Tensor,
+    song_dir: Path,
+    audio_format: str = DEFAULT_AUDIO_FORMAT,
+) -> Path:
+    return write_audio(waveform, mixture_path(song_dir, audio_format), audio_format)
 
 
 def save_stem_flac(waveform: torch.Tensor, song_dir: Path, track: int) -> Path:
-    """Write a single mono stem waveform as FLAC."""
-    song_dir.mkdir(parents=True, exist_ok=True)
-    output_path = song_dir / STEM_FILE_PATTERN.format(track=track)
-    audio = to_mono_numpy(waveform)
-    sf.write(str(output_path), audio, SAMPLE_RATE, format="FLAC", subtype="PCM_16")
-    return output_path
+    return save_stem(waveform, song_dir, track, DEFAULT_AUDIO_FORMAT)
 
 
 def save_mixture_flac(waveform: torch.Tensor, song_dir: Path) -> Path:
-    """Write mixture.flac for a song directory."""
-    song_dir.mkdir(parents=True, exist_ok=True)
-    output_path = song_dir / MIXTURE_FILE_NAME
-    audio = to_mono_numpy(waveform)
-    sf.write(str(output_path), audio, SAMPLE_RATE, format="FLAC", subtype="PCM_16")
-    return output_path
+    return save_mixture(waveform, song_dir, DEFAULT_AUDIO_FORMAT)
 
 
-def write_mixture_from_waveforms(waveforms: list[torch.Tensor], song_dir: Path) -> Path:
-    return save_mixture_flac(build_mixture(waveforms), song_dir)
+def write_mixture_from_waveforms(
+    waveforms: list[torch.Tensor],
+    song_dir: Path,
+    audio_format: str = DEFAULT_AUDIO_FORMAT,
+) -> Path:
+    return save_mixture(build_mixture(waveforms), song_dir, audio_format)
 
 
-def write_mixture_from_song_dir(song_dir: Path, track_indices: list[int]) -> Path | None:
-    """Build mixture.flac from existing stem FLACs. Returns None if any stem is missing."""
-    stem_paths = [stem_flac_path(song_dir, track) for track in track_indices]
-    if not all(path.exists() for path in stem_paths):
+def write_mixture_from_song_dir(
+    song_dir: Path,
+    track_indices: list[int],
+    audio_format: str = DEFAULT_AUDIO_FORMAT,
+) -> Path | None:
+    """Build mixture from existing stems. Returns None if any stem is missing/invalid."""
+    stem_paths = [stem_path(song_dir, track, audio_format) for track in track_indices]
+    if not all(stem_is_valid(path) for path in stem_paths):
         return None
-    waveforms = [load_stem_flac(path) for path in stem_paths]
-    return write_mixture_from_waveforms(waveforms, song_dir)
+    waveforms = [load_stem(path) for path in stem_paths]
+    return write_mixture_from_waveforms(waveforms, song_dir, audio_format)
 
 
 def stem_flac_path(song_dir: Path, track: int) -> Path:
-    return song_dir / STEM_FILE_PATTERN.format(track=track)
+    return stem_path(song_dir, track, DEFAULT_AUDIO_FORMAT)
 
 
 def mixture_flac_path(song_dir: Path) -> Path:
-    return song_dir / MIXTURE_FILE_NAME
+    return mixture_path(song_dir, DEFAULT_AUDIO_FORMAT)
 
 
-def song_is_complete(song_dir: Path, n_tracks: int) -> bool:
-    """Return True if all expected stem FLAC files and mixture.flac exist."""
+def song_is_complete(
+    song_dir: Path,
+    n_tracks: int,
+    audio_format: str = DEFAULT_AUDIO_FORMAT,
+) -> bool:
+    """Return True if all expected valid stems and mixture exist."""
     if not song_dir.is_dir():
         return False
-    stems_ok = all(stem_flac_path(song_dir, j).exists() for j in range(n_tracks))
-    return stems_ok and mixture_flac_path(song_dir).exists()
+    stems_ok = all(
+        stem_is_valid(stem_path(song_dir, j, audio_format)) for j in range(n_tracks)
+    )
+    return stems_ok and stem_is_valid(mixture_path(song_dir, audio_format))

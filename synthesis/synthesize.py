@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import multiprocessing
+import shutil
 import tempfile
 from os import makedirs, remove
 from os.path import dirname, exists, expanduser
@@ -16,8 +17,8 @@ from tqdm import tqdm
 from shared.config import (
     CHUNK_SIZE,
     DATA_DIR_NAME,
+    DEFAULT_AUDIO_FORMAT,
     MAX_N_NOTES_IN_STEM,
-    MAX_N_SAMPLES_IN_STEM,
     NA_STRING,
     OUTPUT_DIR,
     RENDER_MODE_BASIC,
@@ -29,15 +30,18 @@ from shared.config import (
 from synthesis.audio import (
     get_waveform_tensor,
     pad_and_loudness_normalize,
-    mixture_flac_path,
-    save_stem_flac,
+    mixture_path,
+    save_stem,
     song_is_complete,
-    stem_flac_path,
+    stem_is_valid,
+    stem_path,
+    synthesis_audio_format,
     write_mixture_from_song_dir,
     write_mixture_from_waveforms,
 )
 from synthesis.cli_common import add_synthesis_args
 from synthesis.dataset import prepare_ablation_dataset, prepare_full_dataset
+from shared.csv_tables import append_rows_deduped, sanitize_track_name
 from synthesis.paths import (
     ablation_raw_dir,
     ablation_realify_dir,
@@ -71,14 +75,17 @@ def synthesize_song_at_index(
     """Synthesize one song. Returns (song_row, stem_rows) for main-process CSV writes."""
     path_output = dataset.at[i, "path_output"]
     song_dir = Path(path_output)
+    audio_format = synthesis_audio_format(args.mp3)
 
     midi = mido.MidiFile(filename=dataset.at[i, "mid"], charset="utf8")
     n_tracks = len(midi.tracks)
 
-    if path_output in completed_paths and song_is_complete(song_dir, n_tracks) and not args.reset:
+    if path_output in completed_paths and song_is_complete(song_dir, n_tracks, audio_format) and not args.reset:
         del midi
         return None, []
-    stems_complete = all(stem_flac_path(song_dir, j).exists() for j in range(n_tracks))
+    stems_complete = all(
+        stem_is_valid(stem_path(song_dir, j, audio_format)) for j in range(n_tracks)
+    )
     need_to_synthesize = args.reset or not stems_complete
     stem_rows: list[dict] = []
 
@@ -104,7 +111,9 @@ def synthesize_song_at_index(
             elif message.type == "program_change":
                 program = message.program
             elif message.type == "track_name":
-                track_name = " ".join(message.name.replace(",", " ").split())
+                track_name = sanitize_track_name(
+                    " ".join(message.name.replace(",", " ").split())
+                )
             elif message.type == "lyrics":
                 has_lyrics = True
             if not determined_whether_track_is_drum and hasattr(message, "channel"):
@@ -135,8 +144,6 @@ def synthesize_song_at_index(
         waveforms = []
         for j, track_path in enumerate(track_paths):
             waveform = get_waveform_tensor(track_path, args.soundfont_filepath)
-            if waveform.shape[-1] > MAX_N_SAMPLES_IN_STEM:
-                waveform = waveform[:, :MAX_N_SAMPLES_IN_STEM]
             waveforms.append(waveform)
             remove(track_path)
 
@@ -144,11 +151,11 @@ def synthesize_song_at_index(
         waveforms = pad_and_loudness_normalize(waveforms)
 
         for j, waveform in enumerate(waveforms):
-            save_stem_flac(waveform, song_dir, j)
+            save_stem(waveform, song_dir, j, audio_format)
 
-        write_mixture_from_waveforms(waveforms, song_dir)
-    elif stems_complete and not mixture_flac_path(song_dir).exists():
-        write_mixture_from_song_dir(song_dir, list(range(n_tracks)))
+        write_mixture_from_waveforms(waveforms, song_dir, audio_format)
+    elif stems_complete and not mixture_path(song_dir, audio_format).exists():
+        write_mixture_from_song_dir(song_dir, list(range(n_tracks)), audio_format)
 
     song_info = dataset.loc[i].to_dict()
     song_info["path"] = path_output
@@ -177,8 +184,18 @@ def _synthesis_worker(i: int) -> tuple[dict | None, list[dict]]:
     )
 
 
-def run_synthesis(args, output_dir: str):
+def reset_synthesis_output(output_dir: str) -> None:
+    """Remove all prior synthesis artifacts under output_dir."""
+    if exists(output_dir):
+        shutil.rmtree(output_dir)
     makedirs(output_dir, exist_ok=True)
+
+
+def run_synthesis(args, output_dir: str):
+    if args.reset:
+        reset_synthesis_output(output_dir)
+    else:
+        makedirs(output_dir, exist_ok=True)
     output_filepath = f"{output_dir}/{DATA_DIR_NAME}.csv"
     stems_output_filepath = f"{output_dir}/{STEMS_FILE_NAME}.csv"
     makedirs(f"{output_dir}/{DATA_DIR_NAME}", exist_ok=True)
@@ -210,22 +227,33 @@ def run_synthesis(args, output_dir: str):
     for song_dir in set(dataset["path_output"]):
         makedirs(song_dir, exist_ok=True)
 
-    if not exists(output_filepath) or args.reset or args.reset_tables:
+    if not exists(output_filepath) or args.reset:
         pd.DataFrame(columns=SONGS_TABLE_COLUMNS).to_csv(
             output_filepath, sep=",", na_rep=NA_STRING, header=True, index=False, mode="w",
         )
-    completed_paths = set(
-        pd.read_csv(output_filepath, sep=",", header=0, index_col=False, usecols=["path"])["path"]
-    )
-    if not exists(stems_output_filepath) or args.reset or args.reset_tables:
+    completed_paths = set()
+    if exists(output_filepath) and not args.reset:
+        completed_paths = set(
+            pd.read_csv(output_filepath, sep=",", header=0, index_col=False, usecols=["path"])["path"]
+        )
+    if not exists(stems_output_filepath) or args.reset:
         pd.DataFrame(columns=STEMS_TABLE_COLUMNS).to_csv(
             stems_output_filepath, sep=",", na_rep=NA_STRING, header=True, index=False, mode="w",
         )
 
-    work_indices = [
-        i for i in dataset.index
-        if args.reset or dataset.at[i, "path_output"] not in completed_paths
-    ]
+    work_indices = []
+    for i in dataset.index:
+        if args.reset:
+            work_indices.append(i)
+            continue
+        path_output = dataset.at[i, "path_output"]
+        if path_output not in completed_paths:
+            work_indices.append(i)
+            continue
+        n_tracks = int(dataset.at[i, "n_tracks"])
+        audio_format = synthesis_audio_format(args.mp3)
+        if not song_is_complete(Path(path_output), n_tracks, audio_format):
+            work_indices.append(i)
 
     with multiprocessing.Pool(
         processes=args.jobs,
@@ -240,28 +268,79 @@ def run_synthesis(args, output_dir: str):
         ):
             if song_info is None:
                 continue
-            pd.DataFrame(data=[song_info], columns=SONGS_TABLE_COLUMNS).to_csv(
-                output_filepath,
-                sep=",", na_rep=NA_STRING, header=False, index=False, mode="a",
-            )
             if stem_rows:
-                pd.DataFrame(stem_rows, columns=STEMS_TABLE_COLUMNS).to_csv(
+                append_rows_deduped(
                     stems_output_filepath,
-                    sep=",", na_rep=NA_STRING, header=False, index=False, mode="a",
+                    STEMS_TABLE_COLUMNS,
+                    stem_rows,
                 )
+            append_rows_deduped(
+                output_filepath,
+                SONGS_TABLE_COLUMNS,
+                [song_info],
+            )
+
+
+def synthesis_is_complete(source_dir: str, audio_format: str) -> bool:
+    """True when data/stems tables exist and every listed song has stem files on disk."""
+    source = Path(source_dir)
+    data_csv = source / f"{DATA_DIR_NAME}.csv"
+    stems_csv = source / f"{STEMS_FILE_NAME}.csv"
+    if not data_csv.exists() or not stems_csv.exists():
+        return False
+
+    songs = pd.read_csv(data_csv, sep=",", header=0, index_col=False)
+    stems = pd.read_csv(stems_csv, sep=",", header=0, index_col=False)
+    if len(songs) == 0 or len(stems) == 0:
+        return False
+
+    for _, row in songs.iterrows():
+        song_dir = Path(row["path"])
+        n_tracks = int(row["n_tracks"])
+        if not song_is_complete(song_dir, n_tracks, audio_format):
+            return False
+    return True
+
+
+def require_raw_synthesis(
+    source_dir: str,
+    *,
+    run_command: str,
+    audio_format: str = DEFAULT_AUDIO_FORMAT,
+) -> None:
+    """Raise if the non-realify synthesis pass has not completed successfully."""
+    if synthesis_is_complete(source_dir, audio_format):
+        return
+    raise RuntimeError(
+        "Cannot realify: raw stems are missing or incomplete at "
+        f"{source_dir}\n"
+        "Run the corresponding non-realify ablation first:\n"
+        f"  {run_command}"
+    )
+
+
+def raw_synthesis_command(args) -> str:
+    cmd = f"uv run python -m synthesis.synthesize --render-mode {args.render_mode}"
+    if args.full:
+        cmd += " --full"
+    if args.mp3:
+        cmd += " --mp3"
+    return cmd
 
 
 def run_realify_pass(args, source_dir: str, dest_dir: str):
     from synthesis.realify.captions.generate import write_captions
     from synthesis.realify.realify import run_realify
 
+    audio_format = synthesis_audio_format(args.mp3)
     write_captions(source_dir, seed=args.sample_seed)
     run_realify(
         source_dir=source_dir,
         output_dir=dest_dir,
         model=args.model,
         limit=args.realify_limit,
-        gpus=args.realify_gpus,
+        jobs=args.jobs,
+        audio_format=audio_format,
     )
 
 
@@ -275,18 +354,14 @@ def main():
         dest_dir = ablation_realify_dir(args.output_dir, args.render_mode)
 
     if args.realify:
-        if args.realify_only:
-            if not Path(source_dir, "data.csv").exists():
-                raise RuntimeError(
-                    f"--realify-only requires synthesized stems at {source_dir} "
-                    "(run synthesis pass first without --realify-only)."
-                )
-        elif not Path(source_dir, "data.csv").exists():
-            run_synthesis(args, source_dir)
+        audio_format = synthesis_audio_format(args.mp3)
+        require_raw_synthesis(
+            source_dir,
+            run_command=raw_synthesis_command(args),
+            audio_format=audio_format,
+        )
         run_realify_pass(args, source_dir, dest_dir)
     else:
-        if args.realify_only:
-            raise RuntimeError("--realify-only requires --realify.")
         run_synthesis(args, source_dir)
 
     link_ablations_in_repo(args.output_dir)

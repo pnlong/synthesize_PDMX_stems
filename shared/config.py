@@ -64,6 +64,9 @@ GAIN = 1.0
 STEM_FILE_PATTERN = "stem_{track}.flac"
 MIXTURE_FILE_NAME = "mixture.flac"
 MIXTURE_PEAK_LIMIT = 1.0
+FLAC_SUBTYPE = "PCM_16"  # on-disk stems/mixtures; processing uses float32 internally
+DEFAULT_AUDIO_FORMAT = "flac"
+PROTOTYPE_AUDIO_FORMAT = "mp3"
 
 TARGET_LOUDNESS_LUFS = -23.0
 
