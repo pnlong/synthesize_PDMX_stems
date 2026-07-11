@@ -2,6 +2,8 @@
 
 Turn PDMX symbolic MIDI into mono FLAC stems; optionally realify with Stable Audio 3.
 
+Environment setup: **[`SETUP.md`](../SETUP.md)** at repo root.
+
 See also [`RENDERING_NOTES.md`](RENDERING_NOTES.md) for ablation design, Slakh alignment, and output layout.
 
 ## Entry points

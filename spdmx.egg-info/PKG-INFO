@@ -1,3 +1,24 @@
+Metadata-Version: 2.4
+Name: spdmx
+Version: 0.2.0
+Summary: Synthesize PDMX symbolic music as stems, captions, and SA3-realified audio
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Requires-Dist: mido
+Requires-Dist: numpy
+Requires-Dist: pandas
+Requires-Dist: pyyaml
+Requires-Dist: soundfile
+Requires-Dist: torch==2.7.1
+Requires-Dist: torchaudio==2.7.1
+Requires-Dist: tqdm
+Requires-Dist: pyloudnorm
+Requires-Dist: matplotlib
+Provides-Extra: dev
+Requires-Dist: pytest; extra == "dev"
+Dynamic: license-file
+
 # spdmx
 
 Turn the [PDMX](https://zenodo.org/records/13763756) symbolic music dataset into audio stems, captions, and SA3-realified audio.
@@ -11,17 +32,32 @@ Turn the [PDMX](https://zenodo.org/records/13763756) symbolic music dataset into
 
 ## Install
 
-**→ Full step-by-step guide: [`SETUP.md`](SETUP.md)**
+Uses [uv](https://docs.astral.sh/uv/). See [`synthesis/realify/SETUP.md`](synthesis/realify/SETUP.md) for full environment + SA3 setup.
 
-Quick start (synthesis + analysis only):
+### Synthesis and analysis only
 
 ```bash
-cd ~/spdmx
 uv sync --group dev
-uv run python -c "import mido, synthesis.audio; print('spdmx ok')"
 ```
 
-For SA3 realify, submodule, flash-attention, and Hugging Face login, follow **Track B** in [`SETUP.md`](SETUP.md).
+System: **fluidsynth** must be on `PATH` (see SETUP.md).
+
+### With Stable Audio 3 realify
+
+```bash
+git submodule update --init synthesis/realify/stable-audio-3
+uv sync --group dev
+# realify (after submodule has pyproject.toml):
+uv pip install -e synthesis/realify/stable-audio-3
+# flash-attention + huggingface-cli login — see synthesis/realify/SETUP.md
+```
+
+Verify:
+
+```bash
+uv run python -m analysis.analyze_song_lengths
+uv run PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python -m pytest -p pytest -q
+```
 
 ## Usage
 
@@ -35,12 +71,12 @@ Default behavior: random sample from `subset:rated_deduplicated` (N=100, seed=42
 
 ```bash
 # A1 / B1 — raw stems
-uv run python -m synthesis.synthesize --render-mode basic
-uv run python -m synthesis.synthesize --render-mode slakh
+python -m synthesis.synthesize --render-mode basic
+python -m synthesis.synthesize --render-mode slakh
 
 # A2 / B2 — realify (uses existing stems or synthesizes first)
-uv run python -m synthesis.synthesize --render-mode basic --realify
-uv run python -m synthesis.synthesize --render-mode slakh --realify
+python -m synthesis.synthesize --render-mode basic --realify
+python -m synthesis.synthesize --render-mode slakh --realify
 ```
 
 Output:
@@ -56,8 +92,8 @@ Output:
 ### Full PDMX (after listening test)
 
 ```bash
-uv run python -m synthesis.synthesize --render-mode basic --full
-uv run python -m synthesis.synthesize --render-mode basic --full --realify
+python -m synthesis.synthesize --render-mode basic --full
+python -m synthesis.synthesize --render-mode basic --full --realify
 ```
 
 Output: `{OUTPUT_DIR}/dev/stems/` and `{OUTPUT_DIR}/dev/stems_realify/`.
@@ -65,7 +101,7 @@ Output: `{OUTPUT_DIR}/dev/stems/` and `{OUTPUT_DIR}/dev/stems_realify/`.
 ### Assembled sPDMX dataset (planned)
 
 ```bash
-uv run python -m synthesis.build_spdmx --render-mode basic
+python -m synthesis.build_spdmx --render-mode basic
 ```
 
 Will populate `{OUTPUT_DIR}/SPDMX/` with PDMX metadata plus synthesized stems in one pass.
@@ -86,7 +122,7 @@ Will populate `{OUTPUT_DIR}/SPDMX/` with PDMX metadata plus synthesized stems in
 Song-length analysis uses PDMX metadata (`song_length.seconds`) — no synthesis required:
 
 ```bash
-uv run python -m analysis.analyze_song_lengths
+python -m analysis.analyze_song_lengths
 ```
 
 Writes to `{OUTPUT_DIR}/dev/analysis/song_lengths/`:
@@ -101,7 +137,6 @@ Also symlinks [`analysis/output/`](analysis/output/) in this repo to `{OUTPUT_DI
 
 | Path | Purpose |
 |------|---------|
-| [`SETUP.md`](SETUP.md) | **Environment setup guide** (uv, SA3, flash-attn) |
 | `synthesis/synthesize.py` | Main CLI: ablation sample (default) or `--full` PDMX |
 | `synthesis/build_spdmx.py` | Assemble complete sPDMX dataset (stub) |
 | `synthesis/realify/` | SA3 wrapper + submodule |

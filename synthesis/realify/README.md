@@ -2,7 +2,7 @@
 
 Stable Audio 3 (SA3) audio-to-audio “realification” of synthesized stems.
 
-**Setup:** [`SETUP.md`](SETUP.md) — uv, submodule, flash-attention, Hugging Face.
+**Setup:** [`SETUP.md`](../../SETUP.md) at repo root — uv, submodule, flash-attention, Hugging Face.
 
 ## Files
 
@@ -11,7 +11,7 @@ Stable Audio 3 (SA3) audio-to-audio “realification” of synthesized stems.
 | `realify.py` | CLI and `run_realify()`: apply SA3 to each stem using captions + presets |
 | `presets.yaml` | Per-instrument SA3 generation presets (`init_noise_level`, etc.) |
 | `captions/` | Generate text prompts from PDMX metadata for SA3 conditioning |
-| `stable-audio-3/` | Git submodule — SA3 model code; setup in [`SETUP.md`](SETUP.md) |
+| `stable-audio-3/` | Git submodule — SA3 model code; see root [`SETUP.md`](../../SETUP.md) |
 | `tests/` | Realify smoke tests (GPU) and preset exploration notebook |
 
 ## Usage
