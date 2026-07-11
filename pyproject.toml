@@ -1,0 +1,58 @@
+[project]
+name = "spdmx"
+version = "0.2.0"
+description = "Synthesize PDMX symbolic music as stems, captions, and SA3-realified audio"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "mido",
+    "numpy",
+    "pandas",
+    "pyyaml",
+    "soundfile",
+    "torch==2.7.1",
+    "torchaudio==2.7.1",
+    "tqdm",
+    "pyloudnorm",
+    "matplotlib",
+]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+realify = ["stable-audio-3"]
+
+[dependency-groups]
+dev = ["pytest"]
+
+[tool.uv.sources]
+stable-audio-3 = { path = "synthesis/realify/stable-audio-3", editable = true }
+torch = [
+    { index = "pytorch-cu126", marker = "sys_platform == 'linux' and platform_machine == 'x86_64'" },
+]
+torchaudio = [
+    { index = "pytorch-cu126", marker = "sys_platform == 'linux' and platform_machine == 'x86_64'" },
+]
+
+[[tool.uv.index]]
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
+explicit = true
+
+[tool.pytest.ini_options]
+testpaths = [
+    "synthesis/tests",
+    "synthesis/realify/captions/tests",
+    "synthesis/realify/tests",
+    "analysis/tests",
+]
+markers = [
+    "gpu: tests requiring CUDA",
+]
+
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["shared*", "synthesis*", "analysis*"]
