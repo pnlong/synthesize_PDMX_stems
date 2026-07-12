@@ -18,6 +18,7 @@ from shared.config import (
     MIXTURE_PEAK_LIMIT,
     PROTOTYPE_AUDIO_FORMAT,
     SAMPLE_RATE,
+    STEM_CHANNELS,
     TARGET_LOUDNESS_LUFS,
 )
 
@@ -35,7 +36,7 @@ def truncate_waveform(
 
 
 def get_waveform_tensor(midi_path: str, soundfont_filepath: str) -> torch.Tensor:
-    """Synthesize a MIDI file to a mono float waveform tensor (1, samples).
+    """Synthesize a MIDI file to a float waveform tensor (channels, samples).
 
     fluidsynth output is capped at MAX_N_SAMPLES_IN_STEM so pathological MIDIs
     (missing note-offs, extreme length) cannot allocate multi-gigabyte buffers.
@@ -63,23 +64,65 @@ def get_waveform_tensor(midi_path: str, soundfont_filepath: str) -> torch.Tensor
             proc.wait()
 
     if len(raw) < 4:
-        return torch.zeros((1, 0))
+        return torch.zeros((STEM_CHANNELS, 0))
 
     frame_bytes = 4
     n_frames = len(raw) // frame_bytes
     stereo = np.frombuffer(raw[: n_frames * frame_bytes], dtype=np.int16).reshape(-1, 2)
-    mono = stereo.mean(axis=1, keepdims=True).astype(np.float32) / np.iinfo(np.int16).max
-    return truncate_waveform(torch.from_numpy(mono.T.copy()))
+    scale = np.float32(1.0 / np.iinfo(np.int16).max)
+    waveform = torch.from_numpy((stereo.astype(np.float32) * scale).T.copy())
+    return ensure_stem_channels(truncate_waveform(waveform))
 
 
 def to_mono_numpy(waveform: torch.Tensor) -> np.ndarray:
     """Convert waveform tensor to mono numpy array (samples,)."""
-    audio = waveform.numpy()
+    audio = waveform.detach().cpu().numpy()
+    if audio.ndim == 3:
+        audio = audio[0]
     if audio.ndim == 2:
         if audio.shape[0] == 1:
             return audio[0]
         return audio.mean(axis=0)
     return audio
+
+
+def ensure_stem_channels(
+    waveform: torch.Tensor,
+    channels: int | None = None,
+) -> torch.Tensor:
+    """Normalize a waveform tensor to (channels, samples)."""
+    target = STEM_CHANNELS if channels is None else channels
+    if target not in (1, 2):
+        raise ValueError(f"unsupported stem channel count: {target}")
+
+    audio = waveform.detach().cpu()
+    if audio.ndim == 3:
+        audio = audio[0]
+    if audio.ndim == 1:
+        audio = audio.unsqueeze(0)
+
+    current = audio.shape[0]
+    if current == target:
+        return audio.to(torch.float32)
+    if target == 1:
+        return audio.mean(dim=0, keepdim=True).to(torch.float32)
+    if current == 1:
+        return audio.repeat(2, 1).to(torch.float32)
+    raise ValueError(
+        f"cannot convert {current}-channel audio to {target} stem channels"
+    )
+
+
+def to_stem_numpy(
+    waveform: torch.Tensor,
+    channels: int | None = None,
+) -> np.ndarray:
+    """Return numpy audio for disk write: (samples,) mono or (samples, 2) stereo."""
+    audio = ensure_stem_channels(waveform, channels)
+    target = STEM_CHANNELS if channels is None else channels
+    if target == 1:
+        return audio[0].numpy()
+    return audio.T.numpy()
 
 
 def loudness_normalize(
@@ -110,8 +153,9 @@ def loudness_normalize(
     loudness_gain = float(np.power(10.0, (target_lufs - loudness) / 20.0))
     peak_gain = peak_limit / peak if peak > 0 else 1.0
     gain = min(loudness_gain, peak_gain)
-    normalized = audio * gain
-    return torch.from_numpy(normalized.astype(np.float32)).unsqueeze(0)
+    stem = ensure_stem_channels(waveform)
+    normalized = stem.numpy().astype(np.float64) * gain
+    return torch.from_numpy(normalized.astype(np.float32))
 
 
 def pad_and_loudness_normalize(
@@ -140,11 +184,11 @@ def build_mixture(
     if not waveforms:
         raise ValueError("need at least one stem to build a mixture")
     summed = torch.stack(waveforms).sum(dim=0)
-    audio = to_mono_numpy(summed).astype(np.float32)
+    audio = summed.numpy()
     peak = float(np.max(np.abs(audio))) if audio.size else 0.0
     if peak > peak_limit:
         audio = audio * (peak_limit / peak)
-    return torch.from_numpy(audio).unsqueeze(0)
+    return torch.from_numpy(audio.astype(np.float32))
 
 
 def synthesis_audio_format(use_mp3: bool) -> str:
@@ -168,10 +212,6 @@ def mixture_path(song_dir: Path, audio_format: str = DEFAULT_AUDIO_FORMAT) -> Pa
 
 
 def _stem_frame_count(path: Path) -> tuple[int, int]:
-    if path.suffix.lower() == f".{PROTOTYPE_AUDIO_FORMAT}":
-        import torchaudio
-        info = torchaudio.info(str(path))
-        return int(info.num_frames), int(info.sample_rate)
     info = sf.info(str(path))
     return int(info.frames), int(info.samplerate)
 
@@ -199,21 +239,16 @@ def stem_duration_seconds(path: Path) -> float:
 
 
 def load_stem(path: Path) -> torch.Tensor:
-    """Load mono stem as float32 tensor (1, samples), capped at MAX_N_SAMPLES_IN_STEM."""
+    """Load stem as float32 tensor (channels, samples), capped at MAX_N_SAMPLES_IN_STEM."""
     frames, _ = _stem_frame_count(path)
     frames = min(frames, MAX_N_SAMPLES_IN_STEM)
     if frames <= 0:
-        return torch.zeros((1, 0))
-    if path.suffix.lower() == f".{PROTOTYPE_AUDIO_FORMAT}":
-        import torchaudio
-        audio, _ = torchaudio.load(str(path), num_frames=frames)
-        if audio.ndim == 2:
-            audio = audio.mean(dim=0, keepdim=True)
-        return truncate_waveform(audio.to(torch.float32))
+        return torch.zeros((STEM_CHANNELS, 0))
     audio, _ = sf.read(str(path), frames=frames, dtype="float32", always_2d=True)
-    if audio.ndim == 2:
-        audio = audio.mean(axis=1)
-    return torch.from_numpy(np.asarray(audio, dtype=np.float32)).unsqueeze(0)
+    if audio.ndim == 1:
+        audio = audio[:, np.newaxis]
+    tensor = torch.from_numpy(np.asarray(audio.T, dtype=np.float32))
+    return ensure_stem_channels(tensor)
 
 
 def load_stem_flac(path: Path) -> torch.Tensor:
@@ -224,16 +259,15 @@ def write_mp3(waveform: torch.Tensor, path: Path) -> Path:
     import torchaudio
 
     path.parent.mkdir(parents=True, exist_ok=True)
-    audio = to_mono_numpy(waveform).astype(np.float32)
-    tensor = torch.from_numpy(audio).unsqueeze(0)
+    tensor = ensure_stem_channels(waveform)
     torchaudio.save(str(path), tensor, SAMPLE_RATE, format=PROTOTYPE_AUDIO_FORMAT)
     return path
 
 
 def write_flac(waveform: torch.Tensor, path: Path) -> Path:
-    """Write mono float32 waveform to FLAC using FLAC_SUBTYPE (PCM_16 on disk)."""
+    """Write float32 waveform to FLAC using FLAC_SUBTYPE (PCM_16 on disk)."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    audio = to_mono_numpy(waveform).astype(np.float32)
+    audio = to_stem_numpy(waveform).astype(np.float32)
     sf.write(str(path), audio, SAMPLE_RATE, format="FLAC", subtype=FLAC_SUBTYPE)
     return path
 

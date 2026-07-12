@@ -11,6 +11,7 @@ See also [`RENDERING_NOTES.md`](RENDERING_NOTES.md) for ablation design, Slakh a
 | Script | Purpose |
 |--------|---------|
 | `synthesize.py` | Main CLI: ablation sample (default) or `--full` PDMX, `--render-mode`, `--realify` |
+| `listening/serve.py` | Localhost viewer for A1–B2 ablation comparison |
 | `build_spdmx.py` | Assemble final dataset at `{OUTPUT_DIR}/SPDMX/` (stub) |
 
 ## Source files
@@ -24,6 +25,7 @@ See also [`RENDERING_NOTES.md`](RENDERING_NOTES.md) for ablation design, Slakh a
 | `paths.py` | Output path helpers (`dev/ablations/`, `dev/stems/`, `dev/analysis/`, `SPDMX/`) |
 | `patches.py` | Slakh-style patch randomization (stub) |
 | `cli_common.py` | Shared argparse flags for synthesis CLIs |
+| `listening/` | Localhost ablation comparison viewer (`python -m synthesis.listening.serve`) |
 | `realify/` | Stable Audio 3 audio-to-audio wrapper and captions |
 | `tests/` | Synthesis unit tests |
 

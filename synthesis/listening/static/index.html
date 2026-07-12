@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ablation Listening Viewer</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <header class="sidebar-header">
+        <h1>Ablation Viewer</h1>
+        <input id="search" type="search" placeholder="Search title, artist…" autocomplete="off">
+      </header>
+      <ul id="song-list" class="song-list"></ul>
+    </aside>
+
+    <main class="main">
+      <div id="empty-state" class="empty-state">
+        <p>Select a song from the list to compare ablations side by side.</p>
+      </div>
+
+      <div id="song-detail" class="song-detail hidden">
+        <header class="song-header">
+          <div class="song-header-text">
+            <h2 id="song-title"></h2>
+            <p id="song-meta" class="song-meta"></p>
+            <p id="song-path" class="song-path"></p>
+          </div>
+          <div class="song-nav">
+            <button id="prev-btn" type="button">← Prev</button>
+            <button id="next-btn" type="button">Next →</button>
+          </div>
+        </header>
+
+        <section class="comparison-section">
+          <h3>Mixture</h3>
+          <div id="mixture-grid" class="condition-grid mixture-grid"></div>
+        </section>
+
+        <section class="comparison-section">
+          <h3>Stems</h3>
+          <div id="stems-container"></div>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

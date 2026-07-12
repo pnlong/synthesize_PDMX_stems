@@ -258,16 +258,20 @@ uv run python -m synthesis.synthesize --render-mode basic --realify --realify-li
 
 If `basic/` is incomplete, this prints an error with the command to run first.
 
-Or standalone:
+Or standalone (captions generated in memory):
 
 ```bash
-uv run python -m synthesis.realify.captions.generate \
-  --dataset_dir /path/to/dev/ablations/basic
-
 uv run python -m synthesis.realify.realify \
   --source-dir /path/to/dev/ablations/basic \
   --output-dir /path/to/dev/ablations/basic_realify \
   --limit 2
+```
+
+Preview captions without running realify:
+
+```bash
+uv run python -m synthesis.realify.captions.generate \
+  --dataset_dir /path/to/dev/ablations/basic
 ```
 
 Preset notebook: `synthesis/realify/tests/explore_presets.ipynb`

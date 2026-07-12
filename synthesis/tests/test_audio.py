@@ -14,6 +14,7 @@ from shared.config import (
 )
 from synthesis.audio import (
     build_mixture,
+    ensure_stem_channels,
     load_stem_flac,
     loudness_normalize,
     pad_and_loudness_normalize,
@@ -33,6 +34,100 @@ def test_to_mono_from_stereo_tensor():
     mono = to_mono_numpy(stereo)
     assert mono.shape == (3,)
     np.testing.assert_allclose(mono, [0.0, 0.0, 0.0])
+
+
+def test_to_mono_from_batched_tensor():
+    batched = torch.tensor([[[1.0, -1.0], [-1.0, 1.0]]])
+    mono = to_mono_numpy(batched)
+    assert mono.shape == (2,)
+    np.testing.assert_allclose(mono, [0.0, 0.0])
+
+
+def test_ensure_stem_channels_mono_downmix():
+    stereo = torch.tensor([[1.0, -1.0, 1.0], [-1.0, 1.0, -1.0]])
+    mono = ensure_stem_channels(stereo, channels=1)
+    assert mono.shape == (1, 3)
+    np.testing.assert_allclose(mono[0], [0.0, 0.0, 0.0])
+
+
+def test_ensure_stem_channels_mono_upmix():
+    mono = torch.tensor([[0.5, 1.0, 1.5]])
+    stereo = ensure_stem_channels(mono, channels=2)
+    assert stereo.shape == (2, 3)
+    np.testing.assert_allclose(stereo[0], mono[0])
+    np.testing.assert_allclose(stereo[1], mono[0])
+
+
+def test_get_waveform_tensor_preserves_fluidsynth_stereo(monkeypatch):
+    import synthesis.audio as audio_mod
+
+    monkeypatch.setattr(audio_mod, "STEM_CHANNELS", 2)
+    left = np.array([1000, 2000], dtype=np.int16)
+    right = np.array([-1000, -2000], dtype=np.int16)
+    raw = np.column_stack([left, right]).astype(np.int16).tobytes()
+
+    class FakeStdout:
+        def read(self, _n):
+            return raw
+
+    class FakeProc:
+        stdout = FakeStdout()
+
+        def terminate(self):
+            return None
+
+        def wait(self, timeout=None):
+            return 0
+
+    monkeypatch.setattr(audio_mod.subprocess, "Popen", lambda **kwargs: FakeProc())
+    waveform = audio_mod.get_waveform_tensor("song.mid", "font.sf2")
+    assert waveform.shape == (2, 2)
+    assert waveform[0, 0] != waveform[1, 0]
+    np.testing.assert_allclose(waveform[0, 0], 1000 / np.iinfo(np.int16).max, rtol=1e-5)
+    np.testing.assert_allclose(waveform[1, 0], -1000 / np.iinfo(np.int16).max, rtol=1e-5)
+
+
+def test_get_waveform_tensor_downmixes_when_mono_configured(monkeypatch):
+    import synthesis.audio as audio_mod
+
+    monkeypatch.setattr(audio_mod, "STEM_CHANNELS", 1)
+    stereo = np.array([[1000, -1000], [2000, -2000]], dtype=np.int16)
+    raw = stereo.tobytes()
+
+    class FakeStdout:
+        def read(self, _n):
+            return raw
+
+    class FakeProc:
+        stdout = FakeStdout()
+
+        def terminate(self):
+            return None
+
+        def wait(self, timeout=None):
+            return 0
+
+    monkeypatch.setattr(audio_mod.subprocess, "Popen", lambda **kwargs: FakeProc())
+    waveform = audio_mod.get_waveform_tensor("song.mid", "font.sf2")
+    assert waveform.shape == (1, 2)
+    np.testing.assert_allclose(waveform[0, 0], 0.0, atol=1e-5)
+
+
+def test_write_flac_stereo(tmp_path: Path, monkeypatch):
+    import synthesis.audio as audio_mod
+
+    captured = {}
+    monkeypatch.setattr(audio_mod, "STEM_CHANNELS", 2)
+
+    def fake_write(path, audio, sr, format, subtype):
+        captured.update(shape=audio.shape)
+
+    monkeypatch.setattr(audio_mod.sf, "write", fake_write)
+    write_flac(
+        torch.tensor([[0.5, 1.0], [0.25, 0.75]]),
+        tmp_path / "stem_0.flac",
+    )
+    assert captured["shape"] == (2, 2)
 
 
 def test_loudness_normalize_non_silent():

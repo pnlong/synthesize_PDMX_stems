@@ -40,9 +40,11 @@ explicit = true
 testpaths = [
     "shared/tests",
     "synthesis/tests",
+    "synthesis/listening/tests",
     "synthesis/realify/captions/tests",
     "synthesis/realify/tests",
     "analysis/tests",
+    "experiments/preset_sweep/tests",
 ]
 markers = [
     "gpu: tests requiring CUDA",
@@ -54,4 +56,4 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["shared*", "synthesis*", "analysis*"]
+include = ["shared*", "synthesis*", "analysis*", "experiments*"]

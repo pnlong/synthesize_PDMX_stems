@@ -329,18 +329,19 @@ def raw_synthesis_command(args) -> str:
 
 
 def run_realify_pass(args, source_dir: str, dest_dir: str):
-    from synthesis.realify.captions.generate import write_captions
     from synthesis.realify.realify import run_realify
 
     audio_format = synthesis_audio_format(args.mp3)
-    write_captions(source_dir, seed=args.sample_seed)
     run_realify(
         source_dir=source_dir,
         output_dir=dest_dir,
         model=args.model,
         limit=args.realify_limit,
         jobs=args.jobs,
+        batch_size=args.realify_batch_size or REALIFY_BATCH_SIZE,
         audio_format=audio_format,
+        sample_seed=args.sample_seed,
+        reset=args.reset,
     )
 
 

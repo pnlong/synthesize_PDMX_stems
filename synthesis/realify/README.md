@@ -9,7 +9,8 @@ Stable Audio 3 (SA3) audio-to-audio “realification” of synthesized stems.
 | File | Description |
 |------|-------------|
 | `realify.py` | CLI and `run_realify()`: apply SA3 to each stem using captions + presets |
-| `presets.yaml` | Per-instrument SA3 generation presets (`init_noise_level`, etc.) |
+| `chunking.py` | Overlap-and-stitch chunking for stems longer than the model buffer |
+| `presets/` | Per-category SA3 presets (`categories.yaml`) and routing rules |
 | `captions/` | Generate text prompts from PDMX metadata for SA3 conditioning |
 | `stable-audio-3/` | Git submodule — SA3 model code; see root [`SETUP.md`](../../SETUP.md) |
 | `tests/` | Realify smoke tests (GPU) and preset exploration notebook |
@@ -23,7 +24,8 @@ Realify reads stems from the matching non-realify ablation (`basic/` → `basic_
 
 ```bash
 # After basic/ exists with complete stems:
-CUDA_VISIBLE_DEVICES=0,1 python -m synthesis.synthesize --render-mode basic --realify
+# GPU (medium); realify auto-skips GPUs without enough free VRAM
+CUDA_VISIBLE_DEVICES=0,3 python -m synthesis.synthesize --render-mode basic --realify
 
 # CPU fallback (small-music only):
 python -m synthesis.synthesize --render-mode basic --realify -m small-music -j 4
@@ -32,8 +34,29 @@ python -m synthesis.synthesize --render-mode basic --realify -m small-music -j 4
 Standalone:
 
 ```bash
-python -m synthesis.realify.captions.generate --dataset_dir .../dev/ablations/basic
 python -m synthesis.realify.realify \
   --source-dir .../dev/ablations/basic \
   --output-dir .../dev/ablations/basic_realify
 ```
+
+Captions are generated in memory from `data.csv` + `stems.csv` (not stored). Preview with:
+
+```bash
+python -m synthesis.realify.captions.generate --dataset_dir .../dev/ablations/basic
+```
+
+## Realify settings
+
+Global constants in [`shared/config.py`](../../shared/config.py):
+
+| Constant | Default | Purpose |
+|----------|---------|---------|
+| `REALIFY_INIT_NOISE_LEVEL` | `0.45` | SA3 timbre-transfer noise fallback when preset omits it |
+| `REALIFY_STEPS` | `8` | Diffusion steps (rf_denoiser sweet spot) |
+| `REALIFY_CFG_SCALE` | `1.0` | Classifier-free guidance scale |
+
+[`presets/categories.yaml`](presets/categories.yaml) sets `default` plus per-category overrides (`init_noise_level`, `prompt_variant`, `steps`, `cfg_scale`). Stem `name` and `is_drum` are mapped to categories via `routing` rules.
+
+Captions use each stem's resolved `prompt_variant`. All captions start with a fixed preservation anchor for the `current` variant, then shuffled PDMX metadata and an instrument hint.
+
+**Long stems:** stems longer than the model buffer are split into overlapping chunks (default 2s overlap), realified separately, and crossfaded back together. Chunk size is derived from the model `sample_size` minus SA3's 6s duration padding (`~114s` for `small-music`, model-dependent for `medium`).

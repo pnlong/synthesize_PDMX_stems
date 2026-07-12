@@ -25,6 +25,10 @@ ABLATIONS_DIR_NAME = "ablations"
 ANALYSIS_DIR_NAME = "analysis"
 SONG_LENGTHS_DIR_NAME = "song_lengths"
 
+# {OUTPUT_DIR}/dev/experiments/ — experiment outputs (preset sweep, etc.)
+EXPERIMENTS_DIR_NAME = "experiments"
+PRESET_SWEEP_DIR_NAME = "preset_sweep"
+
 # {OUTPUT_DIR}/SPDMX/ — assembled sPDMX dataset (via build_spdmx.py, not implemented yet)
 SPDMX_DATASET_DIR_NAME = "SPDMX"
 
@@ -60,6 +64,9 @@ CAPTION_MD_COLUMNS = [
 CAPTIONS_TABLE_COLUMNS = ["path", "track", "prompt"]
 
 SAMPLE_RATE = 44100
+# Channel layout for on-disk stems/mixtures and in-memory tensors (channels, samples).
+# 1 = mono (downmix fluidsynth stereo). 2 = stereo (keep fluidsynth L/R).
+STEM_CHANNELS = 1
 GAIN = 1.0
 STEM_FILE_PATTERN = "stem_{track}.flac"
 MIXTURE_FILE_NAME = "mixture.flac"
@@ -79,3 +86,15 @@ MAX_N_SAMPLES_IN_STEM = int(MAX_STEM_DURATION * SAMPLE_RATE)
 
 SA3_SMALL_MUSIC_MAX_DURATION = 120
 SA3_MEDIUM_MAX_DURATION = 380
+
+# Stable Audio 3 realify defaults (audio-to-audio timbre transfer)
+REALIFY_INIT_NOISE_LEVEL = 0.45
+REALIFY_STEPS = 8
+REALIFY_CFG_SCALE = 1.0
+REALIFY_DURATION_PADDING_SEC = 6.0  # SA3 model.generate default
+REALIFY_CHUNK_OVERLAP_SEC = 2.0
+# Skip GPUs with less free VRAM at realify startup (medium needs ~8–10 GiB per worker).
+REALIFY_MIN_GPU_FREE_GB = 10.0
+REALIFY_CHUNKED_DECODE = True
+# SA3 stems per GPU forward pass. Raise on 24 GB cards (try 2–4); keep 1 on 11 GB 2080 Ti.
+REALIFY_BATCH_SIZE = 1

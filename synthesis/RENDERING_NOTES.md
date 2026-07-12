@@ -57,6 +57,12 @@ Default on-disk format is FLAC (PCM_16). Pass `--mp3` to write MP3 stems and mix
 
 Constant across all ablations (A1–B2), basic and slakh, synthesis and realify:
 
+| Setting | Value |
+|---|---|
+| Sample rate | 44.1 kHz |
+| Stem channels | `STEM_CHANNELS` in `shared/config.py` (default `1` mono; `2` keeps fluidsynth/SA3 stereo) |
+| Loudness | −23 LUFS integrated (BS.1770-4), peak-limited to 1.0 |
+
 1. Stems are loudness-normalized toward −23 LUFS (BS.1770) with per-stem peak limiting at 1.0, then padded to equal length.
 2. Sum stems sample-wise.
 3. If mixture peak > `MIXTURE_PEAK_LIMIT` (1.0), apply uniform gain `limit / peak`.
@@ -71,9 +77,9 @@ Synthesis and realify are intentionally separate passes with different hardware 
 | Pass | Work | Parallelism | Hardware |
 |------|------|-------------|----------|
 | 1 — Synthesis | Fluidsynth render (basic or slakh) | `-j` / `--jobs` multiprocessing pool | CPU |
-| 2 — Realify | SA3 audio-to-audio per stem | One process per visible GPU, or `-j` CPU workers for `small-music` | GPU / CPU |
+| 2 — Realify | SA3 audio-to-audio per stem | One process per visible GPU; `--realify-batch-size` batches stems per forward pass | GPU / CPU |
 
-Pass 1 writes raw stems under `dev/ablations/{basic,slakh}/` or `dev/stems/`. Pass 2 reads those stems, runs captions + SA3, and writes to `{mode}_realify/` (or `stems_realify/`). **Pass 2 never re-synthesizes** — it errors if the raw ablation is incomplete.
+Pass 1 writes raw stems under `dev/ablations/{basic,slakh}/` or `dev/stems/`. Pass 2 reads those stems, runs captions + SA3, and writes to `{mode}_realify/` (or `stems_realify/`). **Pass 2 never re-synthesizes** — it errors if the raw ablation is incomplete. Mixture rebuild at the end uses `-j` / `--jobs` CPU workers (same flag as synthesis).
 
 Use `CUDA_VISIBLE_DEVICES` to select GPU(s). `medium` requires a visible GPU. `small-music` uses GPU when available, otherwise CPU multiprocessing with `-j`.
 
@@ -82,16 +88,17 @@ Use `CUDA_VISIBLE_DEVICES` to select GPU(s). `medium` requires a visible GPU. `s
 python -m synthesis.synthesize --render-mode basic -j 8
 
 # Pass 2 — GPU (medium); limit devices with CUDA_VISIBLE_DEVICES
-CUDA_VISIBLE_DEVICES=0,1 python -m synthesis.synthesize --render-mode basic --realify
+# Realify skips GPUs with <10 GiB free (see REALIFY_MIN_GPU_FREE_GB in shared/config.py).
+# On mixed 3090/2080 Ti boxes, prefer the larger cards:
+CUDA_VISIBLE_DEVICES=0,3 python -m synthesis.synthesize --render-mode basic --realify
 
 # Pass 2 — CPU smoke test (small-music, no GPU)
 python -m synthesis.synthesize --render-mode basic --realify -m small-music -j 4
 ```
 
-Standalone realify after pass 1:
+Standalone realify after pass 1 (captions generated in memory):
 
 ```bash
-python -m synthesis.realify.captions.generate --dataset_dir .../dev/ablations/basic
 python -m synthesis.realify.realify \
   --source-dir .../dev/ablations/basic \
   --output-dir .../dev/ablations/basic_realify
@@ -131,10 +138,9 @@ python -m analysis.analyze_song_lengths
 python -m synthesis.build_spdmx --render-mode basic
 ```
 
-Standalone realify/captions (optional):
+Standalone realify (captions generated in memory):
 
 ```bash
-python -m synthesis.realify.captions.generate --dataset_dir .../dev/ablations/basic
 python -m synthesis.realify.realify --source-dir .../dev/ablations/basic --output-dir .../dev/ablations/basic_realify
 ```
 
@@ -165,6 +171,14 @@ Same `ABLATION_SAMPLE_SEED` ensures basic and slakh render the same songs.
 
 Subjective comparison across A1–B2 once all four dirs exist. See prior hypotheses in git history / project notes.
 
+Browse and compare generated audio locally:
+
+```bash
+uv run python -m synthesis.listening.serve
+```
+
+See [`listening/README.md`](listening/README.md).
+
 ## Status
 
 | Feature | Status |
@@ -175,5 +189,5 @@ Subjective comparison across A1–B2 once all four dirs exist. See prior hypothe
 | `build_spdmx.py` | Stub |
 | Patch pools (Slakh) | Stub |
 | `mixture.flac` per song | Done |
-| Listening test | Not started |
+| Listening test | Viewer available (`python -m synthesis.listening.serve`) |
 | Song-length analysis (PDMX metadata + plots) | Done |

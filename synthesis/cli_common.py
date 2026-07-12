@@ -10,6 +10,7 @@ from shared.config import (
     ABLATION_SAMPLE_SIZE,
     OUTPUT_DIR,
     PDMX_FILEPATH,
+    REALIFY_BATCH_SIZE,
     RENDER_MODE_BASIC,
     RENDER_MODE_SLAKH,
     SOUNDFONT_PATH,
@@ -23,7 +24,7 @@ def add_synthesis_args(parser: argparse.ArgumentParser):
     parser.add_argument(
         "--reset",
         action="store_true",
-        help="Delete the ablation output directory and re-synthesize all songs from scratch (default: resume incomplete songs).",
+        help="Delete the output directory and rerun from scratch (raw synthesis or realify target).",
     )
     parser.add_argument(
         "-j",
@@ -31,7 +32,7 @@ def add_synthesis_args(parser: argparse.ArgumentParser):
         "--workers",
         default=int(multiprocessing.cpu_count() / 4),
         type=int,
-        help="CPU workers for synthesis and CPU realify (small-music, no GPU visible).",
+        help="CPU workers for synthesis, CPU realify (small-music), and realify mixture writes.",
     )
     parser.add_argument(
         "--render-mode",
@@ -50,6 +51,12 @@ def add_synthesis_args(parser: argparse.ArgumentParser):
         default=None,
         type=int,
         help="Realify only the first N stems (smoke tests); default: all stems.",
+    )
+    parser.add_argument(
+        "--realify-batch-size",
+        default=None,
+        type=int,
+        help="SA3 stems per GPU forward pass (default: REALIFY_BATCH_SIZE in shared/config.py).",
     )
     parser.add_argument(
         "-n",

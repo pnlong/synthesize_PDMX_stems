@@ -5,11 +5,15 @@ from __future__ import annotations
 from pathlib import Path
 
 from shared.config import OUTPUT_DIR
+from experiments.paths import preset_sweep_output_root
 from synthesis.paths import ablations_root, analysis_root
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 REPO_ANALYSIS_SYMLINK = REPO_ROOT / "analysis" / "output"
 REPO_ABLATIONS_SYMLINK = REPO_ROOT / "synthesis" / "ablations_output"
+REPO_PRESET_SWEEP_OUTPUT_SYMLINK = (
+    REPO_ROOT / "experiments" / "preset_sweep" / "output"
+)
 
 LEGACY_ANALYSIS_SYMLINKS = (
     REPO_ROOT / "analysis" / "song_lengths",
@@ -43,9 +47,19 @@ def link_ablations_in_repo(output_dir: str = OUTPUT_DIR) -> tuple[Path, Path]:
     return _link_repo_dir(REPO_ABLATIONS_SYMLINK, Path(ablations_root(output_dir)))
 
 
+def link_preset_sweep_output_in_repo(output_dir: str = OUTPUT_DIR) -> tuple[Path, Path]:
+    """Symlink preset sweep output into experiments/preset_sweep/output in this repo."""
+    REPO_PRESET_SWEEP_OUTPUT_SYMLINK.parent.mkdir(parents=True, exist_ok=True)
+    return _link_repo_dir(
+        REPO_PRESET_SWEEP_OUTPUT_SYMLINK,
+        Path(preset_sweep_output_root(output_dir)),
+    )
+
+
 def setup_dev_symlinks(output_dir: str = OUTPUT_DIR) -> list[tuple[Path, Path]]:
     """Create all in-repo dev artifact symlinks."""
     return [
         link_analysis_in_repo(output_dir),
         link_ablations_in_repo(output_dir),
+        link_preset_sweep_output_in_repo(output_dir),
     ]
