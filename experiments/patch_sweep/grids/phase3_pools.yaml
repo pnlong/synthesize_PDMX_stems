@@ -1,0 +1,15 @@
+# Phase 3: GM program pool variants on phase-1/2 per-category winners.
+# Requires winners.yaml phase1_soundfonts and phase2_fx completed.
+phase: phase3_pools
+fx_profile: null  # taken from phase 2 winners per category
+
+variants:
+  - id: pool_v1_conservative
+    pool_id: pool_v1_conservative
+    note: "2–3 auditioned programs per GM class"
+  - id: pool_v2_diverse
+    pool_id: pool_v2_diverse
+    note: "5–8 programs per GM class"
+  - id: pool_v3_slakh_like
+    pool_id: pool_v3_slakh_like
+    note: "Broader Slakh-inspired class mapping"

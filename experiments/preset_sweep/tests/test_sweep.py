@@ -8,16 +8,18 @@ import pytest
 import soundfile as sf
 import yaml
 
+from experiments.preset_sweep.config import PHASE1, PHASE2, PHASE3, load_yaml
 from experiments.preset_sweep.sweep import (
     MANIFEST_COLUMNS,
     build_manifest_rows,
     build_sweep_tasks,
-    load_yaml,
+    resolve_preset_settings,
     run_preset_sweep,
     song_path_from_id,
     variant_output_path,
     write_manifest,
 )
+from experiments.preset_sweep.winners import record_phase_winners
 from shared.config import DATA_DIR_NAME
 
 
@@ -56,7 +58,7 @@ def test_variant_output_path(tmp_path: Path):
     song_path = source_dir / "data" / "0/13/QmTest"
     out = variant_output_path(
         tmp_path / "output",
-        "noise0.45_minimal",
+        "noise0.45",
         song_path,
         source_dir,
         0,
@@ -66,11 +68,40 @@ def test_variant_output_path(tmp_path: Path):
         tmp_path
         / "output"
         / "variants"
-        / "noise0.45_minimal"
+        / "noise0.45"
         / "data"
         / "0/13/QmTest"
         / "stem_0.flac"
     )
+
+
+def test_resolve_preset_settings_phase1():
+    noise, prompt, steps, cfg = resolve_preset_settings(
+        phase=PHASE1,
+        variant={"id": "noise0.45", "init_noise_level": 0.45},
+        grid_cfg={"prompt_variant": "current", "steps": 8, "cfg_scale": 1.0},
+        category="piano",
+        winners_path=Path("/nonexistent/winners.yaml"),
+    )
+    assert noise == 0.45
+    assert prompt == "current"
+    assert steps == 8
+    assert cfg == 1.0
+
+
+def test_resolve_preset_settings_phase2(tmp_path: Path):
+    winners_path = tmp_path / "winners.yaml"
+    record_phase_winners(PHASE1, {"piano": "noise0.55"}, path=winners_path)
+
+    noise, prompt, steps, cfg = resolve_preset_settings(
+        phase=PHASE2,
+        variant={"id": "minimal", "prompt_variant": "minimal"},
+        grid_cfg={"steps": 8, "cfg_scale": 1.0},
+        category="piano",
+        winners_path=winners_path,
+    )
+    assert noise == 0.55
+    assert prompt == "minimal"
 
 
 def test_build_sweep_tasks_and_manifest(tmp_path: Path):
@@ -84,35 +115,44 @@ def test_build_sweep_tasks_and_manifest(tmp_path: Path):
         "track": 0,
     }]
     variants = [
-        {"id": "noise0.25_current", "init_noise_level": 0.25, "prompt_variant": "current"},
-        {"id": "noise0.45_minimal", "init_noise_level": 0.45, "prompt_variant": "minimal"},
+        {"id": "noise0.25", "init_noise_level": 0.25},
+        {"id": "noise0.45", "init_noise_level": 0.45},
     ]
+    grid_cfg = {"prompt_variant": "current", "steps": 8, "cfg_scale": 1.0}
+    winners_path = tmp_path / "winners.yaml"
 
     tasks = build_sweep_tasks(
+        phase=PHASE1,
         source_dir=source_dir,
         output_dir=output_dir,
         probe_stems=probe_stems,
         variants=variants,
+        grid_cfg=grid_cfg,
         audio_format="flac",
         sample_seed=42,
+        winners_path=winners_path,
     )
     assert len(tasks) == 2
     assert tasks[0]["preset"]["init_noise_level"] == 0.25
     assert tasks[1]["preset"]["init_noise_level"] == 0.45
-    assert "solo piano" in tasks[1]["row"]["prompt"]
+    assert "piano" in tasks[1]["row"]["prompt"].lower()
 
     manifest_rows = build_manifest_rows(
+        phase=PHASE1,
         source_dir=source_dir,
         output_dir=output_dir,
         probe_stems=probe_stems,
         variants=variants,
+        grid_cfg=grid_cfg,
         audio_format="flac",
         sample_seed=42,
+        winners_path=winners_path,
     )
     manifest_path = write_manifest(output_dir, manifest_rows)
     manifest = pd.read_csv(manifest_path)
     assert list(manifest.columns) == MANIFEST_COLUMNS
     assert len(manifest) == 2
+    assert manifest.iloc[0]["phase"] == PHASE1
 
 
 def test_build_sweep_tasks_skip_existing(tmp_path: Path):
@@ -126,13 +166,14 @@ def test_build_sweep_tasks_skip_existing(tmp_path: Path):
         "track": 0,
     }]
     variants = [
-        {"id": "noise0.25_current", "init_noise_level": 0.25, "prompt_variant": "current"},
-        {"id": "noise0.45_minimal", "init_noise_level": 0.45, "prompt_variant": "minimal"},
+        {"id": "noise0.25", "init_noise_level": 0.25},
+        {"id": "noise0.45", "init_noise_level": 0.45},
     ]
+    grid_cfg = {"prompt_variant": "current", "steps": 8, "cfg_scale": 1.0}
 
     existing = variant_output_path(
         output_dir,
-        "noise0.25_current",
+        "noise0.25",
         song_dir,
         source_dir,
         0,
@@ -142,15 +183,18 @@ def test_build_sweep_tasks_skip_existing(tmp_path: Path):
     sf.write(str(existing), np.zeros(44100), 44100, format="FLAC")
 
     tasks = build_sweep_tasks(
+        phase=PHASE1,
         source_dir=source_dir,
         output_dir=output_dir,
         probe_stems=probe_stems,
         variants=variants,
+        grid_cfg=grid_cfg,
         audio_format="flac",
         sample_seed=42,
+        winners_path=tmp_path / "winners.yaml",
     )
     assert len(tasks) == 1
-    assert tasks[0]["row"]["variant_id"] == "noise0.45_minimal"
+    assert tasks[0]["row"]["variant_id"] == "noise0.45"
 
 
 def test_run_preset_sweep_writes_manifest_without_gpu(tmp_path: Path, monkeypatch):
@@ -158,7 +202,7 @@ def test_run_preset_sweep_writes_manifest_without_gpu(tmp_path: Path, monkeypatc
     output_dir = tmp_path / "sweep"
 
     probe_path = tmp_path / "probe_stems.yaml"
-    grid_path = tmp_path / "preset_grid.yaml"
+    grid_path = tmp_path / "phase1_noise.yaml"
     probe_path.write_text(yaml.dump({
         "stems": [{
             "id": "piano_test",
@@ -168,8 +212,11 @@ def test_run_preset_sweep_writes_manifest_without_gpu(tmp_path: Path, monkeypatc
         }],
     }))
     grid_path.write_text(yaml.dump({
+        "prompt_variant": "current",
+        "steps": 8,
+        "cfg_scale": 1.0,
         "variants": [
-            {"id": "noise0.25_current", "init_noise_level": 0.25, "prompt_variant": "current"},
+            {"id": "noise0.25", "init_noise_level": 0.25},
         ],
     }))
 
@@ -183,15 +230,46 @@ def test_run_preset_sweep_writes_manifest_without_gpu(tmp_path: Path, monkeypatc
     )
 
     manifest = run_preset_sweep(
+        phase=PHASE1,
         source_dir=source_dir,
         output_dir=output_dir,
         probe_stems_path=probe_path,
-        preset_grid_path=grid_path,
+        grid_path=grid_path,
+        winners_path=tmp_path / "winners.yaml",
         model="small-music",
         jobs=1,
     )
     assert len(manifest) == 1
-    assert (output_dir / "manifest.csv").is_file()
+    assert (output_dir / "phase1_noise" / "manifest.csv").is_file()
+
+
+def test_phase2_requires_phase1_winners(tmp_path: Path):
+    source_dir, _ = _write_basic_dataset(tmp_path)
+    probe_path = tmp_path / "probe_stems.yaml"
+    grid_path = tmp_path / "phase2_prompts.yaml"
+    probe_path.write_text(yaml.dump({
+        "stems": [{
+            "id": "piano_test",
+            "category": "piano",
+            "song_id": "0/13/QmTest",
+            "track": 0,
+        }],
+    }))
+    grid_path.write_text(yaml.dump({
+        "variants": [{"id": "current", "prompt_variant": "current"}],
+    }))
+
+    with pytest.raises(RuntimeError, match=PHASE1):
+        run_preset_sweep(
+            phase=PHASE2,
+            source_dir=source_dir,
+            output_dir=tmp_path / "sweep",
+            probe_stems_path=probe_path,
+            grid_path=grid_path,
+            winners_path=tmp_path / "winners.yaml",
+            model="small-music",
+            jobs=1,
+        )
 
 
 def test_load_yaml_roundtrip(tmp_path: Path):

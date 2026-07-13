@@ -4,6 +4,8 @@ __pycache__/
 TODO.md
 
 # Symlinks to deepfreeze dev artifacts (created locally by setup_symlinks / CLIs)
+soundfonts
 analysis/output
 synthesis/ablations_output
 experiments/preset_sweep/output
+experiments/patch_sweep/output

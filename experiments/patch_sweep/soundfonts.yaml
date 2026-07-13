@@ -1,0 +1,74 @@
+# Candidate soundfonts for Slakh-style patch tuning (phase 1 audition).
+#
+# Symlinked in-repo at soundfonts/ (see shared.setup_symlinks).
+# Canonical storage: /data3/pnlong/soundfonts
+#
+# Phase 1: render probe stems with each candidate, dry (no program remap).
+# Pick 1–3 winners before moving to FX / program-pool sweeps.
+#
+# Usage:
+#   uv run python -m experiments.patch_sweep.sweep \
+#     --soundfont "soundfonts/GeneralUser GS v1.471.sf2" ...
+
+default: SGM-V2.01.sf2
+
+candidates:
+  - id: sgm_v2
+    file: SGM-V2.01.sf2
+    size_mb: 236
+    source: archive.org free-soundfonts collection
+    role: current production default; strong all-round GM
+    phase1_status: candidate
+
+  - id: generaluser
+    file: GeneralUser GS v1.471.sf2
+    size_mb: 30
+    source: schristiancollins.com / archive.org
+    role: lightweight, musical GM; good audition reference
+    phase1_status: candidate
+
+  - id: fluidr3
+    file: FluidR3_GM2-2.SF2
+    size_mb: 141
+    source: archive.org (FluidR3)
+    role: standard GM reference; slightly drier than SGM
+    phase1_status: candidate
+
+  - id: arachno
+    file: Arachno_SoundFont_Version_1.0.sf2
+    size_mb: 149
+    source: archive.org
+    role: strong strings, brass, bass
+    phase1_status: candidate
+
+  - id: airfont_380
+    file: airfont_380_final.sf2
+    size_mb: 264
+    source: archive.org
+    role: bright winds and piano
+    phase1_status: candidate
+
+  - id: realfont
+    file: RealFont_2_1.sf2
+    size_mb: 102
+    source: local / archive.org
+    role: balanced GM; punchy drums
+    phase1_status: candidate
+
+  - id: timgm6mb
+    file: TimGM6mb.sf2
+    size_mb: 6
+    source: archive.org; pretty_midi / Flakh2100 baseline
+    role: sanity-check baseline only (Flakh-style single bank)
+    phase1_status: reference
+
+# Per-category shortlist — fill after phase 1 listening
+# winners:
+#   piano: null
+#   drums: null
+#   strings: null
+#   wind: null
+#   voice: null
+#   mallet: null
+#   organ: null
+#   polyphonic: null

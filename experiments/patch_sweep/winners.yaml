@@ -1,0 +1,19 @@
+phases:
+  phase1_soundfonts:
+    completed: true
+    winners:
+      drums: arachno
+      mallet: airfont_380
+      organ: arachno
+      piano: airfont_380
+      polyphonic: generaluser
+      strings: sgm_v2
+      voice: generaluser
+      wind: generaluser
+    recorded_at: '2026-07-13T16:24:15.415166+00:00'
+  phase2_fx:
+    completed: false
+    winners: {}
+  phase3_pools:
+    completed: false
+    winners: {}

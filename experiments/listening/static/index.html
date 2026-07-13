@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sweep Listening Test</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <main class="landing">
+    <h1>Sweep Listening Test</h1>
+    <p class="subtitle">Structured evaluation for patch and preset sweeps</p>
+    <div class="cards">
+      <a class="card" href="/test?type=preset">
+        <h2>Preset sweep</h2>
+        <p>SA3 init_noise_level × prompt_variant</p>
+      </a>
+      <a class="card" href="/test?type=patch">
+        <h2>Patch sweep</h2>
+        <p>Slakh-style patch pool variants</p>
+      </a>
+    </div>
+    <p class="hint">Ablation validation (A1–B2) uses <code>synthesis.listening.serve</code> on port 8765.</p>
+  </main>
+</body>
+</html>

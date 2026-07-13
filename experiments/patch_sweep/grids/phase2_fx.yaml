@@ -1,0 +1,15 @@
+# Phase 2: light FX profiles on phase-1 per-category soundfont winners.
+# Requires winners.yaml phase1_soundfonts completed.
+phase: phase2_fx
+pool_id: null
+
+variants:
+  - id: fx_dry
+    fx_profile: dry
+    note: "Fluidsynth reverb/chorus off"
+  - id: fx_light
+    fx_profile: light
+    note: "Subtle room reverb"
+  - id: fx_warm
+    fx_profile: warm
+    note: "Light reverb + gentle warmth EQ"

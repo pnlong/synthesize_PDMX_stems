@@ -1,4 +1,4 @@
-"""Run SA3 preset sweep over a curated probe set and parameter grid."""
+"""Run phased SA3 preset sweeps over the probe set."""
 
 from __future__ import annotations
 
@@ -7,9 +7,24 @@ import multiprocessing
 from pathlib import Path
 
 import pandas as pd
-import yaml
 
-from experiments.paths import preset_sweep_output_root
+from experiments.paths import DEFAULT_PROBE_STEMS, preset_sweep_output_root
+from experiments.probe_stems import validate_probe_stems
+from experiments.preset_sweep.config import (
+    EXPERIMENT_DIR,
+    PHASE1,
+    PHASE2,
+    PHASE3,
+    PHASE_GRID_FILES,
+    PHASES,
+    load_yaml,
+    phase_output_dir,
+)
+from experiments.preset_sweep.winners import (
+    phase_is_complete,
+    resolve_phase1_init_noise_level,
+    resolve_phase2_prompt_variant,
+)
 from shared.config import (
     ABLATION_SAMPLE_SEED,
     DATA_DIR_NAME,
@@ -36,18 +51,24 @@ from synthesis.realify.realify import (
     stem_seed,
 )
 
-REALIFY_PRESETS_PATH = Path(__file__).resolve().parents[2] / "synthesis" / "realify" / "presets" / "categories.yaml"
+REALIFY_PRESETS_PATH = (
+    Path(__file__).resolve().parents[2]
+    / "synthesis"
+    / "realify"
+    / "presets"
+    / "categories.yaml"
+)
 
-EXPERIMENT_DIR = Path(__file__).resolve().parent
-DEFAULT_PROBE_STEMS = EXPERIMENT_DIR / "probe_stems.yaml"
-DEFAULT_PRESET_GRID = EXPERIMENT_DIR / "preset_grid.yaml"
 MANIFEST_FILENAME = "manifest.csv"
 VARIANTS_DIR_NAME = "variants"
 
 MANIFEST_COLUMNS = [
+    "phase",
     "variant_id",
     "init_noise_level",
     "prompt_variant",
+    "steps",
+    "cfg_scale",
     "prompt",
     "stem_id",
     "category",
@@ -71,11 +92,6 @@ def default_source_dir(output_root: str = OUTPUT_DIR) -> Path:
     return Path(ablation_raw_dir(output_root, "basic"))
 
 
-def load_yaml(path: Path) -> dict:
-    with open(path) as f:
-        return yaml.safe_load(f)
-
-
 def song_path_from_id(source_dir: Path, song_id: str) -> Path:
     return source_dir / DATA_DIR_NAME / song_id
 
@@ -96,6 +112,65 @@ def variant_output_path(
         / DATA_DIR_NAME
         / song_id
         / stem_filename(track, audio_format)
+    )
+
+
+def _require_phase_prerequisites(phase: str, winners_path: Path) -> None:
+    if phase == PHASE2 and not phase_is_complete(PHASE1, winners_path):
+        raise RuntimeError(
+            f"{PHASE2} requires completed {PHASE1} winners in {winners_path}. "
+            f"Run the phase 1 sweep, listening test, and record_winners first."
+        )
+    if phase == PHASE3:
+        if not phase_is_complete(PHASE1, winners_path):
+            raise RuntimeError(f"{PHASE3} requires completed {PHASE1} winners.")
+        if not phase_is_complete(PHASE2, winners_path):
+            raise RuntimeError(f"{PHASE3} requires completed {PHASE2} winners.")
+
+
+def resolve_preset_settings(
+    *,
+    phase: str,
+    variant: dict,
+    grid_cfg: dict,
+    category: str | None,
+    winners_path: Path,
+) -> tuple[float, str, int, float]:
+    """Return (init_noise_level, prompt_variant, steps, cfg_scale)."""
+    default_prompt = grid_cfg.get("prompt_variant", "current")
+    default_steps = int(grid_cfg.get("steps", REALIFY_STEPS))
+    default_cfg = float(grid_cfg.get("cfg_scale", REALIFY_CFG_SCALE))
+
+    if phase == PHASE1:
+        return (
+            float(variant["init_noise_level"]),
+            variant.get("prompt_variant") or default_prompt,
+            int(variant.get("steps", default_steps)),
+            float(variant.get("cfg_scale", default_cfg)),
+        )
+
+    if phase == PHASE2:
+        init_noise_level = resolve_phase1_init_noise_level(category or "", winners_path)
+        if init_noise_level is None:
+            raise RuntimeError(f"No phase-1 noise winner for category: {category}")
+        return (
+            init_noise_level,
+            variant["prompt_variant"],
+            int(variant.get("steps", default_steps)),
+            float(variant.get("cfg_scale", default_cfg)),
+        )
+
+    init_noise_level = resolve_phase1_init_noise_level(category or "", winners_path)
+    if init_noise_level is None:
+        raise RuntimeError(f"No phase-1 noise winner for category: {category}")
+    prompt_variant = resolve_phase2_prompt_variant(category or "", winners_path)
+    if prompt_variant is None:
+        raise RuntimeError(f"No phase-2 prompt winner for category: {category}")
+    return (
+        init_noise_level,
+        prompt_variant,
+        int(variant.get("steps", default_steps)),
+        float(variant.get("cfg_scale", default_cfg)),
     )
 
 
@@ -126,12 +201,15 @@ def build_probe_caption(
 
 def build_sweep_tasks(
     *,
+    phase: str,
     source_dir: Path,
     output_dir: Path,
     probe_stems: list[dict],
     variants: list[dict],
+    grid_cfg: dict,
     audio_format: str,
     sample_seed: int,
+    winners_path: Path,
 ) -> list[dict]:
     tasks = []
     for probe in probe_stems:
@@ -141,8 +219,17 @@ def build_sweep_tasks(
         if not stem_is_valid(source_stem_path):
             raise FileNotFoundError(f"Missing or invalid probe stem: {source_stem_path}")
 
+        category = probe.get("category")
+
         for variant in variants:
             variant_id = variant["id"]
+            init_noise_level, prompt_variant, steps, cfg_scale = resolve_preset_settings(
+                phase=phase,
+                variant=variant,
+                grid_cfg=grid_cfg,
+                category=category,
+                winners_path=winners_path,
+            )
             out_path = variant_output_path(
                 output_dir,
                 variant_id,
@@ -154,7 +241,6 @@ def build_sweep_tasks(
             if out_path.exists():
                 continue
 
-            prompt_variant = variant["prompt_variant"]
             prompt = build_probe_caption(
                 source_dir=source_dir,
                 song_path=song_path,
@@ -163,9 +249,9 @@ def build_sweep_tasks(
                 sample_seed=sample_seed,
             )
             preset = {
-                "steps": variant.get("steps", REALIFY_STEPS),
-                "cfg_scale": variant.get("cfg_scale", REALIFY_CFG_SCALE),
-                "init_noise_level": float(variant["init_noise_level"]),
+                "steps": steps,
+                "cfg_scale": cfg_scale,
+                "init_noise_level": init_noise_level,
             }
             if variant.get("negative_prompt") is not None:
                 preset["negative_prompt"] = variant["negative_prompt"]
@@ -176,10 +262,10 @@ def build_sweep_tasks(
                     "track": track,
                     "prompt": prompt,
                     "stem_id": probe["id"],
-                    "category": probe.get("category"),
+                    "category": category,
                     "variant_id": variant_id,
                     "prompt_variant": prompt_variant,
-                    "init_noise_level": preset["init_noise_level"],
+                    "init_noise_level": init_noise_level,
                 },
                 "preset": preset,
                 "out_path": str(out_path),
@@ -193,20 +279,30 @@ def build_sweep_tasks(
 
 def build_manifest_rows(
     *,
+    phase: str,
     source_dir: Path,
     output_dir: Path,
     probe_stems: list[dict],
     variants: list[dict],
+    grid_cfg: dict,
     audio_format: str,
     sample_seed: int,
+    winners_path: Path,
 ) -> list[dict]:
     rows = []
     for probe in probe_stems:
         song_path = song_path_from_id(source_dir, probe["song_id"])
         track = int(probe["track"])
+        category = probe.get("category")
         for variant in variants:
             variant_id = variant["id"]
-            prompt_variant = variant["prompt_variant"]
+            init_noise_level, prompt_variant, steps, cfg_scale = resolve_preset_settings(
+                phase=phase,
+                variant=variant,
+                grid_cfg=grid_cfg,
+                category=category,
+                winners_path=winners_path,
+            )
             prompt = build_probe_caption(
                 source_dir=source_dir,
                 song_path=song_path,
@@ -223,12 +319,15 @@ def build_manifest_rows(
                 audio_format,
             )
             rows.append({
+                "phase": phase,
                 "variant_id": variant_id,
-                "init_noise_level": float(variant["init_noise_level"]),
+                "init_noise_level": init_noise_level,
                 "prompt_variant": prompt_variant,
+                "steps": steps,
+                "cfg_scale": cfg_scale,
                 "prompt": prompt,
                 "stem_id": probe["id"],
-                "category": probe.get("category"),
+                "category": category,
                 "path": str(song_path),
                 "track": track,
                 "out_path": str(out_path),
@@ -245,10 +344,12 @@ def write_manifest(output_dir: Path, rows: list[dict]) -> Path:
 
 def run_preset_sweep(
     *,
+    phase: str,
     source_dir: Path,
     output_dir: Path,
     probe_stems_path: Path,
-    preset_grid_path: Path,
+    grid_path: Path,
+    winners_path: Path,
     model: str = "medium",
     jobs: int = 1,
     batch_size: int = REALIFY_BATCH_SIZE,
@@ -257,40 +358,61 @@ def run_preset_sweep(
     limit_stems: int | None = None,
     limit_variants: int | None = None,
 ) -> pd.DataFrame:
+    if phase not in PHASES:
+        raise ValueError(f"Unknown phase: {phase}")
+
     configure_sa3_env()
     source_dir = source_dir.resolve()
-    output_dir = output_dir.resolve()
+    output_dir = phase_output_dir(output_dir.resolve(), phase)
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    _require_phase_prerequisites(phase, winners_path)
+
     probe_cfg = load_yaml(probe_stems_path)
-    grid_cfg = load_yaml(preset_grid_path)
+    grid_cfg = load_yaml(grid_path)
     probe_stems = list(probe_cfg["stems"])
+    validate_probe_stems(probe_stems)
     variants = list(grid_cfg["variants"])
     if limit_stems is not None:
         probe_stems = probe_stems[:limit_stems]
     if limit_variants is not None:
         variants = variants[:limit_variants]
 
+    for variant in variants:
+        if phase == PHASE1 and "init_noise_level" not in variant:
+            raise ValueError(f"Phase 1 variant missing init_noise_level: {variant}")
+        if phase == PHASE2 and "prompt_variant" not in variant:
+            raise ValueError(f"Phase 2 variant missing prompt_variant: {variant}")
+        if phase == PHASE3 and ("steps" not in variant or "cfg_scale" not in variant):
+            raise ValueError(f"Phase 3 variant missing steps/cfg_scale: {variant}")
+
     tasks = build_sweep_tasks(
+        phase=phase,
         source_dir=source_dir,
         output_dir=output_dir,
         probe_stems=probe_stems,
         variants=variants,
+        grid_cfg=grid_cfg,
         audio_format=audio_format,
         sample_seed=sample_seed,
+        winners_path=winners_path,
     )
 
     manifest_rows = build_manifest_rows(
+        phase=phase,
         source_dir=source_dir,
         output_dir=output_dir,
         probe_stems=probe_stems,
         variants=variants,
+        grid_cfg=grid_cfg,
         audio_format=audio_format,
         sample_seed=sample_seed,
+        winners_path=winners_path,
     )
     manifest_path = write_manifest(output_dir, manifest_rows)
 
     use_gpu = realify_uses_gpu(model) if tasks else False
+    print(f"Preset sweep phase: {phase}")
     print(f"Preset sweep source: {source_dir}")
     print(f"Preset sweep output: {output_dir}")
     print(f"Manifest: {manifest_path}")
@@ -345,7 +467,13 @@ def run_preset_sweep(
 
 def parse_args(args=None, namespace=None):
     parser = argparse.ArgumentParser(
-        description="Run SA3 preset sweep on curated probe stems.",
+        description="Run phased SA3 preset sweep on curated probe stems.",
+    )
+    parser.add_argument(
+        "--phase",
+        required=True,
+        choices=list(PHASES),
+        help="Tuning phase to run.",
     )
     parser.add_argument(
         "--source-dir",
@@ -357,7 +485,7 @@ def parse_args(args=None, namespace=None):
         "--output-dir",
         default=None,
         type=Path,
-        help="Sweep output root (default: dev/experiments/preset_sweep).",
+        help="Preset sweep root (phase subdir is appended automatically).",
     )
     parser.add_argument(
         "--probe-stems",
@@ -366,10 +494,16 @@ def parse_args(args=None, namespace=None):
         help="Probe stem manifest YAML.",
     )
     parser.add_argument(
-        "--preset-grid",
-        default=DEFAULT_PRESET_GRID,
+        "--grid",
+        default=None,
         type=Path,
-        help="Preset variant grid YAML.",
+        help="Phase grid YAML (default: grids/phaseN_*.yaml for --phase).",
+    )
+    parser.add_argument(
+        "--winners",
+        default=EXPERIMENT_DIR / "winners.yaml",
+        type=Path,
+        help="Per-phase winners YAML (phase 2/3 read prior winners).",
     )
     parser.add_argument("-m", "--model", default="medium", choices=["small-music", "medium"])
     parser.add_argument(
@@ -401,11 +535,15 @@ def main():
     args = parse_args()
     from synthesis.audio import synthesis_audio_format
 
+    grid_path = args.grid or PHASE_GRID_FILES[args.phase]
+
     run_preset_sweep(
+        phase=args.phase,
         source_dir=args.source_dir or default_source_dir(),
         output_dir=args.output_dir or default_output_dir(),
         probe_stems_path=args.probe_stems,
-        preset_grid_path=args.preset_grid,
+        grid_path=grid_path,
+        winners_path=args.winners,
         model=args.model,
         jobs=args.jobs,
         batch_size=args.realify_batch_size,

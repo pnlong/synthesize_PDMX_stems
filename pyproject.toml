@@ -45,6 +45,9 @@ testpaths = [
     "synthesis/realify/tests",
     "analysis/tests",
     "experiments/preset_sweep/tests",
+    "experiments/patch_sweep/tests",
+    "experiments/listening/tests",
+    "experiments/tests",
 ]
 markers = [
     "gpu: tests requiring CUDA",

@@ -2,6 +2,8 @@
 
 Localhost web UI for browsing the 100-song ablation sample and comparing mixtures and stems across conditions (A1–B2).
 
+Sweep tuning (patch/preset) uses a separate server: [`experiments/listening/`](../../experiments/listening/) on port **8766**.
+
 ## Quick start
 
 ```bash
@@ -40,19 +42,17 @@ Conditions without generated audio show as **Not generated** or **Audio missing*
 
 Independent `<audio>` players per cell (no synced playback).
 
-## Preset sweep viewer
+## Sweep listening tests
 
-Compare A1 raw stems against SA3 preset variants from `experiments/preset_sweep/`:
+Structured evaluation for patch and preset sweeps:
 
 ```bash
-uv run python -m synthesis.listening.serve --preset-sweep
+uv run python -m experiments.listening.serve
 ```
 
-Open [http://127.0.0.1:8765/preset-sweep](http://127.0.0.1:8765/preset-sweep).
+Open [http://127.0.0.1:8766](http://127.0.0.1:8766).
 
-The preset-sweep API is also enabled automatically when `manifest.csv` exists under `experiments/preset_sweep/output/`.
-
-## API (ablation)
+## API
 
 | Endpoint | Description |
 |----------|-------------|
@@ -60,16 +60,6 @@ The preset-sweep API is also enabled automatically when `manifest.csv` exists un
 | `GET /api/songs` | Song list with metadata |
 | `GET /api/songs/{song_id}` | Full detail with stem/mixture URLs |
 | `GET /audio/{condition}/{song_id}/{filename}` | Stream audio file |
-
-## API (preset sweep)
-
-| Endpoint | Description |
-|----------|-------------|
-| `GET /api/preset-sweep/meta` | Variant list and availability |
-| `GET /api/preset-sweep/stems` | Probe stem list |
-| `GET /api/preset-sweep/stems/{stem_id}` | A1 reference + variant audio URLs |
-| `GET /audio/preset-sweep/reference/{stem_id}/{filename}` | Raw A1 stem |
-| `GET /audio/preset-sweep/variant/{variant_id}/{song_id}/{filename}` | Sweep variant stem |
 
 `song_id` is the relative path under `data/` (e.g. `7/19/QmPfjDmFbF97N6T6ge4PFFiTQ9VxAFsqLPArCRoLuaTGb1`).
 

@@ -1,0 +1,157 @@
+# Shared probe stems for patch_sweep and preset_sweep.
+# Target: 3 stems per listening category (see experiments/probe_stems.py).
+# Each stem must use a MIDI program that matches its category (validated at sweep startup).
+# song_id is the path under data/ (same as listening viewer song ids).
+
+stems:
+  # --- piano (3) ---
+  - id: piano_world
+    category: piano
+    song_id: "6/42/QmNsT1iBJYg3jRACwiHKmEqAfCJXnAUxwPJyzf7WN8kERU"
+    track: 0
+    note: "worldmusic piano"
+
+  - id: piano_classical
+    category: piano
+    song_id: "17/2/QmZ3vfJw1vS5Me9KDoUYSm7RYU4FYSAwioiFHbtogRihgd"
+    track: 0
+    note: "classical piano (GM 0)"
+
+  - id: piano_short
+    category: piano
+    song_id: "0/13/QmacxZgjkothdxzvK8VtJdkfk14TgBDEM43i7GAbWE1rHJ"
+    track: 0
+    note: "short piano from ablation sample"
+
+  # --- drums (3) ---
+  - id: drumset
+    category: drums
+    song_id: "13/29/QmVKzvGJrK1w5z2E3bFnvbGf7JZarW3tp2g1AJpV96MnYz"
+    track: 4
+    note: "drumset, timing-critical"
+
+  - id: drums_kit
+    category: drums
+    song_id: "1/14/QmbCfKA5maYfdXmX6SwhYNSxPKxvkcfifuQ9qVXscFPrK2"
+    track: 5
+    note: "drumset, pop arrangement"
+
+  - id: drums_band
+    category: drums
+    song_id: "0/38/QmaqGkKCErCg3MGwBC2D4FKDfLCui8UobqCnVEEfs7v8gF"
+    track: 12
+    note: "drumset, large ensemble"
+
+  # --- strings (3) ---
+  - id: violin
+    category: strings
+    song_id: "14/56/QmWzkNwfamBpqkdr3piDGZ2Lgy1UosNWibKZX2XjgUE11B"
+    track: 0
+    note: "solo violin"
+
+  - id: violin_2
+    category: strings
+    song_id: "11/47/QmTUt6qaauHdjT6UsH1BC7RfXzf82YTE9QkdocCWezFK6i"
+    track: 0
+    note: "solo violin, different song"
+
+  - id: cello
+    category: strings
+    song_id: "14/23/QmWh6w8fwwY2kWAyEquVoZyHuMDGPYHvgQLqDo99xY56CC"
+    track: 6
+    note: "solo violoncello"
+
+  # --- wind (3) ---
+  - id: flute
+    category: wind
+    song_id: "8/17/QmQeddaTKVBgXMyx3Ur8AFwtUzdBLx7ip56U93choeE1D8"
+    track: 0
+    note: "solo flute"
+
+  - id: alto_sax
+    category: wind
+    song_id: "3/39/QmdQDAcN8FSrW9akc4Fo2qsz7xgoZn1we1YD9msv6ZmBQB"
+    track: 6
+    note: "alto saxophone"
+
+  - id: bassoon
+    category: wind
+    song_id: "13/32/QmVMoHpFtj5ULj2C9knJDSyPx33isyAQbiuCnCEEzsU426"
+    track: 1
+    note: "solo bassoon"
+
+  # --- voice (3) ---
+  - id: soprano
+    category: voice
+    song_id: "7/57/QmPZAaMBDXyvTMff7YUkjQ7QtmDYXDtBsCLrsoYhFWTLNX"
+    track: 0
+    note: "soprano voice"
+
+  - id: voice
+    category: voice
+    song_id: "11/56/QmTzCDtBSNtWBAVaYvM7MVtpQQZ9WdX4RM8ht1Rwk67GA2"
+    track: 0
+    note: "voice stem"
+
+  - id: choir_soprano
+    category: voice
+    song_id: "10/24/QmSHtwDNitZEyTm7A4bvsTJ4yZNjnjCo2ev3expp7b4pLS"
+    track: 2
+    note: "choral soprano (GM 52 Choir Aahs)"
+
+  # --- mallet (3) ---
+  - id: marimba
+    category: mallet
+    song_id: "3/41/QmdRcdA7U2JFgLUBvFJeweYwuSdKV58ULou8z18YaCzJwu"
+    track: 0
+    note: "marimba"
+
+  - id: vibraphone
+    category: mallet
+    song_id: "3/41/QmdRcdA7U2JFgLUBvFJeweYwuSdKV58ULou8z18YaCzJwu"
+    track: 3
+    note: "vibraphone"
+
+  - id: glockenspiel
+    category: mallet
+    song_id: "1/14/QmbCfKA5maYfdXmX6SwhYNSxPKxvkcfifuQ9qVXscFPrK2"
+    track: 0
+    note: "glockenspiel, different song"
+
+  # --- organ (3) ---
+  - id: organ
+    category: organ
+    song_id: "17/15/QmZddxhx5uth5CNzY9ji6VWUQ3eQ6aMpcW6yUbnfKZsh4K"
+    track: 0
+    note: "organ (GM 22)"
+
+  - id: organ_2
+    category: organ
+    song_id: "13/0/QmV1LNhFQFeyGtSvYWgaihfCUqwCraAmHmuxM7f2iwREcn"
+    track: 0
+    note: "organ, hymn-style"
+
+  - id: organ_synth
+    category: organ
+    song_id: "14/57/QmWZtkEnjrLvY44L7MGvEEYAP5AzBjsPUnbf7ahSy9r4Kg"
+    track: 3
+    note: "organ/synth hybrid"
+
+  # --- polyphonic (3) ---
+  - id: poly_flute
+    category: polyphonic
+    song_id: "10/18/QmSEZYnF2u3d7jnGyYmjjtsgeUdNBq4Si7EJbHswDYbo1B"
+    track: 0
+    note: "flute in multi-stem arrangement"
+
+  - id: poly_piano
+    category: polyphonic
+    song_id: "10/18/QmSEZYnF2u3d7jnGyYmjjtsgeUdNBq4Si7EJbHswDYbo1B"
+    track: 1
+    note: "piano in multi-stem arrangement"
+
+  - id: poly_mix
+    category: polyphonic
+    song_id: "10/18/QmSEZYnF2u3d7jnGyYmjjtsgeUdNBq4Si7EJbHswDYbo1B"
+    track: 3
+    note: "violins in multi-stem arrangement (GM 44)"

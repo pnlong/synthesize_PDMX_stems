@@ -1,6 +1,6 @@
 # Per-category SA3 realify presets.
 # default is merged first; matching category overrides apply on top.
-# Tune categories after preset-sweep listening (experiments/preset_sweep/).
+# Tune categories after sweep listening test (experiments/listening/).
 
 default:
   init_noise_level: 0.45

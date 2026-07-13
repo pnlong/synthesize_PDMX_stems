@@ -1,0 +1,27 @@
+# Phase 1: audition candidate soundfonts (dry, no program remap).
+phase: phase1_soundfonts
+fx_profile: dry
+pool_id: null
+
+variants:
+  - id: sgm_v2
+    soundfont_id: sgm_v2
+    note: "SGM-V2.01 — current production default"
+  - id: generaluser
+    soundfont_id: generaluser
+    note: "GeneralUser GS — lightweight musical GM"
+  - id: fluidr3
+    soundfont_id: fluidr3
+    note: "FluidR3 — standard GM reference"
+  - id: arachno
+    soundfont_id: arachno
+    note: "Arachno — strings / brass / bass"
+  - id: airfont_380
+    soundfont_id: airfont_380
+    note: "Airfont 380 — bright winds / piano"
+  - id: realfont
+    soundfont_id: realfont
+    note: "RealFont — balanced, punchy drums"
+  - id: timgm6mb
+    soundfont_id: timgm6mb
+    note: "TimGM6mb — Flakh2100 sanity baseline"

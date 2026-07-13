@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sweep Listening Test</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/test.css">
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div>
+        <h1 id="title">Sweep Listening Test</h1>
+        <p id="progress" class="progress-text"></p>
+        <p id="save-status" class="save-status hidden"></p>
+      </div>
+      <div class="topbar-actions">
+        <a href="/" class="link-btn">Home</a>
+        <button id="export-btn" type="button" disabled>Export responses</button>
+        <button id="save-btn" type="button" disabled>Save to server</button>
+      </div>
+    </header>
+
+    <div id="loading" class="loading">Loading…</div>
+    <div id="complete" class="complete hidden">
+      <h2>Test complete</h2>
+      <p id="complete-message">Responses saved on the server.</p>
+      <p id="complete-path" class="meta"></p>
+      <p class="hint">Use this file with <code>record_winners</code> or <code>listening.aggregate</code>. Browser download is optional backup only.</p>
+      <button id="complete-download-btn" type="button">Download backup copy</button>
+    </div>
+
+    <main id="test-panel" class="test-panel hidden">
+      <section class="stem-info">
+        <h2 id="stem-title"></h2>
+        <p id="stem-meta" class="meta"></p>
+        <p id="stem-note" class="note"></p>
+      </section>
+
+      <section class="reference-section">
+        <h3 id="reference-label">Reference</h3>
+        <div id="reference-audio" class="audio-slot"></div>
+      </section>
+
+      <section class="samples-section">
+        <h3>Rate each sample</h3>
+        <p id="rubric-hint" class="rubric-hint"></p>
+        <div id="samples" class="samples"></div>
+      </section>
+
+      <footer class="nav-footer">
+        <button id="prev-btn" type="button">← Previous</button>
+        <button id="next-btn" type="button">Next stem →</button>
+      </footer>
+    </main>
+  </div>
+  <script src="/static/test.js"></script>
+</body>
+</html>

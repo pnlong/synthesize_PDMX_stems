@@ -25,9 +25,9 @@ Unmatched stems use `default` only.
 
 ## Tuning workflow
 
-1. Run [`experiments/preset_sweep/`](../../../experiments/preset_sweep/)
-2. Listen via `uv run python -m synthesis.listening.serve --preset-sweep`
-3. Add overrides under `categories:` for categories that need different settings
+1. Run phased sweep via [`experiments/preset_sweep/GUIDE.md`](../../../experiments/preset_sweep/GUIDE.md)
+2. Listen via `uv run python -m experiments.listening.serve --sweep preset --preset-sweep-dir <phase_dir>`
+3. Lock with `uv run python -m experiments.preset_sweep.lock` (updates `categories.yaml`)
 
 Example:
 

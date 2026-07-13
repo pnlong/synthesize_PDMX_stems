@@ -1,8 +1,18 @@
 """Shared configuration for the sPDMX pipeline."""
 
+from pathlib import Path
+
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+
 PDMX_FILEPATH = "/deepfreeze/pnlong/PDMX/PDMX/PDMX.csv"
 OUTPUT_DIR = "/deepfreeze/pnlong/SPDMX"
-SOUNDFONT_PATH = "/data3/pnlong/soundfonts/SGM-V2.01.sf2"
+
+# Local soundfont library (symlinked at repo root via shared.setup_symlinks).
+SOUNDFONT_DIR = "/data3/pnlong/soundfonts"
+_REPO_SOUNDFONTS_SYMLINK = _REPO_ROOT / "soundfonts"
+if _REPO_SOUNDFONTS_SYMLINK.is_dir():
+    SOUNDFONT_DIR = str(_REPO_SOUNDFONTS_SYMLINK)
+SOUNDFONT_PATH = f"{SOUNDFONT_DIR}/SGM-V2.01.sf2"
 
 CHUNK_SIZE = 1
 NA_STRING = "NA"
@@ -28,6 +38,7 @@ SONG_LENGTHS_DIR_NAME = "song_lengths"
 # {OUTPUT_DIR}/dev/experiments/ — experiment outputs (preset sweep, etc.)
 EXPERIMENTS_DIR_NAME = "experiments"
 PRESET_SWEEP_DIR_NAME = "preset_sweep"
+PATCH_SWEEP_DIR_NAME = "patch_sweep"
 
 # {OUTPUT_DIR}/SPDMX/ — assembled sPDMX dataset (via build_spdmx.py, not implemented yet)
 SPDMX_DATASET_DIR_NAME = "SPDMX"

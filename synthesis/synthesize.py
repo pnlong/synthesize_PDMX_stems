@@ -24,6 +24,7 @@ from shared.config import (
     RENDER_MODE_BASIC,
     RENDER_MODE_SLAKH,
     SONGS_TABLE_COLUMNS,
+    SOUNDFONT_DIR,
     STEMS_FILE_NAME,
     STEMS_TABLE_COLUMNS,
 )
@@ -92,6 +93,7 @@ def synthesize_song_at_index(
     if need_to_synthesize:
         temp_dir = tempfile.TemporaryDirectory()
         track_paths = [f"{temp_dir.name}/{j}.mid" for j in range(len(midi.tracks))]
+        track_render_meta: list[dict] = []
 
     for j, track in enumerate(midi.tracks):
         if need_to_synthesize:
@@ -124,13 +126,46 @@ def synthesize_song_at_index(
 
         if need_to_synthesize:
             track_midi.tracks.append(track_midi_track)
+            slakh_cfg: dict = {}
             if args.render_mode == RENDER_MODE_SLAKH:
-                from synthesis.patches import apply_patch_to_midi_track, select_patch
+                import random
+
+                from synthesis.patches import (
+                    apply_patch_to_midi_track,
+                    patch_group_key,
+                    patch_seed,
+                    select_patch,
+                    slakh_render_for_track,
+                )
+
+                slakh_cfg = slakh_render_for_track(
+                    program=program,
+                    is_drum=is_drum,
+                    track_name=track_name,
+                )
+                pool_id = slakh_cfg.get("pool_id")
+                rng = None
+                if pool_id:
+                    group = patch_group_key(program, is_drum)
+                    rng = random.Random(
+                        patch_seed(args.sample_seed, path_output, group)
+                    )
                 apply_patch_to_midi_track(
                     track_midi_track,
-                    select_patch(program=program, is_drum=is_drum),
+                    select_patch(
+                        program=program,
+                        is_drum=is_drum,
+                        pool_id=pool_id,
+                        category=slakh_cfg.get("category"),
+                        rng=rng,
+                    ),
                 )
             track_midi.save(track_paths[j])
+            track_render_meta.append({
+                "soundfont_filepath": args.soundfont_filepath,
+                "fx_profile": None,
+                **slakh_cfg,
+            })
 
         stem_rows.append(dict(zip(STEMS_TABLE_COLUMNS, (
             path_output, j, program, is_drum,
@@ -143,7 +178,16 @@ def synthesize_song_at_index(
     if need_to_synthesize:
         waveforms = []
         for j, track_path in enumerate(track_paths):
-            waveform = get_waveform_tensor(track_path, args.soundfont_filepath)
+            meta = track_render_meta[j]
+            soundfont_filepath = meta.get("soundfont_filepath") or args.soundfont_filepath
+            if meta.get("soundfont"):
+                soundfont_filepath = str(Path(SOUNDFONT_DIR) / meta["soundfont"])
+            fx_profile = meta.get("fx_profile")
+            waveform = get_waveform_tensor(
+                track_path,
+                soundfont_filepath,
+                fx_profile=fx_profile,
+            )
             waveforms.append(waveform)
             remove(track_path)
 

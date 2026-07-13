@@ -1,0 +1,15 @@
+# Patch pools (phase 3). Prefer:
+#   uv run python -m experiments.patch_sweep.sweep --phase phase3_pools
+#
+# See grids/phase3_pools.yaml and GUIDE.md.
+
+variants:
+  - id: pool_v1_conservative
+    pool_id: pool_v1_conservative
+    note: "2–3 auditioned programs per GM class"
+  - id: pool_v2_diverse
+    pool_id: pool_v2_diverse
+    note: "5–8 programs per GM class"
+  - id: pool_v3_slakh_like
+    pool_id: pool_v3_slakh_like
+    note: "Broader Slakh-inspired class mapping"

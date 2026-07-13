@@ -35,17 +35,25 @@ def truncate_waveform(
     return waveform[:, :max_samples]
 
 
-def get_waveform_tensor(midi_path: str, soundfont_filepath: str) -> torch.Tensor:
+def get_waveform_tensor(
+    midi_path: str,
+    soundfont_filepath: str,
+    *,
+    fx_profile: str | None = None,
+) -> torch.Tensor:
     """Synthesize a MIDI file to a float waveform tensor (channels, samples).
 
     fluidsynth output is capped at MAX_N_SAMPLES_IN_STEM so pathological MIDIs
     (missing note-offs, extreme length) cannot allocate multi-gigabyte buffers.
     """
+    from synthesis.fx import apply_post_fx, fluidsynth_fx_args
+
     proc = subprocess.Popen(
         args=[
             "fluidsynth",
             "-T", "raw",
             "-F-", "-r", str(SAMPLE_RATE), "-g", str(GAIN),
+            *fluidsynth_fx_args(fx_profile),
             "-i", soundfont_filepath,
             midi_path,
         ],
@@ -71,7 +79,8 @@ def get_waveform_tensor(midi_path: str, soundfont_filepath: str) -> torch.Tensor
     stereo = np.frombuffer(raw[: n_frames * frame_bytes], dtype=np.int16).reshape(-1, 2)
     scale = np.float32(1.0 / np.iinfo(np.int16).max)
     waveform = torch.from_numpy((stereo.astype(np.float32) * scale).T.copy())
-    return ensure_stem_channels(truncate_waveform(waveform))
+    waveform = ensure_stem_channels(truncate_waveform(waveform))
+    return apply_post_fx(waveform, fx_profile)
 
 
 def to_mono_numpy(waveform: torch.Tensor) -> np.ndarray:

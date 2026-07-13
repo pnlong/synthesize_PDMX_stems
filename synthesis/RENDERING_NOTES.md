@@ -167,6 +167,16 @@ synthesis/
 
 Same `ABLATION_SAMPLE_SEED` ensures basic and slakh render the same songs.
 
+### Slakh mode (`--render-mode slakh`)
+
+Slakh-style rendering adds **per-track patch variety** on top of basic Fluidsynth:
+
+- Each listening category (piano, strings, wind, …) can use a different soundfont, FX profile, and GM program pool (from patch sweep tuning → `winners_locked.yaml`).
+- Within a song, each track randomly draws a program from its category's pool (`select_patch` in [`patches.py`](patches.py)). Tracks sharing the same GM instrument class in a song get the **same** patch; the draw varies across songs (seeded by `(sample_seed, song_path, gm_class)`).
+- Pools are defined in `PATCH_POOLS` (`pool_v1_conservative`, `pool_v2_diverse`, `pool_v3_slakh_like`). Until winners are locked, slakh mode passes MIDI programs through unchanged (same as basic).
+
+See [`experiments/TUNING.md`](../experiments/TUNING.md) for the phased tuning workflow (soundfonts → FX → pools).
+
 ## Listening test
 
 Subjective comparison across A1–B2 once all four dirs exist. See prior hypotheses in git history / project notes.
