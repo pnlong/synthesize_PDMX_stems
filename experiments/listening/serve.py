@@ -11,9 +11,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
-from experiments.listening.catalog import SweepCatalog, default_sweep_dir
+from experiments.listening.catalog import SweepCatalog, default_sweep_dir, resolve_sweep_catalog_dir
 from experiments.listening.json_util import json_safe
-from experiments.listening.session import RUBRICS, stem_order, storage_key
+from experiments.listening.session import RUBRICS, rubric_for_catalog, stem_order, storage_key
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
@@ -78,6 +78,10 @@ class SweepListeningHandler(BaseHTTPRequestHandler):
             self._serve_static_file(STATIC_DIR / "test.html")
             return
 
+        if path in ("/verify", "/verify.html"):
+            self._serve_static_file(STATIC_DIR / "verify.html")
+            return
+
         if path.startswith("/api/"):
             self._handle_api(path, query)
             return
@@ -114,12 +118,52 @@ class SweepListeningHandler(BaseHTTPRequestHandler):
             self._send_error(HTTPStatus.BAD_REQUEST, "Invalid JSON body")
             return
 
+        if payload.get("mode") == "verification":
+            self._save_verification(sweep_type, payload)
+            return
+
         checkpoint = bool(payload.pop("checkpoint", False))
         if checkpoint:
             out_path = catalog.session_responses_path()
         else:
             timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
             out_path = catalog.responses_dir() / f"responses_{timestamp}.json"
+        out_path.write_text(json.dumps(json_safe(payload), indent=2))
+        self._send_json({"saved": str(out_path), "checkpoint": checkpoint})
+
+    def _save_verification(self, sweep_type: str, payload: dict) -> None:
+        from experiments.listening.final_verify import final_catalog
+        from experiments.listening.verification import (
+            validate_verification,
+            verification_in_progress_path,
+        )
+
+        source_responses = payload.get("source_responses")
+        if not source_responses:
+            self._send_error(HTTPStatus.BAD_REQUEST, "Missing source_responses")
+            return
+
+        try:
+            catalog, _ = final_catalog(sweep_type)
+        except RuntimeError as exc:
+            self._send_error(HTTPStatus.BAD_REQUEST, str(exc))
+            return
+
+        errors = validate_verification(payload)
+        checkpoint = bool(payload.get("checkpoint", False))
+        if not checkpoint and errors:
+            self._send_error(
+                HTTPStatus.BAD_REQUEST,
+                "; ".join(errors),
+            )
+            return
+
+        if checkpoint:
+            out_path = verification_in_progress_path(catalog, source_responses)
+        else:
+            timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+            safe = source_responses.replace(".json", "")
+            out_path = catalog.responses_dir() / f"verification_final_{safe}_{timestamp}.json"
         out_path.write_text(json.dumps(json_safe(payload), indent=2))
         self._send_json({"saved": str(out_path), "checkpoint": checkpoint})
 
@@ -149,7 +193,7 @@ class SweepListeningHandler(BaseHTTPRequestHandler):
                 "available": catalog.available(),
                 "manifest_id": catalog.manifest_id(),
                 "storage_key": storage_key(sweep_type, catalog.manifest_id()),
-                "rubric": RUBRICS[sweep_type],
+                "rubric": rubric_for_catalog(catalog),
                 "variants": catalog.variants(),
                 "stems": catalog.list_stems(),
                 "stem_order": stem_order(stem_ids, session_seed),
@@ -184,7 +228,212 @@ class SweepListeningHandler(BaseHTTPRequestHandler):
             self._send_json(detail)
             return
 
+        if path.startswith(f"/api/{sweep_type}/verify/"):
+            self._handle_verify_api(sweep_type, catalog, path, query)
+            return
+
         self._send_error(HTTPStatus.NOT_FOUND, "Not found")
+
+    def _handle_verify_api(
+        self,
+        sweep_type: str,
+        catalog: SweepCatalog,
+        path: str,
+        query: dict,
+    ) -> None:
+        from experiments.listening.aggregate import load_responses
+        from experiments.listening.final_verify import (
+            composed_config,
+            final_catalog,
+            readiness_errors,
+            winners_path_for,
+        )
+        from experiments.listening.verification import (
+            PRESET_VERIFY_SOURCE,
+            build_category_verification,
+            build_patch_shortlist_verification_meta,
+            build_preset_realify_verification_meta,
+            build_verification_meta,
+            list_response_files,
+            resolve_responses_path,
+            verification_in_progress_path,
+        )
+
+        errors = readiness_errors(sweep_type)
+        if errors:
+            self._send_error(
+                HTTPStatus.BAD_REQUEST,
+                "Final verification requires all tuning phases complete: "
+                + "; ".join(errors),
+            )
+            return
+
+        try:
+            verify_catalog, verify_phase = final_catalog(sweep_type)
+        except RuntimeError as exc:
+            self._send_error(HTTPStatus.BAD_REQUEST, str(exc))
+            return
+
+        config_fn = lambda category, variant_id: composed_config(
+            sweep_type, category, variant_id
+        )
+        winners_path = winners_path_for(sweep_type)
+
+        if path == f"/api/{sweep_type}/verify/responses":
+            if sweep_type == "preset":
+                self._send_json({"files": [], "source": PRESET_VERIFY_SOURCE})
+            else:
+                self._send_json({"files": list_response_files(verify_catalog)})
+            return
+
+        responses_name = query.get("responses", [""])[0]
+        if sweep_type == "preset":
+            responses_name = responses_name or PRESET_VERIFY_SOURCE
+        elif not responses_name:
+            self._send_error(HTTPStatus.BAD_REQUEST, "Missing responses query param")
+            return
+
+        use_preset_winners = (
+            sweep_type == "preset" and responses_name == PRESET_VERIFY_SOURCE
+        )
+        if not use_preset_winners:
+            responses_path = resolve_responses_path(verify_catalog, responses_name)
+            if responses_path is None:
+                self._send_error(
+                    HTTPStatus.NOT_FOUND,
+                    f"Responses not found: {responses_name}",
+                )
+                return
+
+        if path == f"/api/{sweep_type}/verify/meta":
+            if sweep_type == "patch":
+                from experiments.patch_sweep.winners import phase_winners
+                from experiments.patch_sweep.config import PHASE1 as PATCH_PHASE1
+
+                responses = load_responses(responses_path)
+                shortlists = phase_winners(PATCH_PHASE1, winners_path)
+                meta = build_patch_shortlist_verification_meta(
+                    verify_catalog,
+                    responses,
+                    source_responses=responses_name,
+                    shortlists=shortlists,
+                    verification_phase=verify_phase,
+                )
+            elif use_preset_winners:
+                from experiments.listening.final_verify import final_phase_winners
+
+                meta = build_preset_realify_verification_meta(
+                    verify_catalog,
+                    category_winners=final_phase_winners(sweep_type, winners_path),
+                    source_responses=PRESET_VERIFY_SOURCE,
+                    composed_config_fn=config_fn,
+                    verification_phase=verify_phase,
+                )
+            else:
+                responses = load_responses(responses_path)
+                meta = build_verification_meta(
+                    verify_catalog,
+                    responses,
+                    source_responses=responses_name,
+                    composed_config_fn=config_fn,
+                    verification_phase=verify_phase,
+                )
+            self._send_json(meta)
+            return
+
+        if path == f"/api/{sweep_type}/verify/session":
+            session_path = verification_in_progress_path(verify_catalog, responses_name)
+            if session_path.is_file():
+                with open(session_path) as f:
+                    payload = json.load(f)
+            else:
+                payload = {"categories": []}
+            self._send_json(payload)
+            return
+
+        prefix = f"/api/{sweep_type}/verify/categories/"
+        if path.startswith(prefix):
+            category = path[len(prefix) :].strip("/")
+            if not category:
+                self._send_error(HTTPStatus.BAD_REQUEST, "Missing category")
+                return
+            variant_ids = query.get("variant_id", [])
+            if not variant_ids:
+                if sweep_type == "patch":
+                    from experiments.patch_sweep.winners import phase1_soundfont_ids
+
+                    variant_ids = phase1_soundfont_ids(category, winners_path)
+                elif use_preset_winners:
+                    from experiments.listening.final_verify import final_phase_winners
+
+                    locked = final_phase_winners(sweep_type, winners_path)
+                    if category in locked:
+                        variant_ids = [locked[category]]
+                else:
+                    responses = load_responses(responses_path)
+                    meta = build_verification_meta(
+                        verify_catalog,
+                        responses,
+                        source_responses=responses_name,
+                        composed_config_fn=config_fn,
+                        verification_phase=verify_phase,
+                    )
+                    for entry in meta.get("categories", []):
+                        if entry["category"] == category:
+                            variant_ids = [
+                                v["variant_id"]
+                                for v in entry.get("variants", [])
+                                if v.get("passed_filter")
+                            ]
+                            break
+            detail = build_category_verification(
+                verify_catalog,
+                category,
+                variant_ids,
+                composed_config_fn=config_fn,
+            )
+            if detail is None:
+                self._send_error(HTTPStatus.NOT_FOUND, f"Category not found: {category}")
+                return
+            self._send_json(detail)
+            return
+
+        self._send_error(HTTPStatus.NOT_FOUND, "Not found")
+
+    def _resolve_audio_path(
+        self,
+        sweep_type: str,
+        kind: str,
+        key: str,
+        filename: str,
+    ) -> Path | None:
+        catalog = self.catalogs.get(sweep_type)
+        if catalog is None:
+            return None
+
+        catalogs_to_try = [catalog]
+        try:
+            from experiments.listening.final_verify import final_catalog, readiness_errors
+
+            if not readiness_errors(sweep_type):
+                verify_catalog, _ = final_catalog(sweep_type)
+                if verify_catalog.sweep_dir != catalog.sweep_dir:
+                    if kind == "reference":
+                        catalogs_to_try = [verify_catalog, catalog]
+                    else:
+                        catalogs_to_try.append(verify_catalog)
+        except RuntimeError:
+            pass
+
+        for cat in catalogs_to_try:
+            if kind == "reference":
+                audio_path = cat.resolve_reference_audio(key, filename)
+            else:
+                variant_id, song_id = key.split("|", 1)
+                audio_path = cat.resolve_variant_audio(variant_id, song_id, filename)
+            if audio_path is not None:
+                return audio_path
+        return None
 
     def _serve_audio(self, path: str) -> None:
         parsed = parse_sweep_audio(path)
@@ -193,16 +442,7 @@ class SweepListeningHandler(BaseHTTPRequestHandler):
             return
 
         sweep_type, kind, key, filename = parsed
-        catalog = self.catalogs.get(sweep_type)
-        if catalog is None:
-            self._send_error(HTTPStatus.NOT_FOUND, "Sweep not configured")
-            return
-
-        if kind == "reference":
-            audio_path = catalog.resolve_reference_audio(key, filename)
-        else:
-            variant_id, song_id = key.split("|", 1)
-            audio_path = catalog.resolve_variant_audio(variant_id, song_id, filename)
+        audio_path = self._resolve_audio_path(sweep_type, kind, key, filename)
 
         if audio_path is None:
             self._send_error(HTTPStatus.NOT_FOUND, "Audio not found")
@@ -309,8 +549,14 @@ def main(args=None) -> None:
     }
 
     for sweep_type in sweep_types:
-        sweep_dir = dir_overrides[sweep_type] or default_sweep_dir(sweep_type)
-        if sweep_type == opts.sweep or (sweep_dir / "manifest.csv").is_file():
+        sweep_root = dir_overrides[sweep_type] or default_sweep_dir(sweep_type)
+        sweep_dir = resolve_sweep_catalog_dir(
+            sweep_type,
+            sweep_root,
+            prefer_verification_phase=True,
+        )
+        manifest_name = "manifest.csv"
+        if sweep_type == opts.sweep or (sweep_dir / manifest_name).is_file():
             catalogs[sweep_type] = SweepCatalog(sweep_type, sweep_dir)
 
     if not catalogs:
@@ -325,6 +571,7 @@ def main(args=None) -> None:
     for sweep_type, catalog in catalogs.items():
         print(f"  {sweep_type}: {catalog.sweep_dir} ({len(catalog.list_stems())} stems)")
     print(f"  Test UI: {url}/test")
+    print(f"  Verification UI: {url}/verify")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

@@ -8,7 +8,7 @@ Neither sweep picks one global winner. Probe stems in [`probe_stems.yaml`](probe
 
 | Sweep | What varies | Locked in production |
 |-------|-------------|----------------------|
-| **Patch** (Slakh) | Fluidsynth soundfont, GM program pools, FX | [`synthesis/patches.py`](../synthesis/patches.py) `PATCH_POOLS` |
+| **Patch** (Slakh) | Fluidsynth soundfont shortlists, FX | [`experiments/patch_sweep/winners_locked.yaml`](patch_sweep/winners_locked.yaml) → `SLAKH_CATEGORY_RENDER` |
 | **Preset** (SA3) | Phased: `init_noise_level` → prompt → diffusion | [`synthesis/realify/presets/categories.yaml`](../synthesis/realify/presets/categories.yaml) |
 
 Categories with multiple probe stems (3 per category) vote on the same winner via mean realism/content across stems.
@@ -36,7 +36,7 @@ Document decisions in each sweep’s `results_notes.md` as you go (winners, reje
 
 ### Blinded listening (all phases)
 
-Each phase uses the same **blinded** listening test at port **8766**. You never see soundfont names, FX settings, or pool IDs during rating — only **Sample A / B / C** in randomized order per stem.
+Each phase uses the same **blinded** listening test at port **8766**. You never see soundfont names or FX settings during rating — only **Sample A / B / C** in randomized order per stem.
 
 ```bash
 # After a phase sweep finishes:
@@ -61,10 +61,8 @@ uv run python -m experiments.listening.aggregate \
 
 **How winners are picked** (`aggregate.py`):
 
-1. Group ratings by **category** (piano, strings, wind, …) and **variant_id**
-2. Drop variants that fail a **content gate** (min stem content ≥ 3, mean ≥ 3.5) — avoids picking something that sounds “real” but changed the music
-3. Among survivors, pick highest **mean realism** (tie-break: mean content), averaged across **3 probe stems per category**
-4. All stems in a category vote together on one winner
+- **Phase 1 (noise):** drop variants with mean content **< 4.5**; among survivors, pick highest mean realism; ties → higher `init_noise_level`.
+- **Phase 2+ (prompt / diffusion):** content gate (min ≥ 3, mean ≥ 3.5) + highest mean realism.
 
 Variant IDs stay in the exported JSON for aggregation only; the UI shows blind labels.
 
@@ -72,11 +70,8 @@ Variant IDs stay in the exported JSON for aggregation only; the UI shows blind l
 |-------|---------------------|-----------|-------------------|
 | 1 — Soundfonts | `sgm_v2`, `generaluser`, … | A1 basic | `output/phase1_soundfonts/` |
 | 2 — FX | `fx_dry`, `fx_light`, `fx_warm` | A1 basic | `output/phase2_fx/` |
-| 3 — Pools | `pool_v1_conservative`, … | A1 basic | `output/phase3_pools/` |
 
-Phase 1 tip: content scores should be ~equal (same MIDI, different bank) — **realism** is the main signal. Phase 3: content may diverge slightly when programs change; keep the content gate.
-
-**Not yet wired:** dedicated sweep scripts/grids for phase 1 and 2 (soundfont + FX variants in manifest). Phase 3 reuses the existing patch sweep once pools are populated.
+Phase 1 tip: content scores should be ~equal (same MIDI, different bank) — **realism** is the main signal.
 
 ---
 
@@ -84,29 +79,25 @@ Phase 1 tip: content scores should be ~equal (same MIDI, different bank) — **r
 
 **Goal:** make `--render-mode slakh` audibly and meaningfully different from `basic`, approximating [Slakh2100](http://www.slakh.com/) stem diversity without Kontakt VSTs.
 
-### Slakh-style variety (two layers)
+### Slakh-style variety
 
-1. **Per listening category** (after tuning + lock) — each category gets its own soundfont, FX profile, and program pool (`winners_locked.yaml` → `SLAKH_CATEGORY_RENDER`).
-2. **Per track, within a song** — for each GM instrument class in a song (e.g. all string tracks), `select_patch()` randomly picks one GM program from that category's pool and reuses it for every track of that class **in that song**. Across songs the draw changes (seeded by `(sample_seed, song_path, gm_class)`).
+1. **Per listening category** (after tuning + lock) — each category gets a **soundfont shortlist** and FX profile (`winners_locked.yaml` → `SLAKH_CATEGORY_RENDER`).
+2. **Per song, within a category** — production slakh mode randomly picks one soundfont from the shortlist per (song, category), seeded by `(sample_seed, song_path, category)`. MIDI programs stay unchanged.
 
-Phase 3 of the patch sweep compares pool variants (`pool_v1_conservative`, `pool_v2_diverse`, `pool_v3_slakh_like`). Phase 1–2 intentionally disable pools (`pool_id: null`) so you judge soundfonts and FX on passthrough MIDI programs.
+Complete phases 1–2 and run `patch_sweep.lock` to enable B1 variety. Until `winners_locked.yaml` exists, `--render-mode slakh` behaves like basic.
 
-Until `winners_locked.yaml` exists, `--render-mode slakh` behaves like basic (no pool remapping). Complete phases 1–3 and run `patch_sweep.lock` to enable B1 variety.
+Slakh uses 187 professional sample patches in ~34 GM classes. Our Fluidsynth approximation:
 
-Slakh uses 187 professional sample patches in ~34 GM classes, with per-track random assignment and baked-in reverb/EQ. Our Fluidsynth approximation:
-
-- **Soundfont** — GM bank character (which samples Fluidsynth loads)
-- **Program pools** — class-matched GM program remapping ([`patches.py`](../synthesis/patches.py))
+- **Soundfont shortlists** — multiple GM banks per category for timbral diversity
 - **FX** — light reverb/EQ (post-fluidsynth or fluidsynth flags), applied after soundfont is chosen
 
 ### Staged tuning (do not skip ahead)
 
 | Phase | What we compare | Status |
 |-------|-----------------|--------|
-| **1 — Soundfonts** | 7 candidate banks, dry render, no program remap | **In progress** |
-| **2 — FX** | Light reverb/EQ profiles on 1–3 shortlisted soundfonts | Pending |
-| **3 — Program pools** | `pool_v1` / `pool_v2` / `pool_v3` GM program lists | Pending |
-| **4 — Production lock** | Per-category winners → B1 ablation (100 songs) | Pending |
+| **1 — Soundfonts** | 7 candidate banks, dry render, shortlist ≥4.1 mean rating | **In progress** |
+| **2 — FX** | Light reverb/EQ profiles on phase-1 shortlists | Pending |
+| **3 — Production lock** | Per-category shortlists + FX → B1 ablation (100 songs) | Pending |
 
 See [`patch_sweep/GUIDE.md`](patch_sweep/GUIDE.md) for the **step-by-step runbook** and [`patch_sweep/soundfonts.yaml`](patch_sweep/soundfonts.yaml) for the soundfont catalog.
 
@@ -140,7 +131,7 @@ See [`preset_sweep/GUIDE.md`](preset_sweep/GUIDE.md) for the **step-by-step runb
 | `steps` / `cfg_scale` | 3 (optional) | 3 diffusion profiles | noise + prompt from phases 1–2 |
 | SA3 model | — | — | `medium` (post-trained) |
 
-Phase 1: content scores should spread with noise — find realism peak within content gate. Phase 2: content gate strict. Phase 3: fine-tuning only if needed.
+Phase 1: drop noise levels with mean content < 4.5; pick highest realism among survivors. Phase 2: content gate strict, highest realism. Phase 3: fine-tuning only if needed.
 
 | Phase | `variant_id` encodes | Reference | Separate output dir |
 |-------|---------------------|-----------|-------------------|

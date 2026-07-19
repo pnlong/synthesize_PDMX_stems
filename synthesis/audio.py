@@ -192,7 +192,19 @@ def build_mixture(
     """Sum loudness-normalized stems and apply uniform anti-clip gain (Slakh-style)."""
     if not waveforms:
         raise ValueError("need at least one stem to build a mixture")
-    summed = torch.stack(waveforms).sum(dim=0)
+    max_length = max(w.shape[-1] for w in waveforms)
+    aligned = [
+        torch.nn.functional.pad(
+            waveform,
+            pad=(0, max_length - waveform.shape[-1]),
+            mode="constant",
+            value=0,
+        )
+        if waveform.shape[-1] < max_length
+        else waveform
+        for waveform in waveforms
+    ]
+    summed = torch.stack(aligned).sum(dim=0)
     audio = summed.numpy()
     peak = float(np.max(np.abs(audio))) if audio.size else 0.0
     if peak > peak_limit:
@@ -242,9 +254,13 @@ def stem_flac_is_valid(path: Path) -> bool:
 
 def stem_duration_seconds(path: Path) -> float:
     """Duration in seconds, capped at MAX_N_SAMPLES_IN_STEM."""
-    frames, sample_rate = _stem_frame_count(path)
-    frames = min(frames, MAX_N_SAMPLES_IN_STEM)
-    return frames / sample_rate
+    return stem_n_samples(path) / SAMPLE_RATE
+
+
+def stem_n_samples(path: Path) -> int:
+    """Sample count for a stem file, capped at MAX_N_SAMPLES_IN_STEM."""
+    frames, _ = _stem_frame_count(path)
+    return min(frames, MAX_N_SAMPLES_IN_STEM)
 
 
 def load_stem(path: Path) -> torch.Tensor:
@@ -335,7 +351,7 @@ def write_mixture_from_song_dir(
     stem_paths = [stem_path(song_dir, track, audio_format) for track in track_indices]
     if not all(stem_is_valid(path) for path in stem_paths):
         return None
-    waveforms = [load_stem(path) for path in stem_paths]
+    waveforms = pad_and_loudness_normalize([load_stem(path) for path in stem_paths])
     return write_mixture_from_waveforms(waveforms, song_dir, audio_format)
 
 

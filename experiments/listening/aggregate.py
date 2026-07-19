@@ -15,6 +15,8 @@ from experiments.paths import DEFAULT_PROBE_STEMS
 
 DEFAULT_CONTENT_THRESHOLD = 3.0
 DEFAULT_CONTENT_MEAN_THRESHOLD = 3.5
+DEFAULT_MEAN_RATING_THRESHOLD = 4.1
+DEFAULT_NOISE_CONTENT_THRESHOLD = 4.5
 
 
 def load_responses(path: Path) -> dict:
@@ -48,45 +50,223 @@ def aggregate_winners(
     if df.empty:
         return pd.DataFrame(), pd.DataFrame()
 
+    from experiments.listening.verification import auto_winners, filter_eligible, variant_stats
+
     per_stem = (
         df.groupby(["stem_id", "category", "variant_id"], dropna=False)
         .agg(content=("content", "mean"), realism=("realism", "mean"))
         .reset_index()
     )
 
-    variant_stats = (
-        per_stem.groupby(["category", "variant_id"], dropna=False)
-        .agg(
-            mean_content=("content", "mean"),
-            mean_realism=("realism", "mean"),
-            min_content=("content", "min"),
-            n_stems=("stem_id", "nunique"),
-        )
-        .reset_index()
+    stats = variant_stats(df)
+    eligible = filter_eligible(
+        stats,
+        content_threshold=content_threshold,
+        content_mean_threshold=content_mean_threshold,
     )
+    winners = auto_winners(eligible)
 
-    eligible = variant_stats[
-        (variant_stats["min_content"] >= content_threshold)
-        & (variant_stats["mean_content"] >= content_mean_threshold)
-    ]
-    if eligible.empty:
-        eligible = variant_stats.copy()
+    return per_stem, winners
+
+
+def _noise_level_from_variant_id(variant_id: str) -> float:
+    prefix = "noise"
+    if str(variant_id).startswith(prefix):
+        return float(str(variant_id)[len(prefix):])
+    return float("-inf")
+
+
+def noise_level_winners(
+    df: pd.DataFrame,
+    *,
+    content_threshold: float = DEFAULT_NOISE_CONTENT_THRESHOLD,
+) -> pd.DataFrame:
+    """Pick phase-1 noise winners: mean content >= threshold, then highest realism.
+
+    Tie-break equal realism by higher init_noise_level.
+    """
+    if df.empty:
+        return pd.DataFrame()
+
+    from experiments.listening.verification import variant_stats
+
+    stats = variant_stats(df)
+    if stats.empty:
+        return stats
+
+    stats = stats.copy()
+    stats["init_noise_level"] = stats["variant_id"].map(_noise_level_from_variant_id)
+
+    def _rank(group: pd.DataFrame) -> pd.DataFrame:
+        return group.sort_values(
+            ["mean_realism", "init_noise_level", "mean_content", "variant_id"],
+            ascending=[False, False, False, True],
+        )
 
     winners = []
-    for category, group in eligible.groupby("category", dropna=False):
-        best = group.sort_values(
-            ["mean_realism", "mean_content"],
-            ascending=[False, False],
-        ).iloc[0]
+    for category, group in stats.groupby("category", dropna=False):
+        passing = group[group["mean_content"] >= content_threshold]
+        ranked = _rank(passing if not passing.empty else group)
+        best = ranked.iloc[0]
         winners.append({
             "category": category,
             "variant_id": best["variant_id"],
             "mean_content": round(float(best["mean_content"]), 2),
             "mean_realism": round(float(best["mean_realism"]), 2),
             "n_stems": int(best["n_stems"]),
+            "passed_content_threshold": bool(best["mean_content"] >= content_threshold),
+        })
+    return pd.DataFrame(winners).sort_values("category")
+
+
+def noise_level_dataframe(
+    df: pd.DataFrame,
+    *,
+    content_threshold: float = DEFAULT_NOISE_CONTENT_THRESHOLD,
+) -> pd.DataFrame:
+    """Tabular phase-1 noise stats with threshold flag for reporting."""
+    from experiments.listening.verification import variant_stats
+
+    stats = variant_stats(df)
+    if stats.empty:
+        return stats
+
+    stats = stats.copy()
+    stats["passed_content_threshold"] = stats["mean_content"] >= content_threshold
+    return stats.sort_values(["category", "mean_realism"], ascending=[True, False])
+
+
+def noise_audit_candidates(
+    phase1_winners: dict[str, str],
+) -> dict[str, set[str]]:
+    """Per-category variant ids to compare in phase-1b (winner vs one-step-lower)."""
+    from experiments.preset_sweep.config import (
+        init_noise_level_from_variant_id,
+        lower_noise_level,
+        noise_variant_id,
+    )
+
+    candidates: dict[str, set[str]] = {}
+    for category, variant_id in phase1_winners.items():
+        winner_level = init_noise_level_from_variant_id(variant_id)
+        lower_level = lower_noise_level(winner_level)
+        candidates[str(category)] = {
+            noise_variant_id(winner_level),
+            noise_variant_id(lower_level),
+        }
+    return candidates
+
+
+def noise_audit_winners(
+    df: pd.DataFrame,
+    phase1_winners: dict[str, str],
+    *,
+    content_threshold: float = DEFAULT_NOISE_CONTENT_THRESHOLD,
+) -> tuple[pd.DataFrame, dict[str, str]]:
+    """Pick audit winners after production silence enforcement: content gate, then realism."""
+    if df.empty:
+        return pd.DataFrame(), {}
+
+    from experiments.listening.verification import variant_stats
+    from experiments.preset_sweep.config import init_noise_level_from_variant_id
+
+    stats = variant_stats(df)
+    if stats.empty:
+        return pd.DataFrame(), {}
+
+    stats = stats.copy()
+    stats["init_noise_level"] = stats["variant_id"].map(_noise_level_from_variant_id)
+    candidates = noise_audit_candidates(phase1_winners)
+
+    winners = []
+    revisions: dict[str, str] = {}
+    for category, group in stats.groupby("category", dropna=False):
+        category = str(category)
+        allowed = candidates.get(category)
+        if not allowed:
+            continue
+        subset = group[group["variant_id"].isin(allowed)]
+        if subset.empty:
+            continue
+        passing = subset[subset["mean_content"] >= content_threshold]
+        pool = passing if not passing.empty else subset
+        pool = pool.sort_values(
+            ["mean_realism", "init_noise_level", "mean_content", "variant_id"],
+            ascending=[False, True, False, True],
+        )
+        best = pool.iloc[0]
+        winners.append({
+            "category": category,
+            "variant_id": best["variant_id"],
+            "mean_content": round(float(best["mean_content"]), 2),
+            "mean_realism": round(float(best["mean_realism"]), 2),
+            "n_stems": int(best["n_stems"]),
+            "passed_content_threshold": bool(best["mean_content"] >= content_threshold),
         })
 
-    return per_stem, pd.DataFrame(winners).sort_values("category")
+        phase1_variant = phase1_winners.get(category)
+        if phase1_variant and best["variant_id"] != phase1_variant:
+            best_level = init_noise_level_from_variant_id(str(best["variant_id"]))
+            phase1_level = init_noise_level_from_variant_id(phase1_variant)
+            if best_level < phase1_level:
+                revisions[category] = str(best["variant_id"])
+
+    winners_df = pd.DataFrame(winners).sort_values("category") if winners else pd.DataFrame()
+    return winners_df, revisions
+
+
+def shortlist_variants(
+    df: pd.DataFrame,
+    *,
+    mean_rating_threshold: float = DEFAULT_MEAN_RATING_THRESHOLD,
+) -> dict[str, list[str]]:
+    """Return per-category variant shortlists with mean(content, realism) >= threshold."""
+    if df.empty:
+        return {}
+
+    from experiments.listening.verification import variant_stats
+
+    stats = variant_stats(df)
+    if stats.empty:
+        return {}
+
+    stats = stats.copy()
+    stats["mean_rating"] = (stats["mean_content"] + stats["mean_realism"]) / 2
+
+    shortlists: dict[str, list[str]] = {}
+    for category, group in stats.groupby("category", dropna=False):
+        passing = group[group["mean_rating"] >= mean_rating_threshold].sort_values(
+            ["mean_rating", "mean_realism", "mean_content"],
+            ascending=[False, False, False],
+        )
+        if passing.empty:
+            best = group.sort_values(
+                ["mean_rating", "mean_realism", "mean_content"],
+                ascending=[False, False, False],
+            ).iloc[0]
+            passing = group[group["variant_id"] == best["variant_id"]]
+
+        shortlists[str(category)] = [str(v) for v in passing["variant_id"].tolist()]
+
+    return shortlists
+
+
+def shortlist_dataframe(
+    df: pd.DataFrame,
+    *,
+    mean_rating_threshold: float = DEFAULT_MEAN_RATING_THRESHOLD,
+) -> pd.DataFrame:
+    """Tabular shortlist with stats for reporting."""
+    from experiments.listening.verification import variant_stats
+
+    stats = variant_stats(df)
+    if stats.empty:
+        return stats
+
+    stats = stats.copy()
+    stats["mean_rating"] = (stats["mean_content"] + stats["mean_realism"]) / 2
+    stats["shortlisted"] = stats["mean_rating"] >= mean_rating_threshold
+    return stats.sort_values(["category", "mean_rating"], ascending=[True, False])
 
 
 def preset_config_suggestions(

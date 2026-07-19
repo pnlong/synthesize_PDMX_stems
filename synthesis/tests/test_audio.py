@@ -172,6 +172,14 @@ def test_build_mixture_single_stem():
     np.testing.assert_allclose(to_mono_numpy(mixture), to_mono_numpy(w))
 
 
+def test_build_mixture_pads_mismatched_lengths():
+    w1 = torch.ones(1, 5) * 0.4
+    w2 = torch.ones(1, 4) * 0.4
+    mixture = build_mixture([w1, w2])
+    assert mixture.shape[-1] == 5
+    np.testing.assert_allclose(to_mono_numpy(mixture), [0.8, 0.8, 0.8, 0.8, 0.4], rtol=1e-5)
+
+
 def test_write_mixture_from_song_dir(tmp_path: Path):
     song_dir = tmp_path / "song"
     song_dir.mkdir()

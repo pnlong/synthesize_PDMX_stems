@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sweep Verification</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/verify.css">
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div>
+        <h1 id="title">Final sweep verification</h1>
+        <p id="progress" class="progress-text"></p>
+        <p id="save-status" class="save-status hidden"></p>
+      </div>
+      <div class="topbar-actions">
+        <a href="/" class="link-btn">Home</a>
+        <button id="save-btn" type="button" disabled>Save progress</button>
+      </div>
+    </header>
+
+    <div id="setup" class="setup">
+      <p id="setup-hint" class="hint">After tuning phases are complete, review candidates before <code>lock</code>.</p>
+      <label class="field" id="responses-field">
+        <span id="responses-label">Blind test responses</span>
+        <select id="responses-select"></select>
+      </label>
+      <button id="start-btn" type="button">Start verification</button>
+    </div>
+
+    <div id="loading" class="loading hidden">Loading…</div>
+
+    <div id="complete" class="complete hidden">
+      <h2>Verification complete</h2>
+      <p id="complete-message">Saved on the server.</p>
+      <p id="complete-path" class="meta"></p>
+      <p class="hint">Pass this file to <code>patch_sweep.lock --verification</code> or <code>preset_sweep.lock --verification</code>.</p>
+      <button id="complete-download-btn" type="button">Download backup copy</button>
+    </div>
+
+    <main id="verify-panel" class="verify-panel hidden">
+      <section class="category-nav">
+        <h2 id="category-title"></h2>
+        <p id="category-meta" class="meta"></p>
+      </section>
+
+      <section id="soundfont-nav-section" class="soundfont-nav-section hidden">
+        <h3>Soundfonts in shortlist</h3>
+        <div id="soundfont-tabs" class="soundfont-tabs"></div>
+        <div class="soundfont-controls">
+          <button id="prev-soundfont-btn" type="button">← Prev soundfont</button>
+          <span id="soundfont-position" class="meta"></span>
+          <button id="next-soundfont-btn" type="button">Next soundfont →</button>
+        </div>
+      </section>
+
+      <section id="current-soundfont-section" class="current-soundfont-section hidden">
+        <div id="current-soundfont-header" class="current-soundfont-header"></div>
+        <div id="compare-grid" class="compare-grid"></div>
+      </section>
+
+      <section id="preset-reference-section" class="reference-section">
+        <h3>Reference stems</h3>
+        <div id="stems" class="stem-list"></div>
+      </section>
+
+      <section id="preset-bypass-section" class="bypass-section hidden">
+        <div id="preset-bypass-controls"></div>
+      </section>
+
+      <section id="preset-variants-section" class="variants-section">
+        <h3>Filter-passing variants</h3>
+        <p class="hint">Check variants you approve. Pick one winner among approved.</p>
+        <div id="variants" class="variant-list"></div>
+      </section>
+
+      <footer class="nav-footer">
+        <button id="prev-btn" type="button">← Previous category</button>
+        <button id="next-btn" type="button">Next category →</button>
+      </footer>
+    </main>
+  </div>
+  <script src="/static/verify.js"></script>
+</body>
+</html>

@@ -23,6 +23,7 @@ from shared.config import (
     REALIFY_CHUNKED_DECODE,
     REALIFY_INIT_NOISE_LEVEL,
     REALIFY_MIN_GPU_FREE_GB,
+    REALIFY_SILENCE_ENFORCE,
     REALIFY_STEPS,
     SAMPLE_RATE,
     STEMS_FILE_NAME,
@@ -32,6 +33,7 @@ from synthesis.audio import (
     load_stem,
     stem_duration_seconds,
     stem_is_valid,
+    stem_n_samples,
     stem_path,
     write_audio,
     write_mixture_from_song_dir,
@@ -51,6 +53,7 @@ from synthesis.realify.preset_config import (
     preset_key,
     select_preset,
 )
+from synthesis.realify.silence import apply_silence_enforcement
 
 _REALIFY_MODEL = None
 _REALIFY_PRESETS: dict | None = None
@@ -102,6 +105,33 @@ def task_needs_chunking(task: dict, model) -> bool:
     return needs_chunking(int(task["duration"] * SAMPLE_RATE), model)
 
 
+def task_n_samples(task: dict) -> int | None:
+    if "n_samples" in task:
+        return int(task["n_samples"])
+    stem_path = task.get("stem_path")
+    if stem_path:
+        return stem_n_samples(Path(stem_path))
+    return None
+
+
+def _pad_waveforms_to_common_length(
+    waveforms: list[torch.Tensor],
+) -> tuple[list[torch.Tensor], list[int]]:
+    lengths = [int(w.shape[-1]) for w in waveforms]
+    max_len = max(lengths)
+    if len(set(lengths)) == 1:
+        return waveforms, lengths
+    padded = [
+        torch.nn.functional.pad(w, (0, max_len - w.shape[-1]))
+        for w in waveforms
+    ]
+    return padded, lengths
+
+
+def _trim_waveform(waveform: torch.Tensor, n_samples: int) -> torch.Tensor:
+    return waveform[..., :n_samples]
+
+
 def iter_realify_batches(
     tasks: list[dict],
     model,
@@ -128,7 +158,7 @@ def iter_realify_batches(
 
     for task in tasks:
         preset = task_preset(task, presets)
-        key = preset_key(preset)
+        key = (*preset_key(preset), task_n_samples(task))
         if task_needs_chunking(task, model):
             pending = flush()
             if pending is not None:
@@ -409,6 +439,7 @@ def realify_stem(
     duration_seconds: float,
     seed: int,
     audio_format: str = DEFAULT_AUDIO_FORMAT,
+    silence_enforce: bool = REALIFY_SILENCE_ENFORCE,
 ):
     waveform = load_stem(init_audio_path)
     total_samples = waveform.shape[-1]
@@ -425,7 +456,12 @@ def realify_stem(
             duration_seconds=duration_seconds,
             seed=seed,
         )
-        write_audio(_normalize_generated_audio(audio), output_path, audio_format)
+        audio = apply_silence_enforcement(
+            waveform,
+            _normalize_generated_audio(audio),
+            enabled=silence_enforce,
+        )
+        write_audio(audio, output_path, audio_format)
         return
 
     spans = plan_chunk_spans(total_samples, chunk_samples, overlap_samples)
@@ -448,6 +484,11 @@ def realify_stem(
         )
 
     stitched = stitch_chunk_outputs(chunks, spans, overlap_samples)
+    stitched = apply_silence_enforcement(
+        waveform,
+        stitched,
+        enabled=silence_enforce,
+    )
     write_audio(stitched, output_path, audio_format)
 
 
@@ -457,6 +498,7 @@ def realify_stems_batch(
     model,
     presets: dict,
     audio_format: str,
+    silence_enforce: bool = REALIFY_SILENCE_ENFORCE,
 ) -> None:
     """Realify multiple stems in one SA3 forward pass."""
     if len(tasks) == 1:
@@ -471,12 +513,14 @@ def realify_stems_batch(
             duration_seconds=task["duration"],
             seed=task["seed"],
             audio_format=audio_format,
+            silence_enforce=silence_enforce,
         )
         return
 
     rows = [pd.Series(task["row"]) for task in tasks]
     preset = task_preset(tasks[0], presets)
     waveforms = [load_stem(Path(task["stem_path"])) for task in tasks]
+    waveforms, original_lengths = _pad_waveforms_to_common_length(waveforms)
     audio = _generate_realify_audio(
         preset=preset,
         model=model,
@@ -486,8 +530,23 @@ def realify_stems_batch(
         seed=[task["seed"] for task in tasks],
         batch_size=len(tasks),
     )
-    for task, stem_audio in zip(tasks, _normalize_generated_batch(audio)):
-        write_audio(stem_audio, Path(task["out_path"]), audio_format)
+    for task, stem_audio, n_samples, reference in zip(
+        tasks,
+        _normalize_generated_batch(audio),
+        original_lengths,
+        waveforms,
+    ):
+        stem_audio = _trim_waveform(stem_audio, n_samples)
+        stem_audio = apply_silence_enforcement(
+            _trim_waveform(reference, n_samples),
+            stem_audio,
+            enabled=silence_enforce,
+        )
+        write_audio(
+            stem_audio,
+            Path(task["out_path"]),
+            audio_format,
+        )
 
 
 def process_realify_tasks(
@@ -499,6 +558,7 @@ def process_realify_tasks(
     batch_size: int,
     desc: str,
     show_progress: bool = True,
+    silence_enforce: bool = REALIFY_SILENCE_ENFORCE,
 ) -> None:
     batches = list(iter_realify_batches(tasks, model, presets, batch_size))
     progress = tqdm(total=len(tasks), desc=desc, unit="stem", disable=not show_progress)
@@ -509,6 +569,7 @@ def process_realify_tasks(
                 model=model,
                 presets=presets,
                 audio_format=audio_format,
+                silence_enforce=silence_enforce,
             )
             progress.update(len(batch))
             if torch.cuda.is_available():
@@ -536,13 +597,36 @@ def copy_metadata_tables(source_dir: Path, output_dir: Path):
             shutil.copy2(src, output_dir / name)
 
 
+def _stem_metadata_row(
+    captions_row: pd.Series,
+    stems_df: pd.DataFrame | None,
+) -> pd.Series:
+    if stems_df is None or stems_df.empty:
+        return captions_row
+    match = stems_df[
+        (stems_df["path"] == captions_row["path"])
+        & (stems_df["track"] == captions_row["track"])
+    ]
+    if match.empty:
+        return captions_row
+    merged = match.iloc[0].to_dict()
+    merged.update(captions_row.to_dict())
+    return pd.Series(merged)
+
+
 def build_realify_tasks(
     captions: pd.DataFrame,
     source_dir: Path,
     output_dir: Path,
     audio_format: str = DEFAULT_AUDIO_FORMAT,
     sample_seed: int = ABLATION_SAMPLE_SEED,
+    presets: dict | None = None,
 ) -> list[dict]:
+    from synthesis.realify.preset_config import realify_enabled, select_preset
+
+    stems_path = source_dir / "stems.csv"
+    stems_df = pd.read_csv(stems_path) if stems_path.is_file() else None
+
     tasks = []
     for _, row in captions.iterrows():
         song_dir = Path(row["path"])
@@ -555,11 +639,19 @@ def build_realify_tasks(
         source_stem_path = stem_path(song_dir, track, audio_format)
         if not stem_is_valid(source_stem_path):
             continue
+        if presets is not None:
+            meta_row = _stem_metadata_row(row, stems_df)
+            preset = select_preset(presets, meta_row)
+            if not realify_enabled(preset):
+                out_path.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(source_stem_path, out_path)
+                continue
         tasks.append({
             "row": row.to_dict(),
             "out_path": str(out_path),
             "stem_path": str(source_stem_path),
             "duration": stem_duration_seconds(source_stem_path),
+            "n_samples": stem_n_samples(source_stem_path),
             "audio_format": audio_format,
             "seed": stem_seed(sample_seed, str(song_dir), track),
         })
@@ -591,7 +683,12 @@ def _teardown_gpu_realify_worker() -> None:
         pass
 
 
-def _init_gpu_realify_worker(model_name: str, presets_filepath: str, batch_size: int):
+def _init_gpu_realify_worker(
+    model_name: str,
+    presets_filepath: str,
+    batch_size: int,
+    silence_enforce: bool,
+):
     global _REALIFY_MODEL, _REALIFY_PRESETS, _REALIFY_BATCH_SIZE, _REALIFY_WORKER_CONFIG
 
     configure_sa3_env()
@@ -599,6 +696,7 @@ def _init_gpu_realify_worker(model_name: str, presets_filepath: str, batch_size:
         "model_name": model_name,
         "presets_filepath": presets_filepath,
         "batch_size": batch_size,
+        "silence_enforce": silence_enforce,
     }
     _REALIFY_BATCH_SIZE = batch_size
     _REALIFY_MODEL = None
@@ -617,15 +715,31 @@ def _ensure_gpu_realify_worker(device_id: int) -> None:
 
     cfg = _REALIFY_WORKER_CONFIG
     torch.cuda.set_device(device_id)
+    print(
+        f"Realify worker: loading SA3 {cfg['model_name']} on cuda:{device_id}...",
+        flush=True,
+    )
     _REALIFY_BATCH_SIZE = cfg["batch_size"]
     _REALIFY_PRESETS = load_presets(Path(cfg["presets_filepath"]))
     _REALIFY_MODEL = load_model(cfg["model_name"], device_index=device_id)
+    print(f"Realify worker: cuda:{device_id} ready", flush=True)
 
 
-def _init_cpu_realify_worker(model_name: str, presets_filepath: str, batch_size: int):
-    global _REALIFY_MODEL, _REALIFY_PRESETS, _REALIFY_BATCH_SIZE
+def _init_cpu_realify_worker(
+    model_name: str,
+    presets_filepath: str,
+    batch_size: int,
+    silence_enforce: bool,
+):
+    global _REALIFY_MODEL, _REALIFY_PRESETS, _REALIFY_BATCH_SIZE, _REALIFY_WORKER_CONFIG
 
     configure_sa3_env()
+    _REALIFY_WORKER_CONFIG = {
+        "model_name": model_name,
+        "presets_filepath": presets_filepath,
+        "batch_size": batch_size,
+        "silence_enforce": silence_enforce,
+    }
     _REALIFY_BATCH_SIZE = batch_size
     _REALIFY_PRESETS = load_presets(Path(presets_filepath))
     _REALIFY_MODEL = load_model(model_name, device_index=None)
@@ -645,6 +759,7 @@ def _realify_gpu_worker_shard(args: tuple[int, list[dict]]) -> int:
             batch_size=_REALIFY_BATCH_SIZE,
             desc="Realifying stems",
             show_progress=False,
+            silence_enforce=_REALIFY_WORKER_CONFIG["silence_enforce"],
         )
         return len(shard)
     finally:
@@ -662,6 +777,7 @@ def _realify_worker_shard(shard: list[dict]) -> int:
         batch_size=_REALIFY_BATCH_SIZE,
         desc="Realifying stems",
         show_progress=False,
+        silence_enforce=_REALIFY_WORKER_CONFIG["silence_enforce"],
     )
     return len(shard)
 
@@ -673,6 +789,7 @@ def _run_realify_gpu(
     presets_filepath: Path,
     batch_size: int,
     audio_format: str,
+    silence_enforce: bool = REALIFY_SILENCE_ENFORCE,
 ) -> None:
     gpu_indices = select_realify_gpu_indices()
     if not gpu_indices:
@@ -706,6 +823,7 @@ def _run_realify_gpu(
             audio_format=audio_format,
             batch_size=batch_size,
             desc="Realifying stems (GPU)",
+            silence_enforce=silence_enforce,
         )
         return
 
@@ -719,6 +837,13 @@ def _run_realify_gpu(
         f"Realify: loading SA3 {model} on {n_workers} GPU worker(s): "
         + "; ".join(device_labels)
     )
+    shard_size = (len(tasks) + n_workers - 1) // n_workers
+    print(
+        f"Realify: {n_workers} workers × ~{shard_size} stems each; "
+        "progress bar updates per shard (not per stem). "
+        "Model load in workers is silent for a few minutes first.",
+        flush=True,
+    )
 
     ctx = multiprocessing.get_context("spawn")
     shards = [tasks[i::n_workers] for i in range(n_workers)]
@@ -729,7 +854,7 @@ def _run_realify_gpu(
     pool = ctx.Pool(
         processes=n_workers,
         initializer=_init_gpu_realify_worker,
-        initargs=(model, str(presets_filepath), batch_size),
+        initargs=(model, str(presets_filepath), batch_size, silence_enforce),
     )
     try:
         desc = f"Realifying stems ({n_workers} GPUs)"
@@ -748,11 +873,14 @@ def _run_realify_cpu(
     jobs: int,
     batch_size: int,
     audio_format: str,
+    silence_enforce: bool = REALIFY_SILENCE_ENFORCE,
 ) -> None:
     n_workers = min(max(jobs, 1), len(tasks))
 
     if n_workers == 1:
-        _init_cpu_realify_worker(model, str(presets_filepath), batch_size)
+        _init_cpu_realify_worker(
+            model, str(presets_filepath), batch_size, silence_enforce,
+        )
         process_realify_tasks(
             tasks,
             model=_REALIFY_MODEL,
@@ -760,6 +888,7 @@ def _run_realify_cpu(
             audio_format=audio_format,
             batch_size=batch_size,
             desc="Realifying stems (CPU)",
+            silence_enforce=silence_enforce,
         )
         return
 
@@ -767,7 +896,7 @@ def _run_realify_cpu(
     pool = multiprocessing.Pool(
         processes=n_workers,
         initializer=_init_cpu_realify_worker,
-        initargs=(model, str(presets_filepath), batch_size),
+        initargs=(model, str(presets_filepath), batch_size, silence_enforce),
     )
     try:
         with tqdm(
@@ -793,6 +922,7 @@ def run_realify(
     audio_format: str = DEFAULT_AUDIO_FORMAT,
     sample_seed: int = ABLATION_SAMPLE_SEED,
     reset: bool = False,
+    silence_enforce: bool = REALIFY_SILENCE_ENFORCE,
 ):
     """Realify stems on visible GPU(s) or CPU (small-music only)."""
     configure_sa3_env()
@@ -815,7 +945,12 @@ def run_realify(
         captions = captions.head(limit)
 
     tasks = build_realify_tasks(
-        captions, source_dir, output_dir, audio_format, sample_seed=sample_seed,
+        captions,
+        source_dir,
+        output_dir,
+        audio_format,
+        sample_seed=sample_seed,
+        presets=presets,
     )
     use_gpu = realify_uses_gpu(model) if tasks else False
     log_realify_plan(
@@ -840,6 +975,7 @@ def run_realify(
             presets_filepath=presets_filepath,
             batch_size=batch_size,
             audio_format=audio_format,
+            silence_enforce=silence_enforce,
         )
     else:
         _run_realify_cpu(
@@ -849,6 +985,7 @@ def run_realify(
             jobs=jobs,
             batch_size=batch_size,
             audio_format=audio_format,
+            silence_enforce=silence_enforce,
         )
 
     write_mixtures_for_dataset(
@@ -962,6 +1099,11 @@ def parse_args(args=None, namespace=None):
         action="store_true",
         help="Read/write MP3 stems and mixtures instead of FLAC (must match synthesis format).",
     )
+    parser.add_argument(
+        "--no-silence-enforce",
+        action="store_true",
+        help="Disable post-SA3 silence enforcement (reference vs realified energy gating).",
+    )
     return parser.parse_args(args=args, namespace=namespace)
 
 
@@ -980,6 +1122,7 @@ def main():
         batch_size=args.realify_batch_size,
         audio_format=synthesis_audio_format(args.mp3),
         reset=args.reset,
+        silence_enforce=not args.no_silence_enforce,
     )
 
 

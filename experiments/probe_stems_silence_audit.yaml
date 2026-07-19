@@ -1,0 +1,34 @@
+# Probe stems for silence-enforcement listening audits.
+# Pick sparse arrangements with audible rests (classical piano, strings, wind).
+# Use with preset_sweep or ablation listening: compare --no-silence-enforce vs default.
+
+stems:
+  - id: silence_piano_classical
+    category: piano
+    song_id: "17/2/QmZ3vfJw1vS5Me9KDoUYSm7RYU4FYSAwioiFHbtogRihgd"
+    track: 0
+    note: "classical piano — likely intra-stem rests"
+
+  - id: silence_piano_world
+    category: piano
+    song_id: "6/42/QmNsT1iBJYg3jRACwiHKmEqAfCJXnAUxwPJyzf7WN8kERU"
+    track: 0
+    note: "worldmusic piano"
+
+  - id: silence_strings
+    category: strings
+    song_id: "17/2/QmZ3vfJw1vS5Me9KDoUYSm7RYU4FYSAwioiFHbtogRihgd"
+    track: 2
+    note: "string section from classical arrangement"
+
+  - id: silence_wind
+    category: wind
+    song_id: "6/42/QmNsT1iBJYg3jRACwiHKmEqAfCJXnAUxwPJyzf7WN8kERU"
+    track: 1
+    note: "wind from ensemble"
+
+  - id: silence_polyphonic
+    category: polyphonic
+    song_id: "13/29/QmVKzvGJrK1w5z2E3bFnvbGf7JZarW3tp2g1AJpV96MnYz"
+    track: 0
+    note: "multi-instrument — sparse sections between parts"

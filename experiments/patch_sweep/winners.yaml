@@ -2,18 +2,47 @@ phases:
   phase1_soundfonts:
     completed: true
     winners:
-      drums: arachno
-      mallet: airfont_380
-      organ: arachno
-      piano: airfont_380
-      polyphonic: generaluser
-      strings: sgm_v2
-      voice: generaluser
-      wind: generaluser
-    recorded_at: '2026-07-13T16:24:15.415166+00:00'
+      drums:
+      - arachno
+      - realfont
+      - sgm_v2
+      - airfont_380
+      - generaluser
+      mallet:
+      - airfont_380
+      - fluidr3
+      - realfont
+      - generaluser
+      organ:
+      - arachno
+      - realfont
+      - sgm_v2
+      piano:
+      - airfont_380
+      - generaluser
+      polyphonic:
+      - airfont_380
+      - sgm_v2
+      strings:
+      - sgm_v2
+      - fluidr3
+      voice:
+      - generaluser
+      - airfont_380
+      - arachno
+      wind:
+      - generaluser
+      - airfont_380
+    recorded_at: '2026-07-13T23:01:27.123681+00:00'
   phase2_fx:
-    completed: false
-    winners: {}
-  phase3_pools:
-    completed: false
-    winners: {}
+    completed: true
+    winners:
+      drums: fx_dry
+      mallet: fx_dry
+      organ: fx_dry
+      piano: fx_dry
+      polyphonic: fx_dry
+      strings: fx_dry
+      voice: fx_warm
+      wind: fx_light
+    recorded_at: '2026-07-13T22:24:40.186613+00:00'

@@ -8,7 +8,14 @@ import pytest
 import soundfile as sf
 import yaml
 
-from experiments.preset_sweep.config import PHASE1, PHASE2, PHASE3, load_yaml
+from experiments.preset_sweep.config import (
+    PHASE1,
+    PHASE1B,
+    PHASE2,
+    PHASE3,
+    load_yaml,
+    resolve_silence_enforce,
+)
 from experiments.preset_sweep.sweep import (
     MANIFEST_COLUMNS,
     build_manifest_rows,
@@ -228,6 +235,10 @@ def test_run_preset_sweep_writes_manifest_without_gpu(tmp_path: Path, monkeypatc
         "experiments.preset_sweep.sweep._run_realify_cpu",
         lambda *args, **kwargs: None,
     )
+    monkeypatch.setattr(
+        "experiments.preset_sweep.sweep.validate_probe_stems",
+        lambda stems, **kwargs: None,
+    )
 
     manifest = run_preset_sweep(
         phase=PHASE1,
@@ -243,7 +254,78 @@ def test_run_preset_sweep_writes_manifest_without_gpu(tmp_path: Path, monkeypatc
     assert (output_dir / "phase1_noise" / "manifest.csv").is_file()
 
 
-def test_phase2_requires_phase1_winners(tmp_path: Path):
+def test_resolve_silence_enforce_defaults_phase1b_only():
+    assert resolve_silence_enforce(PHASE1, {}) is False
+    assert resolve_silence_enforce(PHASE1B, {}) is True
+    assert resolve_silence_enforce(PHASE2, {}) is False
+    assert resolve_silence_enforce(PHASE1, {"silence_enforce": True}) is True
+
+
+def test_run_phase1b_passes_silence_enforce(tmp_path: Path, monkeypatch):
+    source_dir, _ = _write_basic_dataset(tmp_path)
+    output_dir = tmp_path / "sweep"
+    winners_path = tmp_path / "winners.yaml"
+    record_phase_winners(PHASE1, {"piano": "noise0.45"}, path=winners_path)
+
+    grid_path = tmp_path / "phase1b.yaml"
+    grid_path.write_text(yaml.dump({
+        "prompt_variant": "current",
+        "steps": 8,
+        "cfg_scale": 1.0,
+        "silence_enforce": True,
+        "clip_seconds": 10,
+        "diverse_stems_per_category": 1,
+        "min_rms": 0.01,
+        "noise_levels": [0.25, 0.35, 0.45, 0.55, 0.65],
+        "variants": [],
+    }))
+
+    captured = {}
+
+    def fake_cpu(*args, **kwargs):
+        captured["silence_enforce"] = kwargs.get("silence_enforce")
+
+    def fake_prepare(**kwargs):
+        return source_dir, [{
+            "id": "piano_test",
+            "category": "piano",
+            "song_id": "0/13/QmTest",
+            "track": 0,
+        }], [
+            {"id": "noise0.35", "init_noise_level": 0.35},
+            {"id": "noise0.45", "init_noise_level": 0.45},
+        ]
+
+    monkeypatch.setattr(
+        "experiments.preset_sweep.sweep.realify_uses_gpu",
+        lambda model: False,
+    )
+    monkeypatch.setattr(
+        "experiments.preset_sweep.sweep._run_realify_cpu",
+        fake_cpu,
+    )
+    monkeypatch.setattr(
+        "experiments.preset_sweep.sweep.prepare_phase1b_audit",
+        fake_prepare,
+    )
+
+    probe_path = tmp_path / "probe.yaml"
+    probe_path.write_text(yaml.dump({"stems": []}))
+
+    run_preset_sweep(
+        phase=PHASE1B,
+        source_dir=source_dir,
+        output_dir=output_dir,
+        probe_stems_path=probe_path,
+        grid_path=grid_path,
+        winners_path=winners_path,
+        model="small-music",
+        jobs=1,
+    )
+    assert captured["silence_enforce"] is True
+
+
+def test_phase2_requires_phase1_and_phase1b_winners(tmp_path: Path):
     source_dir, _ = _write_basic_dataset(tmp_path)
     probe_path = tmp_path / "probe_stems.yaml"
     grid_path = tmp_path / "phase2_prompts.yaml"
@@ -258,6 +340,7 @@ def test_phase2_requires_phase1_winners(tmp_path: Path):
     grid_path.write_text(yaml.dump({
         "variants": [{"id": "current", "prompt_variant": "current"}],
     }))
+    winners_path = tmp_path / "winners.yaml"
 
     with pytest.raises(RuntimeError, match=PHASE1):
         run_preset_sweep(
@@ -266,7 +349,20 @@ def test_phase2_requires_phase1_winners(tmp_path: Path):
             output_dir=tmp_path / "sweep",
             probe_stems_path=probe_path,
             grid_path=grid_path,
-            winners_path=tmp_path / "winners.yaml",
+            winners_path=winners_path,
+            model="small-music",
+            jobs=1,
+        )
+
+    record_phase_winners(PHASE1, {"piano": "noise0.45"}, path=winners_path)
+    with pytest.raises(RuntimeError, match="phase1b_noise_audit"):
+        run_preset_sweep(
+            phase=PHASE2,
+            source_dir=source_dir,
+            output_dir=tmp_path / "sweep",
+            probe_stems_path=probe_path,
+            grid_path=grid_path,
+            winners_path=winners_path,
             model="small-music",
             jobs=1,
         )

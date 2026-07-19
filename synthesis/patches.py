@@ -1,10 +1,9 @@
-"""Slakh-style patch selection.
+"""Slakh-style rendering configuration.
 
-Slakh randomly assigns a patch from a class-matched pool for each track's MIDI
-program number. Patch pools are keyed by ``pool_id`` (see ``PATCH_POOLS``).
-
-Per-category soundfont / FX / pool winners are loaded from
+Per-category soundfont shortlists and FX profiles are loaded from
 ``experiments/patch_sweep/winners_locked.yaml`` after the tuning pipeline.
+Production slakh mode randomly picks a soundfont per (song, category) from
+each shortlist while keeping MIDI programs unchanged.
 """
 
 from __future__ import annotations

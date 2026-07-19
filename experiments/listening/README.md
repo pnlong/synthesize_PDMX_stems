@@ -2,7 +2,7 @@
 
 Structured blinded evaluation for patch and preset sweeps. Separate from the ablation validation viewer (`synthesis.listening.serve` on port 8765).
 
-**Purpose:** identify the best patch-pool variant or SA3 preset variant **per instrument category** (strings, brass, piano, …). Probe stems carry a `category` tag; aggregation reports one winner per category, not one winner overall.
+**Purpose:** identify the best patch soundfont shortlist / FX profile or SA3 preset variant **per instrument category** (strings, brass, piano, …). Probe stems carry a `category` tag; aggregation reports one winner (or shortlist) per category, not one winner overall.
 
 ## Quick start
 
@@ -31,6 +31,26 @@ Progress is saved in two places:
 
 On reload, the UI merges browser and server progress and resumes at the first incomplete stem. On **Finish**, a timestamped `responses_*.json` is also written for `record_winners` / `aggregate`.
 
+## Verification (after all phases, before lock)
+
+**One final pass** — not per phase. For **patch**, review phase 1 soundfont shortlists (dry audio) using phase 1 blind-test responses. For **preset**, compare basic synthesis vs locked presets from `winners.yaml` (no responses file needed). Approve or bypass realification before `lock`.
+
+```bash
+uv run python -m experiments.listening.serve --sweep patch   # or preset
+```
+
+- Preset: [http://127.0.0.1:8766/verify?type=preset](http://127.0.0.1:8766/verify?type=preset) — auto-starts from `winners.yaml`
+- Patch: [http://127.0.0.1:8766/verify?type=patch](http://127.0.0.1:8766/verify?type=patch) — select phase 1 `responses_*.json`
+
+Progress saves to `verification_in_progress_<source>.json`; **Finish** writes `verification_final_<source>_YYYYMMDDTHHMMSSZ.json` (preset source is `winners.yaml`).
+
+Pass to `lock`:
+
+```bash
+uv run python -m experiments.patch_sweep.lock \
+  --verification .../verification_final_responses_....json
+```
+
 ## Options
 
 ```bash
@@ -55,7 +75,12 @@ uv run python -m experiments.listening.aggregate \
 | `GET /api/{preset\|patch}/meta` | Rubric, stem order, manifest id |
 | `GET /api/{preset\|patch}/stems/{stem_id}` | Reference + blinded samples |
 | `GET /api/{preset\|patch}/responses/session` | In-progress responses checkpoint |
-| `POST /api/{preset\|patch}/responses` | Save responses (`checkpoint: true` → in-progress file) |
+| `POST /api/{preset\|patch}/responses` | Save responses (`checkpoint: true` → in-progress file; `mode: verification` → verification file) |
+| `GET /api/patch/verify/responses` | List blind-test response files (patch only) |
+| `GET /api/preset/verify/meta` | Locked presets per category from `winners.yaml` |
+| `GET /api/patch/verify/meta?responses=...` | Eligible variants + auto-winners per category |
+| `GET /api/{preset\|patch}/verify/categories/{category}` | Unblinded audio (preset: optional `responses=winners.yaml`) |
+| `GET /api/{preset\|patch}/verify/session?responses=...` | In-progress verification checkpoint |
 | `GET /audio/{preset\|patch}/reference/{stem_id}/{filename}` | Reference audio |
 | `GET /audio/{preset\|patch}/variant/{variant_id}/{song_id}/{filename}` | Variant audio |
 
@@ -64,5 +89,7 @@ uv run python -m experiments.listening.aggregate \
 - [`catalog.py`](catalog.py) — manifest + audio resolution for both sweep types
 - [`session.py`](session.py) — blinded ordering and rubrics
 - [`aggregate.py`](aggregate.py) — per-category winner selection
+- [`final_verify.py`](final_verify.py) — end-of-pipeline verification phase resolution and composed config
+- [`verification.py`](verification.py) — filter-pass survivors, verification catalog, winner validation
 - [`serve.py`](serve.py) — stdlib HTTP server (port 8766)
 - [`static/`](static/) — listening test UI

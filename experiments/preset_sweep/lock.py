@@ -21,6 +21,12 @@ def parse_args(args=None):
         help="Per-phase winners YAML.",
     )
     parser.add_argument(
+        "--verification",
+        default=None,
+        type=Path,
+        help="Final verification JSON (from /verify UI) to apply before locking.",
+    )
+    parser.add_argument(
         "--output",
         default=WINNERS_LOCKED_PATH,
         type=Path,
@@ -42,6 +48,13 @@ def parse_args(args=None):
 
 def main():
     args = parse_args()
+    if args.verification is not None:
+        from experiments.listening.aggregate import load_responses
+        from experiments.listening.final_verify import apply_verification_to_winners
+
+        verification = load_responses(args.verification)
+        apply_verification_to_winners(verification, sweep_type="preset", winners_path=args.winners)
+        print(f"Applied verification overrides from {args.verification}")
     out = write_locked_config(
         args.winners,
         args.output,

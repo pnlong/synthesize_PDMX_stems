@@ -7,9 +7,11 @@ from pathlib import Path
 
 import yaml
 
+from experiments.preset_sweep.bypass_rules import merge_bypass_rules
 from experiments.preset_sweep.config import (
     CATEGORIES_YAML_PATH,
     PHASE1,
+    PHASE1B,
     PHASE2,
     PHASE3,
     PHASES,
@@ -26,6 +28,7 @@ def _empty_winners_doc() -> dict:
     return {
         "phases": {
             PHASE1: {"completed": False, "winners": {}},
+            PHASE1B: {"completed": False, "winners": {}},
             PHASE2: {"completed": False, "winners": {}},
             PHASE3: {"completed": False, "winners": {}},
         }
@@ -76,6 +79,46 @@ def phase_is_complete(phase: str, path: Path = WINNERS_PATH) -> bool:
     return bool(doc["phases"].get(phase, {}).get("completed"))
 
 
+def bypass_realify_categories(path: Path = WINNERS_PATH) -> set[str]:
+    doc = load_winners(path)
+    bypass = doc.get("bypass_realify") or {}
+    return {str(category) for category, enabled in bypass.items() if enabled}
+
+
+def bypass_realify_rules(path: Path = WINNERS_PATH) -> list[dict]:
+    doc = load_winners(path)
+    return list(doc.get("bypass_realify_rules") or [])
+
+
+def record_bypass_realify_rules(
+    rules: list[dict],
+    *,
+    path: Path = WINNERS_PATH,
+) -> dict:
+    """Persist per-instrument bypass routing rules from final verification."""
+    doc = load_winners(path)
+    existing = list(doc.get("bypass_realify_rules") or [])
+    doc["bypass_realify_rules"] = merge_bypass_rules(existing, rules)
+    doc["bypass_realify_rules_recorded_at"] = datetime.now(timezone.utc).isoformat()
+    save_winners(doc, path)
+    return doc
+
+
+def record_bypass_realify(
+    categories: dict[str, bool],
+    *,
+    path: Path = WINNERS_PATH,
+) -> dict:
+    """Persist per-category realify bypass from final verification."""
+    doc = load_winners(path)
+    doc["bypass_realify"] = {
+        str(category): True for category, enabled in categories.items() if enabled
+    }
+    doc["bypass_realify_recorded_at"] = datetime.now(timezone.utc).isoformat()
+    save_winners(doc, path)
+    return doc
+
+
 def resolve_phase1_init_noise_level(category: str, winners_path: Path = WINNERS_PATH) -> float | None:
     variant_id = phase_winners(PHASE1, winners_path).get(category)
     if variant_id is None:
@@ -119,10 +162,16 @@ def build_locked_preset_config(
     phase2 = doc["phases"][PHASE2].get("winners") or {}
     phase3 = doc["phases"][PHASE3].get("winners") or {}
     phase3_complete = doc["phases"][PHASE3].get("completed", False)
+    bypass = bypass_realify_categories(winners_path)
+    bypass_rules = bypass_realify_rules(winners_path)
 
-    categories = sorted(set(phase1) | set(phase2) | set(phase3))
-    locked = {"categories": {}}
+    categories = sorted(set(phase1) | set(phase2) | set(phase3) | bypass)
+    locked = {"categories": {}, "bypass_routing_rules": bypass_rules}
     for category in categories:
+        if category in bypass:
+            locked["categories"][category] = {"realify": False}
+            continue
+
         noise_variant = phase1.get(category)
         prompt_variant = phase2.get(category)
         if noise_variant is None or prompt_variant is None:
@@ -155,11 +204,17 @@ def merge_locked_into_categories_yaml(
     locked: dict,
     categories_path: Path = CATEGORIES_YAML_PATH,
 ) -> dict:
-    """Apply locked category overrides to production categories.yaml."""
+    """Apply locked category overrides and bypass routing rules to production categories.yaml."""
     doc = load_yaml(categories_path)
     doc.setdefault("categories", {})
+    doc.setdefault("routing", [])
     for category, preset in locked.get("categories", {}).items():
         doc["categories"][category] = dict(preset)
+
+    doc["routing"] = merge_bypass_rules(
+        [dict(rule) for rule in doc.get("routing", [])],
+        locked.get("bypass_routing_rules") or [],
+    )
     return doc
 
 

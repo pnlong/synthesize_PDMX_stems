@@ -1,0 +1,240 @@
+.setup {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 2rem 1.5rem;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin: 1.25rem 0;
+  font-size: 0.9rem;
+}
+
+.field select {
+  padding: 0.55rem 0.65rem;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text);
+}
+
+#start-btn {
+  padding: 0.65rem 1rem;
+  border-radius: 8px;
+  border: 1px solid var(--accent);
+  background: transparent;
+  color: var(--accent);
+  cursor: pointer;
+}
+
+.verify-panel {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 0 1.5rem 2rem;
+}
+
+.soundfont-nav-section,
+.current-soundfont-section {
+  margin-bottom: 1.25rem;
+}
+
+.soundfont-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0.75rem 0 1rem;
+}
+
+.soundfont-tab {
+  padding: 0.45rem 0.75rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.soundfont-tab.active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.soundfont-tab.approved {
+  background: rgba(72, 187, 120, 0.12);
+}
+
+.soundfont-tab.rejected {
+  opacity: 0.55;
+  text-decoration: line-through;
+}
+
+.soundfont-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+
+.soundfont-title {
+  font-size: 1.35rem;
+  font-weight: 700;
+  margin-bottom: 0.35rem;
+}
+
+.keep-label.rejected-state {
+  color: #f56565;
+}
+
+.compare-grid {
+  display: grid;
+  gap: 0.9rem;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+}
+
+.compare-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.9rem 1rem;
+}
+
+.compare-block + .compare-block {
+  margin-top: 0.75rem;
+}
+
+.compare-label {
+  font-size: 0.8rem;
+  color: var(--muted);
+  margin-bottom: 0.25rem;
+}
+
+.stem-list {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.stem-card,
+.variant-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.9rem 1rem;
+  min-width: 0;
+}
+
+.stem-title {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.stem-id {
+  margin-top: 0.15rem;
+  font-size: 0.78rem;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.variant-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.variant-card.auto-winner {
+  border-color: #4a5568;
+}
+
+.variant-card.selected-winner {
+  border-color: var(--good);
+}
+
+.variant-card.not-approved {
+  opacity: 0.72;
+}
+
+.variant-header {
+  display: grid;
+  gap: 0.25rem;
+  margin-bottom: 0.75rem;
+}
+
+.variant-title {
+  font-weight: 600;
+}
+
+.badge {
+  display: inline-block;
+  margin-left: 0.35rem;
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+  background: #2a3344;
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+.approve-label,
+.winner-label {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.9rem;
+}
+
+.variant-stems {
+  display: grid;
+  gap: 0.65rem;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  margin-bottom: 0.65rem;
+}
+
+.variant-stem {
+  min-width: 0;
+}
+
+.variant-stem .meta {
+  margin-bottom: 0.25rem;
+}
+
+.preset-bypass-section,
+.bypass-section {
+  margin: 1rem 0 1.25rem;
+}
+
+.bypass-card {
+  background: rgba(237, 137, 54, 0.08);
+  border: 1px solid rgba(237, 137, 54, 0.35);
+  border-radius: 10px;
+  padding: 0.9rem 1rem;
+}
+
+.bypass-label {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.bypass-hint {
+  margin: 0.45rem 0 0 1.55rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.variants-section.bypass-active {
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+.variants-section.bypass-active .hint::after {
+  content: " (skipped — realification bypassed for this category)";
+  color: var(--muted);
+}

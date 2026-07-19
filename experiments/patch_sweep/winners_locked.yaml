@@ -1,0 +1,65 @@
+categories:
+  drums:
+    soundfont_ids:
+    - arachno
+    - realfont
+    - sgm_v2
+    - airfont_380
+    - generaluser
+    soundfont_id: arachno
+    soundfont: Arachno_SoundFont_Version_1.0.sf2
+    fx_profile: dry
+  mallet:
+    soundfont_ids:
+    - airfont_380
+    - fluidr3
+    - realfont
+    - generaluser
+    soundfont_id: airfont_380
+    soundfont: airfont_380_final.sf2
+    fx_profile: dry
+  organ:
+    soundfont_ids:
+    - arachno
+    - realfont
+    - sgm_v2
+    soundfont_id: arachno
+    soundfont: Arachno_SoundFont_Version_1.0.sf2
+    fx_profile: dry
+  piano:
+    soundfont_ids:
+    - airfont_380
+    - generaluser
+    soundfont_id: airfont_380
+    soundfont: airfont_380_final.sf2
+    fx_profile: dry
+  polyphonic:
+    soundfont_ids:
+    - airfont_380
+    - sgm_v2
+    soundfont_id: airfont_380
+    soundfont: airfont_380_final.sf2
+    fx_profile: dry
+  strings:
+    soundfont_ids:
+    - sgm_v2
+    - fluidr3
+    soundfont_id: sgm_v2
+    soundfont: SGM-V2.01.sf2
+    fx_profile: dry
+  voice:
+    soundfont_ids:
+    - generaluser
+    - airfont_380
+    - arachno
+    soundfont_id: generaluser
+    soundfont: GeneralUser GS v1.471.sf2
+    fx_profile: warm
+  wind:
+    soundfont_ids:
+    - generaluser
+    - airfont_380
+    soundfont_id: generaluser
+    soundfont: GeneralUser GS v1.471.sf2
+    fx_profile: light
+locked_at: '2026-07-13T23:01:27.151697+00:00'

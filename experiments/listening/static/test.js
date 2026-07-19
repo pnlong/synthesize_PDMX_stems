@@ -131,11 +131,19 @@ function isStemComplete(stemId) {
     if (!saved || !state.meta) {
       return false;
     }
-    const nVariants = state.meta.variants.length;
-    const rated = Object.values(saved.samples || {}).filter(
+    const samples = Object.values(saved.samples || {});
+    if (samples.length === 0) {
+      return false;
+    }
+    const fullyRated = samples.filter(
       (s) => isRated(s.content) && isRated(s.realism)
-    ).length;
-    return rated >= nVariants;
+    );
+    const nVariants = state.meta.variants.length;
+    return (
+      fullyRated.length === samples.length &&
+      fullyRated.length > 0 &&
+      fullyRated.length >= nVariants
+    );
   }
   const samples = state.stemDetail.samples || [];
   return samples.every((sample) => {

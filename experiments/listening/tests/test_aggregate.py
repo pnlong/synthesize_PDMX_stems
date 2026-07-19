@@ -6,7 +6,12 @@ from pathlib import Path
 import pandas as pd
 import yaml
 
-from experiments.listening.aggregate import aggregate_winners, ratings_dataframe, run_aggregate
+from experiments.listening.aggregate import (
+    aggregate_winners,
+    noise_level_winners,
+    ratings_dataframe,
+    run_aggregate,
+)
 from experiments.listening.catalog import SweepCatalog
 
 
@@ -118,3 +123,92 @@ def test_aggregate_filters_low_content(tmp_path: Path, capsys):
     text = output_path.read_text()
     assert "noise0.45_minimal" in text
     assert "noise0.55_minimal" not in text.split("Winner")[1]
+
+
+def test_noise_level_winners_requires_content_then_picks_realism():
+    responses = {
+        "ratings": [{
+            "stem_id": "piano_a",
+            "category": "piano",
+            "samples": [
+                {"variant_id": "noise0.45", "content": 5.0, "realism": 4.0},
+                {"variant_id": "noise0.55", "content": 4.0, "realism": 5.0},
+                {"variant_id": "noise0.65", "content": 3.0, "realism": 5.0},
+            ],
+        }, {
+            "stem_id": "piano_b",
+            "category": "piano",
+            "samples": [
+                {"variant_id": "noise0.45", "content": 5.0, "realism": 4.0},
+                {"variant_id": "noise0.55", "content": 4.0, "realism": 5.0},
+                {"variant_id": "noise0.65", "content": 3.0, "realism": 5.0},
+            ],
+        }],
+    }
+    df = ratings_dataframe(responses)
+    winners = noise_level_winners(df, content_threshold=4.5)
+    assert winners.iloc[0]["variant_id"] == "noise0.45"
+    assert bool(winners.iloc[0]["passed_content_threshold"])
+
+
+def test_noise_level_winners_excludes_low_content_even_if_more_realistic():
+    responses = {
+        "ratings": [{
+            "stem_id": "piano_a",
+            "category": "piano",
+            "samples": [
+                {"variant_id": "noise0.45", "content": 4.8, "realism": 4.0},
+                {"variant_id": "noise0.55", "content": 4.0, "realism": 5.0},
+            ],
+        }, {
+            "stem_id": "piano_b",
+            "category": "piano",
+            "samples": [
+                {"variant_id": "noise0.45", "content": 4.8, "realism": 4.0},
+                {"variant_id": "noise0.55", "content": 4.0, "realism": 5.0},
+            ],
+        }],
+    }
+    df = ratings_dataframe(responses)
+    winners = noise_level_winners(df, content_threshold=4.5)
+    assert winners.iloc[0]["variant_id"] == "noise0.45"
+
+
+def test_noise_level_winners_tiebreaks_on_higher_noise():
+    responses = {
+        "ratings": [{
+            "stem_id": "piano_a",
+            "category": "piano",
+            "samples": [
+                {"variant_id": "noise0.45", "content": 5.0, "realism": 4.5},
+                {"variant_id": "noise0.55", "content": 5.0, "realism": 4.5},
+            ],
+        }, {
+            "stem_id": "piano_b",
+            "category": "piano",
+            "samples": [
+                {"variant_id": "noise0.45", "content": 5.0, "realism": 4.5},
+                {"variant_id": "noise0.55", "content": 5.0, "realism": 4.5},
+            ],
+        }],
+    }
+    df = ratings_dataframe(responses)
+    winners = noise_level_winners(df, content_threshold=4.5)
+    assert winners.iloc[0]["variant_id"] == "noise0.55"
+
+
+def test_noise_level_winners_falls_back_when_none_pass_content():
+    responses = {
+        "ratings": [{
+            "stem_id": "piano_a",
+            "category": "piano",
+            "samples": [
+                {"variant_id": "noise0.45", "content": 4.0, "realism": 4.0},
+                {"variant_id": "noise0.55", "content": 3.0, "realism": 5.0},
+            ],
+        }],
+    }
+    df = ratings_dataframe(responses)
+    winners = noise_level_winners(df, content_threshold=4.5)
+    assert winners.iloc[0]["variant_id"] == "noise0.55"
+    assert not bool(winners.iloc[0]["passed_content_threshold"])

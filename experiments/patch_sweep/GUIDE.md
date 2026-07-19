@@ -21,7 +21,7 @@ export SWEEP_MP3="--mp3"
 
 ## Phase 1 — Soundfonts (dry, no program remap)
 
-Compare **7 candidate GM banks**. Same MIDI, different samples. Pick the best **per category** (piano, strings, wind, …).
+Compare **7 candidate GM banks**. Same MIDI, different samples. Build a **shortlist per category** (not a single winner): every soundfont with mean(content, realism) / 2 **≥ 4.1** is included.
 
 ### 1.1 Render
 
@@ -57,7 +57,9 @@ uv run python -m experiments.patch_sweep.record_winners \
   --responses experiments/patch_sweep/output/phase1_soundfonts/responses/responses_YYYYMMDDTHHMMSSZ.json
 ```
 
-This writes per-category `variant_id` (e.g. `sgm_v2`, `arachno`) into [`winners.yaml`](winners.yaml).
+This writes per-category **shortlists** (e.g. `piano: [sgm_v2, airfont_380]`) into [`winners.yaml`](winners.yaml). Soundfonts below the threshold are dropped; if none pass, the best-rated one is kept as a fallback.
+
+Default threshold is **4.1** (average of content + realism). Override with `--mean-rating-threshold`.
 
 Optional: inspect aggregate report:
 
@@ -71,9 +73,9 @@ uv run python -m experiments.listening.aggregate \
 
 ---
 
-## Phase 2 — FX (on phase-1 winners)
+## Phase 2 — FX (on phase-1 shortlists)
 
-Compare **3 light FX profiles** using each category's winning soundfont from phase 1.
+Compare **3 light FX profiles** using each category's **primary** phase-1 soundfont (first in the shortlist).
 
 ### 2.1 Render
 
@@ -100,55 +102,48 @@ uv run python -m experiments.patch_sweep.record_winners \
 
 ---
 
-## Phase 3 — Program pools
+## Phase 3 — Soundfont shortlist review (before lock)
 
-Compare **3 GM program pool variants** using each category's locked soundfont + FX.
-
-### 3.1 Render
-
-Requires phase 1 and 2 winners.
+After phases 1–2 are recorded, **review the phase 1 shortlist** — listen to each soundfont dry (no FX) and reject anything that slipped through the rating threshold.
 
 ```bash
-uv run python -m experiments.patch_sweep.sweep \
-  --phase phase3_pools -j 8 $SWEEP_MP3
+uv run python -m experiments.listening.serve --sweep patch
 ```
 
-~3 variants × 24 stems = **72** renders.  
-Output: `experiments/patch_sweep/output/phase3_pools/`
+Open [http://127.0.0.1:8766/verify?type=patch](http://127.0.0.1:8766/verify?type=patch), select your **phase 1** `responses_*.json`, then for each category:
 
-Pools are defined in [`synthesis/patches.py`](../../synthesis/patches.py) (`PATCH_POOLS`).
+- Click soundfont tabs (or use prev/next) to audition each shortlisted bank
+- Compare reference (A1 basic) vs dry soundfont on all probe stems
+- **Uncheck** soundfonts you do not want in production
+- Move to the next category when at least one soundfont remains
 
-### 3.2 Listen → record
-
-```bash
-uv run python -m experiments.listening.serve --sweep patch \
-  --patch-sweep-dir experiments/patch_sweep/output/phase3_pools
-
-uv run python -m experiments.patch_sweep.record_winners \
-  --phase phase3_pools \
-  --responses experiments/patch_sweep/output/phase3_pools/responses/responses_....json
-```
+**Finish** writes `experiments/patch_sweep/output/phase1_soundfonts/responses/verification_final_responses_*_YYYYMMDDTHHMMSSZ.json`.
 
 ---
 
 ## Phase 4 — Lock production config
 
-When all three phases are `completed: true` in `winners.yaml`:
+When the shortlist review looks good:
 
 ```bash
-uv run python -m experiments.patch_sweep.lock
+uv run python -m experiments.patch_sweep.lock \
+  --verification experiments/patch_sweep/output/phase1_soundfonts/responses/verification_final_responses_....json
 ```
+
+(`--verification` updates phase 1 shortlists from your review, then locks.)
 
 Writes [`winners_locked.yaml`](winners_locked.yaml) — per-category:
 
 ```yaml
 categories:
   piano:
+    soundfont_ids: [sgm_v2, airfont_380]
     soundfont_id: sgm_v2
     soundfont: SGM-V2.01.sf2
     fx_profile: light
-    pool_id: pool_v2_diverse
 ```
+
+Production slakh mode **randomly picks** a soundfont per (song, category) from each shortlist. MIDI programs are unchanged (no GM pool remapping).
 
 `synthesis/patches.py` loads this automatically as `SLAKH_CATEGORY_RENDER`.
 
@@ -162,7 +157,7 @@ Re-render a few probe stems in slakh mode and confirm they differ from A1:
 
 ```bash
 uv run python -m experiments.patch_sweep.sweep \
-  --phase phase3_pools --limit-stems 2 --limit-variants 1 $SWEEP_MP3
+  --phase phase2_fx --limit-stems 2 --limit-variants 1 $SWEEP_MP3
 ```
 
 Or run synthesis on a single song if you have a quick test path.
@@ -190,16 +185,16 @@ Compare A1 (basic) vs B1 (slakh) on port **8765**.
 | Step | Command |
 |------|---------|
 | Render phase N | `uv run python -m experiments.patch_sweep.sweep --phase <phase> -j 8` |
-| Listen | `uv run python -m experiments.listening.serve --sweep patch --patch-sweep-dir <phase_dir>` |
+| Listen (per phase) | `uv run python -m experiments.listening.serve --sweep patch --patch-sweep-dir <phase_dir>` |
+| Final verify | `http://127.0.0.1:8766/verify?type=patch` (review phase 1 shortlists) |
 | Record winners | `uv run python -m experiments.patch_sweep.record_winners --phase <phase> --responses <json>` |
-| Lock production | `uv run python -m experiments.patch_sweep.lock` |
+| Lock production | `uv run python -m experiments.patch_sweep.lock [--verification <json>]` |
 | B1 ablation | `uv run python -m synthesis.synthesize --render-mode slakh` |
 
 | Phase | `--phase` value | Variants | Needs prior winners |
 |-------|-----------------|----------|---------------------|
 | 1 Soundfonts | `phase1_soundfonts` | 7 | — |
-| 2 FX | `phase2_fx` | 3 | phase 1 |
-| 3 Pools | `phase3_pools` | 3 | phase 1 + 2 |
+| 2 FX | `phase2_fx` | 3 | phase 1 shortlists |
 
 ## Files
 
@@ -213,7 +208,7 @@ Compare A1 (basic) vs B1 (slakh) on port **8765**.
 
 ## Troubleshooting
 
-- **Phase 2/3 sweep refuses to start** — run `record_winners` for the prior phase first; check `winners.yaml` shows `completed: true`.
+- **Phase 2 sweep refuses to start** — run `record_winners` for phase 1 first; check `winners.yaml` shows `completed: true`.
 - **Missing probe stem** — ensure A1 basic ablation exists for all `probe_stems.yaml` song IDs.
 - **Soundfont not found** — run `ls soundfonts/`; recreate symlink via `setup_symlinks`.
 - **Listening UI shows "Audio not available"** — sweep didn't finish; check manifest.csv `out_path` files exist.

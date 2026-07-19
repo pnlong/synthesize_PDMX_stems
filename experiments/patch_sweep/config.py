@@ -18,7 +18,9 @@ PHASE1 = "phase1_soundfonts"
 PHASE2 = "phase2_fx"
 PHASE3 = "phase3_pools"
 
-PHASES = (PHASE1, PHASE2, PHASE3)
+PHASES = (PHASE1, PHASE2)
+REQUIRED_LOCK_PHASES = (PHASE1, PHASE2)
+DEPRECATED_PHASES = (PHASE3,)
 
 PHASE_GRID_FILES = {
     PHASE1: GRIDS_DIR / "phase1_soundfonts.yaml",
@@ -43,8 +45,8 @@ def soundfont_path(file_name: str, soundfont_dir: str | Path | None = None) -> P
     return root / file_name
 
 
-def load_soundfont_catalog(path: Path = SOUNDFONTS_CATALOG) -> dict:
-    return load_yaml(path)
+def load_soundfont_catalog(path: Path | None = None) -> dict:
+    return load_yaml(path or SOUNDFONTS_CATALOG)
 
 
 def soundfont_file_for_id(soundfont_id: str, catalog: dict | None = None) -> str:

@@ -70,4 +70,9 @@ def add_synthesis_args(parser: argparse.ArgumentParser):
         action="store_true",
         help="Write stems and mixtures as MP3 instead of FLAC (prototyping; smaller files).",
     )
+    parser.add_argument(
+        "--no-silence-enforce",
+        action="store_true",
+        help="Disable post-SA3 silence enforcement on realified stems.",
+    )
     parser.add_argument("--sample-seed", default=ABLATION_SAMPLE_SEED, type=int)

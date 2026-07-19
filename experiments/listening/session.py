@@ -15,6 +15,16 @@ RUBRICS = {
         "realism_help": "Sounds like a recorded instrument?",
         "reference_label": "Reference (A1 raw)",
     },
+    "preset_phase1b": {
+        "content_label": "Content",
+        "content_help": (
+            "Same melody, rhythm, and timing in played sections? "
+            "(Rests are silence-corrected; do not penalize rest hallucinations.)"
+        ),
+        "realism_label": "Realism",
+        "realism_help": "Sounds like a recorded instrument?",
+        "reference_label": "Reference (A1 raw clip)",
+    },
     "patch": {
         "content_label": "Musical content",
         "content_help": "Same melody, rhythm, and timing as the reference?",
@@ -64,3 +74,13 @@ def stem_order(stem_ids: list[str], session_seed: int) -> list[str]:
 
 def storage_key(sweep_type: str, manifest_id: str) -> str:
     return f"sweep_test_{sweep_type}_{manifest_id}"
+
+
+def rubric_for_catalog(catalog) -> dict:
+    """Return listening rubric; phase-1b uses silence-enforcement-aware content guidance."""
+    if getattr(catalog, "sweep_type", None) == "preset" and not catalog._manifest.empty:
+        phase = str(catalog._manifest.iloc[0].get("phase", ""))
+        if phase == "phase1b_noise_audit":
+            return RUBRICS["preset_phase1b"]
+    sweep_type = getattr(catalog, "sweep_type", "preset")
+    return RUBRICS.get(sweep_type, RUBRICS["preset"])

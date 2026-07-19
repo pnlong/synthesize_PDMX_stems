@@ -14,9 +14,10 @@ from experiments.paths import (
 )
 from experiments.patch_sweep.sweep import MANIFEST_FILENAME as PATCH_MANIFEST
 from experiments.patch_sweep.sweep import VARIANTS_DIR_NAME as PATCH_VARIANTS_DIR
+from experiments.preset_sweep.clips_dir import resolve_sweep_clips_dir
 from experiments.preset_sweep.sweep import MANIFEST_FILENAME as PRESET_MANIFEST
 from experiments.preset_sweep.sweep import VARIANTS_DIR_NAME as PRESET_VARIANTS_DIR
-from shared.config import DATA_DIR_NAME, DEFAULT_AUDIO_FORMAT, OUTPUT_DIR, PROTOTYPE_AUDIO_FORMAT
+from shared.config import DATA_DIR_NAME, DEFAULT_AUDIO_FORMAT, OUTPUT_DIR, PROTOTYPE_AUDIO_FORMAT, STEMS_FILE_NAME
 from shared.repo_symlinks import (
     REPO_PATCH_SWEEP_OUTPUT_SYMLINK,
     REPO_PRESET_SWEEP_OUTPUT_SYMLINK,
@@ -46,6 +47,46 @@ def default_sweep_dir(sweep_type: str, output_root: str = OUTPUT_DIR) -> Path:
     raise ValueError(f"Unknown sweep type: {sweep_type}")
 
 
+def resolve_sweep_catalog_dir(
+    sweep_type: str,
+    sweep_dir: Path,
+    *,
+    prefer_verification_phase: bool = False,
+) -> Path:
+    """Pick a phased sweep output directory that actually has a manifest."""
+    sweep_dir = sweep_dir.resolve()
+    manifest_name = (
+        PRESET_MANIFEST if sweep_type == "preset" else PATCH_MANIFEST
+    )
+
+    if prefer_verification_phase:
+        try:
+            from experiments.listening.final_verify import final_sweep_dir, readiness_errors
+
+            if not readiness_errors(sweep_type):
+                phase_dir = final_sweep_dir(sweep_type)
+                if (phase_dir / manifest_name).is_file():
+                    return phase_dir.resolve()
+        except Exception:
+            pass
+
+    if (sweep_dir / manifest_name).is_file():
+        return sweep_dir
+
+    candidates = sorted(
+        (
+            path
+            for path in sweep_dir.iterdir()
+            if path.is_dir() and (path / manifest_name).is_file()
+        ),
+        key=lambda path: path.stat().st_mtime,
+        reverse=True,
+    )
+    if candidates:
+        return candidates[0].resolve()
+    return sweep_dir
+
+
 class SweepCatalog:
     def __init__(
         self,
@@ -59,6 +100,9 @@ class SweepCatalog:
         self.sweep_type = sweep_type
         self.sweep_dir = sweep_dir.resolve()
         self.source_dir = (source_dir or default_source_dir()).resolve()
+        clips_dir = resolve_sweep_clips_dir(self.sweep_dir)
+        if clips_dir is not None:
+            self.source_dir = clips_dir
         self.probe_stems_path = probe_stems_path
         self._manifest = self._load_manifest()
         self._probe_by_id = self._load_probe_index()
@@ -115,6 +159,11 @@ class SweepCatalog:
         return df
 
     def _load_probe_index(self) -> dict[str, dict]:
+        diverse_path = self.sweep_dir / "diverse_stems.yaml"
+        if diverse_path.is_file():
+            from experiments.preset_sweep.diverse_stems import load_diverse_stems_manifest
+
+            return {entry["id"]: entry for entry in load_diverse_stems_manifest(diverse_path)}
         with open(self.probe_stems_path) as f:
             cfg = yaml.safe_load(f)
         return {entry["id"]: entry for entry in cfg.get("stems", [])}
@@ -138,25 +187,17 @@ class SweepCatalog:
                 self._manifest[
                     ["variant_id", "init_noise_level", "prompt_variant"]
                 ]
-                .drop_duplicates()
+                .drop_duplicates(subset=["variant_id"])
                 .sort_values("variant_id")
             )
         else:
+            cols = ["variant_id"]
+            for c in ("pool_id", "soundfont_id", "fx_profile", "phase"):
+                if c in self._manifest.columns:
+                    cols.append(c)
             rows = (
-                self._manifest[
-                    [
-                        c
-                        for c in (
-                            "variant_id",
-                            "pool_id",
-                            "soundfont_id",
-                            "fx_profile",
-                            "phase",
-                        )
-                        if c in self._manifest.columns
-                    ]
-                ]
-                .drop_duplicates()
+                self._manifest[cols]
+                .drop_duplicates(subset=["variant_id"])
                 .sort_values("variant_id")
             )
         return rows.to_dict(orient="records")
@@ -197,7 +238,7 @@ class SweepCatalog:
         first = group.iloc[0]
         track = int(first["track"])
         song_id = song_id_from_path(first["path"])
-        filename = stem_filename(track, self._audio_format)
+        filename = self._reference_filename(stem_id, track)
         probe = self._probe_by_id.get(stem_id, {})
 
         variant_ids = group.sort_values("variant_id")["variant_id"].tolist()
@@ -266,11 +307,48 @@ class SweepCatalog:
             ),
         }
 
+    def _reference_filename(self, stem_id: str, track: int) -> str:
+        probe = self._probe_by_id.get(stem_id, {})
+        audio_format = str(probe.get("audio_format") or self._audio_format)
+        return stem_filename(track, audio_format)
+
+    def _manifest_reference_path(self, stem_id: str) -> Path | None:
+        if self._manifest.empty:
+            return None
+        group = self._manifest[self._manifest["stem_id"] == stem_id]
+        if group.empty:
+            return None
+
+        row = group.iloc[0]
+        track = int(row["track"])
+        song_dir = Path(str(row["path"])).resolve()
+        filename = self._reference_filename(stem_id, track)
+        audio_path = (song_dir / filename).resolve()
+
+        allowed_roots = {
+            self.source_dir.resolve(),
+            self.sweep_dir.resolve(),
+        }
+        clips_dir = resolve_sweep_clips_dir(self.sweep_dir)
+        if clips_dir is not None:
+            allowed_roots.add(clips_dir.resolve())
+
+        if not any(str(audio_path).startswith(str(root)) for root in allowed_roots):
+            return None
+        return audio_path if audio_path.is_file() else None
+
     def resolve_reference_audio(self, stem_id: str, filename: str) -> Path | None:
         stem = self._probe_by_id.get(stem_id)
-        if stem is None:
+        if stem is None and self._manifest.empty:
             return None
         if "/" in filename or "\\" in filename or ".." in Path(filename).parts:
+            return None
+
+        manifest_path = self._manifest_reference_path(stem_id)
+        if manifest_path is not None:
+            return manifest_path
+
+        if stem is None:
             return None
         song_id = stem["song_id"]
         audio_path = (self.source_dir / DATA_DIR_NAME / song_id / filename).resolve()

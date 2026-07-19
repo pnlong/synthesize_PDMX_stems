@@ -81,6 +81,13 @@ code {
   font-size: 0.85rem;
 }
 
+.section-title {
+  margin: 2.5rem 0 1rem;
+  font-size: 1rem;
+  color: var(--muted);
+  font-weight: 500;
+}
+
 .hidden {
   display: none !important;
 }

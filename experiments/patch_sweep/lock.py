@@ -20,6 +20,12 @@ def parse_args(args=None):
         help="Per-phase winners YAML.",
     )
     parser.add_argument(
+        "--verification",
+        default=None,
+        type=Path,
+        help="Final verification JSON (from /verify UI) to apply before locking.",
+    )
+    parser.add_argument(
         "--output",
         default=WINNERS_LOCKED_PATH,
         type=Path,
@@ -30,6 +36,13 @@ def parse_args(args=None):
 
 def main():
     args = parse_args()
+    if args.verification is not None:
+        from experiments.listening.aggregate import load_responses
+        from experiments.listening.final_verify import apply_verification_to_winners
+
+        verification = load_responses(args.verification)
+        apply_verification_to_winners(verification, sweep_type="patch", winners_path=args.winners)
+        print(f"Applied verification overrides from {args.verification}")
     out = write_locked_config(args.winners, args.output)
     print(f"Wrote locked slakh config: {out}")
     print("Production slakh mode will load this on next import of synthesis.patches.")

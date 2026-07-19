@@ -4,26 +4,45 @@ from __future__ import annotations
 
 import argparse
 import multiprocessing
+import shutil
 from pathlib import Path
 
 import pandas as pd
+import yaml
 
 from experiments.paths import DEFAULT_PROBE_STEMS, preset_sweep_output_root
 from experiments.probe_stems import validate_probe_stems
+from experiments.preset_sweep.clips_dir import expose_clips_dir
 from experiments.preset_sweep.config import (
     EXPERIMENT_DIR,
+    LOCKED_VERIFY_VARIANT,
     PHASE1,
+    PHASE1B,
     PHASE2,
     PHASE3,
+    PHASE4,
     PHASE_GRID_FILES,
-    PHASES,
+    SWEEP_PHASES,
+    build_noise_audit_variants,
     load_yaml,
     phase_output_dir,
+    resolve_silence_enforce,
+)
+from experiments.preset_sweep.diverse_stems import (
+    DEFAULT_CLIP_SECONDS,
+    DEFAULT_DIVERSE_PER_CATEGORY,
+    DEFAULT_MIN_RMS,
+    load_diverse_stems_manifest,
+    replace_silent_probe_clips,
+    select_diverse_stems,
+    write_diverse_clip_dataset,
 )
 from experiments.preset_sweep.winners import (
     phase_is_complete,
+    phase_winners,
     resolve_phase1_init_noise_level,
     resolve_phase2_prompt_variant,
+    resolve_phase3_diffusion_variant_id,
 )
 from shared.config import (
     ABLATION_SAMPLE_SEED,
@@ -37,7 +56,7 @@ from shared.config import (
 )
 from shared.repo_symlinks import REPO_PRESET_SWEEP_OUTPUT_SYMLINK
 from synthesis.audio import stem_duration_seconds, stem_filename, stem_is_valid, stem_path
-from synthesis.listening.catalog import default_ablations_dir
+from synthesis.listening.catalog import default_ablations_dir, song_id_from_path
 from synthesis.paths import ablation_raw_dir
 from synthesis.realify.captions.generate import generate_captions_from_tables
 from synthesis.realify.realify import (
@@ -116,16 +135,38 @@ def variant_output_path(
 
 
 def _require_phase_prerequisites(phase: str, winners_path: Path) -> None:
-    if phase == PHASE2 and not phase_is_complete(PHASE1, winners_path):
+    if phase == PHASE1B and not phase_is_complete(PHASE1, winners_path):
         raise RuntimeError(
-            f"{PHASE2} requires completed {PHASE1} winners in {winners_path}. "
-            f"Run the phase 1 sweep, listening test, and record_winners first."
+            f"{PHASE1B} requires completed {PHASE1} winners in {winners_path}. "
+            f"Run phase 1, listening test, and record_winners first."
         )
+    if phase == PHASE2:
+        if not phase_is_complete(PHASE1, winners_path):
+            raise RuntimeError(
+                f"{PHASE2} requires completed {PHASE1} winners in {winners_path}. "
+                f"Run the phase 1 sweep, listening test, and record_winners first."
+            )
+        if not phase_is_complete(PHASE1B, winners_path):
+            raise RuntimeError(
+                f"{PHASE2} requires completed {PHASE1B} noise audit in {winners_path}. "
+                f"Run phase 1b, listening test, and record_winners first."
+            )
     if phase == PHASE3:
         if not phase_is_complete(PHASE1, winners_path):
             raise RuntimeError(f"{PHASE3} requires completed {PHASE1} winners.")
+        if not phase_is_complete(PHASE1B, winners_path):
+            raise RuntimeError(f"{PHASE3} requires completed {PHASE1B} noise audit.")
         if not phase_is_complete(PHASE2, winners_path):
             raise RuntimeError(f"{PHASE3} requires completed {PHASE2} winners.")
+    if phase == PHASE4:
+        if not phase_is_complete(PHASE1, winners_path):
+            raise RuntimeError(f"{PHASE4} requires completed {PHASE1} winners.")
+        if not phase_is_complete(PHASE1B, winners_path):
+            raise RuntimeError(
+                f"{PHASE4} requires completed {PHASE1B} diverse clips in {winners_path}."
+            )
+        if not phase_is_complete(PHASE2, winners_path):
+            raise RuntimeError(f"{PHASE4} requires completed {PHASE2} winners.")
 
 
 def resolve_preset_settings(
@@ -149,6 +190,14 @@ def resolve_preset_settings(
             float(variant.get("cfg_scale", default_cfg)),
         )
 
+    if phase == PHASE1B:
+        return (
+            float(variant["init_noise_level"]),
+            grid_cfg.get("prompt_variant", default_prompt),
+            int(grid_cfg.get("steps", default_steps)),
+            float(grid_cfg.get("cfg_scale", default_cfg)),
+        )
+
     if phase == PHASE2:
         init_noise_level = resolve_phase1_init_noise_level(category or "", winners_path)
         if init_noise_level is None:
@@ -166,11 +215,31 @@ def resolve_preset_settings(
     prompt_variant = resolve_phase2_prompt_variant(category or "", winners_path)
     if prompt_variant is None:
         raise RuntimeError(f"No phase-2 prompt winner for category: {category}")
+
+    if phase == PHASE3:
+        return (
+            init_noise_level,
+            prompt_variant,
+            int(variant.get("steps", default_steps)),
+            float(variant.get("cfg_scale", default_cfg)),
+        )
+
+    diffusion_variant = resolve_phase3_diffusion_variant_id(category or "", winners_path)
+    if diffusion_variant:
+        from experiments.preset_sweep.winners import _diffusion_from_variant_id
+
+        diffusion = _diffusion_from_variant_id(diffusion_variant)
+        steps = int(diffusion["steps"])
+        cfg_scale = float(diffusion["cfg_scale"])
+    else:
+        steps = default_steps
+        cfg_scale = default_cfg
+
     return (
         init_noise_level,
         prompt_variant,
-        int(variant.get("steps", default_steps)),
-        float(variant.get("cfg_scale", default_cfg)),
+        steps,
+        cfg_scale,
     )
 
 
@@ -184,8 +253,10 @@ def build_probe_caption(
 ) -> str:
     songs = pd.read_csv(source_dir / f"{DATA_DIR_NAME}.csv")
     stems = pd.read_csv(source_dir / f"{STEMS_FILE_NAME}.csv")
+    song_id = str(song_path.relative_to(source_dir / DATA_DIR_NAME))
+    stems["_song_id"] = stems["path"].map(lambda p: song_id_from_path(str(p)))
     stems = stems[
-        (stems["path"] == str(song_path)) & (stems["track"] == track)
+        (stems["_song_id"] == song_id) & (stems["track"] == track)
     ]
     if stems.empty:
         raise ValueError(f"No stem row for {song_path} track {track}")
@@ -215,7 +286,8 @@ def build_sweep_tasks(
     for probe in probe_stems:
         song_path = song_path_from_id(source_dir, probe["song_id"])
         track = int(probe["track"])
-        source_stem_path = stem_path(song_path, track, audio_format)
+        stem_format = str(probe.get("audio_format") or audio_format)
+        source_stem_path = stem_path(song_path, track, stem_format)
         if not stem_is_valid(source_stem_path):
             raise FileNotFoundError(f"Missing or invalid probe stem: {source_stem_path}")
 
@@ -271,7 +343,7 @@ def build_sweep_tasks(
                 "out_path": str(out_path),
                 "stem_path": str(source_stem_path),
                 "duration": stem_duration_seconds(source_stem_path),
-                "audio_format": audio_format,
+                "audio_format": stem_format,
                 "seed": stem_seed(sample_seed, str(song_path), track),
             })
     return tasks
@@ -293,6 +365,7 @@ def build_manifest_rows(
     for probe in probe_stems:
         song_path = song_path_from_id(source_dir, probe["song_id"])
         track = int(probe["track"])
+        stem_format = str(probe.get("audio_format") or audio_format)
         category = probe.get("category")
         for variant in variants:
             variant_id = variant["id"]
@@ -316,7 +389,7 @@ def build_manifest_rows(
                 song_path,
                 source_dir,
                 track,
-                audio_format,
+                stem_format,
             )
             rows.append({
                 "phase": phase,
@@ -342,6 +415,136 @@ def write_manifest(output_dir: Path, rows: list[dict]) -> Path:
     return manifest_path
 
 
+def prepare_phase1b_audit(
+    *,
+    source_dir: Path,
+    output_dir: Path,
+    grid_cfg: dict,
+    winners_path: Path,
+    sample_seed: int,
+) -> tuple[Path, list[dict], list[dict]]:
+    clip_seconds = float(grid_cfg.get("clip_seconds", DEFAULT_CLIP_SECONDS))
+    per_category = int(grid_cfg.get("diverse_stems_per_category", DEFAULT_DIVERSE_PER_CATEGORY))
+    min_rms = float(grid_cfg.get("min_rms", DEFAULT_MIN_RMS))
+    clips_dir = output_dir / "clips"
+    manifest_path = output_dir / "diverse_stems.yaml"
+
+    if manifest_path.is_file():
+        probe_stems = load_diverse_stems_manifest(manifest_path)
+    else:
+        probe_stems = select_diverse_stems(
+            source_dir,
+            per_category=per_category,
+            clip_seconds=clip_seconds,
+            min_rms=min_rms,
+            seed=sample_seed,
+        )
+        write_diverse_clip_dataset(
+            source_dir,
+            probe_stems,
+            clips_dir,
+            clip_seconds=clip_seconds,
+        )
+
+    phase1_winners = phase_winners(PHASE1, winners_path)
+    variants = build_noise_audit_variants(phase1_winners)
+    return clips_dir, probe_stems, variants
+
+
+
+def _link_phase4_clip_assets(*, sweep_root: Path, output_dir: Path) -> Path:
+    """Expose phase-1b clips + manifest under the phase-4 output tree for listening."""
+    phase1b_dir = phase_output_dir(sweep_root, PHASE1B)
+    source_clips = phase1b_dir / "clips"
+    source_manifest = phase1b_dir / "diverse_stems.yaml"
+    if not source_manifest.is_file():
+        raise RuntimeError(
+            f"{PHASE4} requires phase-1b diverse_stems.yaml: {source_manifest}. "
+            f"Run phase 1b first."
+        )
+    if not source_clips.is_dir():
+        raise RuntimeError(
+            f"{PHASE4} requires phase-1b clips dir: {source_clips}. Run phase 1b first."
+        )
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    dest_manifest = output_dir / "diverse_stems.yaml"
+    if not dest_manifest.exists():
+        shutil.copy2(source_manifest, dest_manifest)
+    expose_clips_dir(output_dir=output_dir, source_clips=source_clips)
+    return source_clips
+
+
+def prepare_phase4_verify(
+    *,
+    sweep_root: Path,
+    output_dir: Path,
+    source_dir: Path,
+    grid_cfg: dict,
+    sample_seed: int,
+) -> tuple[Path, list[dict], list[dict]]:
+    phase1b_dir = phase_output_dir(sweep_root, PHASE1B)
+    reference_clips = phase1b_dir / "clips"
+    reference_manifest = phase1b_dir / "diverse_stems.yaml"
+    if not reference_manifest.is_file():
+        raise RuntimeError(
+            f"{PHASE4} requires phase-1b diverse_stems.yaml: {reference_manifest}. "
+            f"Run phase 1b first."
+        )
+    if not reference_clips.is_dir():
+        raise RuntimeError(
+            f"{PHASE4} requires phase-1b clips dir: {reference_clips}. Run phase 1b first."
+        )
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    manifest_path = output_dir / "diverse_stems.yaml"
+    if not manifest_path.is_file():
+        shutil.copy2(reference_manifest, manifest_path)
+
+    probe_stems = load_diverse_stems_manifest(manifest_path)
+    clip_seconds = float(grid_cfg.get("clip_seconds", DEFAULT_CLIP_SECONDS))
+    min_rms = float(grid_cfg.get("min_rms", DEFAULT_MIN_RMS))
+    variants = [{"id": LOCKED_VERIFY_VARIANT}]
+
+    if grid_cfg.get("replace_silent_clips", True):
+        output_clips = output_dir / "clips"
+        probe_stems, replacements = replace_silent_probe_clips(
+            probe_stems,
+            reference_clips_dir=reference_clips,
+            source_dir=source_dir,
+            output_clips_dir=output_clips,
+            clip_seconds=clip_seconds,
+            min_rms=min_rms,
+            seed=sample_seed,
+        )
+        if replacements:
+            with open(manifest_path, "w") as f:
+                yaml.safe_dump(
+                    {"clip_seconds": clip_seconds, "stems": probe_stems},
+                    f,
+                    sort_keys=False,
+                    default_flow_style=False,
+                )
+            for entry in replacements:
+                if entry["from_id"] == entry["to_id"]:
+                    print(
+                        f"Re-clipped silent stem in {entry['category']}: "
+                        f"{entry['from_id']} @ {entry['clip_start_seconds']}s"
+                    )
+                else:
+                    print(
+                        f"Replaced silent clip in {entry['category']}: "
+                        f"{entry['from_id']} -> {entry['to_id']}"
+                    )
+            clips_dir = output_clips
+        else:
+            clips_dir = _link_phase4_clip_assets(sweep_root=sweep_root, output_dir=output_dir)
+    else:
+        clips_dir = _link_phase4_clip_assets(sweep_root=sweep_root, output_dir=output_dir)
+
+    return clips_dir, probe_stems, variants
+
+
 def run_preset_sweep(
     *,
     phase: str,
@@ -357,38 +560,67 @@ def run_preset_sweep(
     sample_seed: int = ABLATION_SAMPLE_SEED,
     limit_stems: int | None = None,
     limit_variants: int | None = None,
+    silence_enforce: bool | None = None,
 ) -> pd.DataFrame:
-    if phase not in PHASES:
+    if phase not in SWEEP_PHASES:
         raise ValueError(f"Unknown phase: {phase}")
 
     configure_sa3_env()
     source_dir = source_dir.resolve()
-    output_dir = phase_output_dir(output_dir.resolve(), phase)
+    sweep_root = output_dir.resolve()
+    output_dir = phase_output_dir(sweep_root, phase)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     _require_phase_prerequisites(phase, winners_path)
 
     probe_cfg = load_yaml(probe_stems_path)
     grid_cfg = load_yaml(grid_path)
-    probe_stems = list(probe_cfg["stems"])
-    validate_probe_stems(probe_stems)
-    variants = list(grid_cfg["variants"])
+    realify_source_dir = source_dir
+
+    if phase == PHASE1B:
+        clips_dir, probe_stems, variants = prepare_phase1b_audit(
+            source_dir=source_dir,
+            output_dir=output_dir,
+            grid_cfg=grid_cfg,
+            winners_path=winners_path,
+            sample_seed=sample_seed,
+        )
+        realify_source_dir = clips_dir
+    elif phase == PHASE4:
+        clips_dir, probe_stems, variants = prepare_phase4_verify(
+            sweep_root=sweep_root,
+            output_dir=output_dir,
+            source_dir=source_dir,
+            grid_cfg=grid_cfg,
+            sample_seed=sample_seed,
+        )
+        realify_source_dir = clips_dir
+    else:
+        probe_stems = list(probe_cfg["stems"])
+        validate_probe_stems(probe_stems)
+        variants = list(grid_cfg["variants"])
+
     if limit_stems is not None:
         probe_stems = probe_stems[:limit_stems]
     if limit_variants is not None:
         variants = variants[:limit_variants]
 
+    if silence_enforce is None:
+        silence_enforce = resolve_silence_enforce(phase, grid_cfg)
+
     for variant in variants:
-        if phase == PHASE1 and "init_noise_level" not in variant:
+        if phase in (PHASE1, PHASE1B) and "init_noise_level" not in variant:
             raise ValueError(f"Phase 1 variant missing init_noise_level: {variant}")
         if phase == PHASE2 and "prompt_variant" not in variant:
             raise ValueError(f"Phase 2 variant missing prompt_variant: {variant}")
         if phase == PHASE3 and ("steps" not in variant or "cfg_scale" not in variant):
             raise ValueError(f"Phase 3 variant missing steps/cfg_scale: {variant}")
+        if phase == PHASE4 and variant.get("id") != LOCKED_VERIFY_VARIANT:
+            raise ValueError(f"Phase 4 expects locked variant id {LOCKED_VERIFY_VARIANT!r}")
 
     tasks = build_sweep_tasks(
         phase=phase,
-        source_dir=source_dir,
+        source_dir=realify_source_dir,
         output_dir=output_dir,
         probe_stems=probe_stems,
         variants=variants,
@@ -400,7 +632,7 @@ def run_preset_sweep(
 
     manifest_rows = build_manifest_rows(
         phase=phase,
-        source_dir=source_dir,
+        source_dir=realify_source_dir,
         output_dir=output_dir,
         probe_stems=probe_stems,
         variants=variants,
@@ -413,12 +645,14 @@ def run_preset_sweep(
 
     use_gpu = realify_uses_gpu(model) if tasks else False
     print(f"Preset sweep phase: {phase}")
-    print(f"Preset sweep source: {source_dir}")
+    print(f"Preset sweep source: {realify_source_dir}")
     print(f"Preset sweep output: {output_dir}")
     print(f"Manifest: {manifest_path}")
     print(f"Probe stems: {len(probe_stems)}")
     print(f"Variants: {len(variants)}")
     print(f"Tasks queued: {len(tasks)} (skipped existing outputs)")
+    if silence_enforce:
+        print("Silence enforcement: enabled (reference-gated post-SA3 silence)")
     log_realify_plan(
         source_dir=source_dir,
         output_dir=output_dir,
@@ -443,6 +677,7 @@ def run_preset_sweep(
                 audio_format=audio_format,
                 batch_size=1,
                 desc="Preset sweep (GPU)",
+                silence_enforce=silence_enforce,
             )
         else:
             _run_realify_gpu(
@@ -451,6 +686,7 @@ def run_preset_sweep(
                 presets_filepath=REALIFY_PRESETS_PATH,
                 batch_size=batch_size,
                 audio_format=audio_format,
+                silence_enforce=silence_enforce,
             )
     else:
         _run_realify_cpu(
@@ -460,6 +696,7 @@ def run_preset_sweep(
             jobs=jobs,
             batch_size=batch_size,
             audio_format=audio_format,
+            silence_enforce=silence_enforce,
         )
 
     return pd.read_csv(manifest_path)
@@ -472,7 +709,7 @@ def parse_args(args=None, namespace=None):
     parser.add_argument(
         "--phase",
         required=True,
-        choices=list(PHASES),
+        choices=list(SWEEP_PHASES),
         help="Tuning phase to run.",
     )
     parser.add_argument(

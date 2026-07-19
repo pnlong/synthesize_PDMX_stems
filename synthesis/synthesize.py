@@ -21,6 +21,8 @@ from shared.config import (
     MAX_N_NOTES_IN_STEM,
     NA_STRING,
     OUTPUT_DIR,
+    REALIFY_BATCH_SIZE,
+    REALIFY_SILENCE_ENFORCE,
     RENDER_MODE_BASIC,
     RENDER_MODE_SLAKH,
     SONGS_TABLE_COLUMNS,
@@ -128,12 +130,8 @@ def synthesize_song_at_index(
             track_midi.tracks.append(track_midi_track)
             slakh_cfg: dict = {}
             if args.render_mode == RENDER_MODE_SLAKH:
-                import random
-
                 from synthesis.patches import (
                     apply_patch_to_midi_track,
-                    patch_group_key,
-                    patch_seed,
                     select_patch,
                     slakh_render_for_track,
                 )
@@ -143,21 +141,13 @@ def synthesize_song_at_index(
                     is_drum=is_drum,
                     track_name=track_name,
                 )
-                pool_id = slakh_cfg.get("pool_id")
-                rng = None
-                if pool_id:
-                    group = patch_group_key(program, is_drum)
-                    rng = random.Random(
-                        patch_seed(args.sample_seed, path_output, group)
-                    )
                 apply_patch_to_midi_track(
                     track_midi_track,
                     select_patch(
                         program=program,
                         is_drum=is_drum,
-                        pool_id=pool_id,
+                        pool_id=None,
                         category=slakh_cfg.get("category"),
-                        rng=rng,
                     ),
                 )
             track_midi.save(track_paths[j])
@@ -180,7 +170,27 @@ def synthesize_song_at_index(
         for j, track_path in enumerate(track_paths):
             meta = track_render_meta[j]
             soundfont_filepath = meta.get("soundfont_filepath") or args.soundfont_filepath
-            if meta.get("soundfont"):
+            if args.render_mode == RENDER_MODE_SLAKH:
+                from experiments.patch_sweep.config import soundfont_file_for_id
+                from experiments.patch_sweep.winners import pick_soundfont_id
+
+                soundfont_ids = meta.get("soundfont_ids") or []
+                if not soundfont_ids and meta.get("soundfont_id"):
+                    soundfont_ids = [meta["soundfont_id"]]
+                if soundfont_ids:
+                    category = meta.get("category") or "default"
+                    picked = pick_soundfont_id(
+                        list(soundfont_ids),
+                        category=category,
+                        song_path=path_output,
+                        sample_seed=args.sample_seed,
+                    )
+                    soundfont_filepath = str(
+                        Path(SOUNDFONT_DIR) / soundfont_file_for_id(picked)
+                    )
+                elif meta.get("soundfont"):
+                    soundfont_filepath = str(Path(SOUNDFONT_DIR) / meta["soundfont"])
+            elif meta.get("soundfont"):
                 soundfont_filepath = str(Path(SOUNDFONT_DIR) / meta["soundfont"])
             fx_profile = meta.get("fx_profile")
             waveform = get_waveform_tensor(
@@ -386,6 +396,7 @@ def run_realify_pass(args, source_dir: str, dest_dir: str):
         audio_format=audio_format,
         sample_seed=args.sample_seed,
         reset=args.reset,
+        silence_enforce=REALIFY_SILENCE_ENFORCE and not args.no_silence_enforce,
     )
 
 

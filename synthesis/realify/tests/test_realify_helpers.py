@@ -80,6 +80,48 @@ def test_build_realify_tasks_skips_existing(tmp_path: Path):
     assert tasks[0]["out_path"] == str(out_song_dir / "stem_1.flac")
 
 
+def test_build_realify_tasks_copies_passthrough_when_realify_disabled(tmp_path: Path):
+    from synthesis.realify.preset_config import realify_enabled
+
+    source_dir = tmp_path / "basic"
+    output_dir = tmp_path / "basic_realify"
+    song_dir = source_dir / "data" / "song"
+    out_song_dir = output_dir / "data" / "song"
+    song_dir.mkdir(parents=True)
+
+    sr = 44100
+    sf.write(str(song_dir / "stem_0.flac"), np.ones(sr) * 0.1, sr, format="FLAC")
+    sf.write(str(song_dir / "stem_1.flac"), np.ones(sr) * 0.2, sr, format="FLAC")
+
+    stems = pd.DataFrame({
+        "path": [str(song_dir), str(song_dir)],
+        "track": [0, 1],
+        "name": ["Organ", "Piano"],
+        "is_drum": [False, False],
+    })
+    stems.to_csv(source_dir / "stems.csv", index=False)
+
+    captions = pd.DataFrame({
+        "path": [str(song_dir), str(song_dir)],
+        "track": [0, 1],
+        "prompt": ["organ", "piano"],
+    })
+
+    presets = {
+        "default": {"init_noise_level": 0.45, "prompt_variant": "current"},
+        "routing": [{"category": "organ", "name_keywords": ["organ"]}],
+        "categories": {"organ": {"realify": False}},
+    }
+
+    tasks = build_realify_tasks(
+        captions, source_dir, output_dir, presets=presets,
+    )
+    assert len(tasks) == 1
+    assert tasks[0]["out_path"] == str(out_song_dir / "stem_1.flac")
+    assert (out_song_dir / "stem_0.flac").is_file()
+    assert not realify_enabled(presets["categories"]["organ"])
+
+
 def test_build_realify_tasks_skips_invalid_stem(tmp_path: Path, monkeypatch):
     source_dir = tmp_path / "basic"
     output_dir = tmp_path / "basic_realify"
@@ -397,7 +439,12 @@ def test_run_realify_gpu_uses_spawn_pool(tmp_path: Path, monkeypatch):
     )
 
     assert captured["pool_kwargs"]["processes"] == 2
-    assert captured["pool_kwargs"]["initargs"] == ("medium", str(tmp_path / "presets" / "categories.yaml"), 1)
+    assert captured["pool_kwargs"]["initargs"] == (
+        "medium",
+        str(tmp_path / "presets" / "categories.yaml"),
+        1,
+        True,
+    )
     assert captured["imap_func"] == "_realify_gpu_worker_shard"
     assert captured["imap_chunksize"] == 1
     assert captured["pool_closed"] is True
@@ -450,10 +497,10 @@ def test_iter_realify_batches_groups_by_preset_and_size(monkeypatch):
         ],
     }
     tasks = [
-        {"row": {"prompt": "a", "is_drum": False, "name": "Piano"}, "duration": 10.0},
-        {"row": {"prompt": "b", "is_drum": False, "name": "Piano"}, "duration": 12.0},
-        {"row": {"prompt": "c", "is_drum": True, "name": "Kick"}, "duration": 8.0},
-        {"row": {"prompt": "d", "is_drum": False, "name": "Piano"}, "duration": 400.0},
+        {"row": {"prompt": "a", "is_drum": False, "name": "Piano"}, "duration": 10.0, "n_samples": 441000},
+        {"row": {"prompt": "b", "is_drum": False, "name": "Piano"}, "duration": 12.0, "n_samples": 441000},
+        {"row": {"prompt": "c", "is_drum": True, "name": "Kick"}, "duration": 8.0, "n_samples": 352800},
+        {"row": {"prompt": "d", "is_drum": False, "name": "Piano"}, "duration": 400.0, "n_samples": 441000},
     ]
     monkeypatch.setattr(
         "synthesis.realify.realify.task_needs_chunking",
@@ -512,6 +559,59 @@ def test_realify_stems_batch_calls_generate_once(tmp_path: Path, monkeypatch):
     assert calls[0]["prompt"] == ["a", "b"]
     assert calls[0]["seed"] == [1, 2]
     assert len(calls[0]["init_audio"]) == 2
+    assert calls[0]["init_audio"][0][1].shape[-1] == calls[0]["init_audio"][1][1].shape[-1]
+
+
+def test_realify_stems_batch_pads_mismatched_lengths(tmp_path: Path, monkeypatch):
+    import torch
+
+    calls = []
+
+    class FakeModel:
+        model_config = {"sample_size": 123}
+        model = type("M", (), {"sample_rate": 44100})()
+
+        def generate(self, **kwargs):
+            calls.append(kwargs)
+            batch_size = kwargs["batch_size"]
+            return torch.zeros(batch_size, 2, 50)
+
+    presets = {"default": {"steps": 8, "cfg_scale": 1.0}}
+    tasks = [
+        {
+            "row": {"prompt": "a"},
+            "stem_path": str(tmp_path / "a.flac"),
+            "out_path": str(tmp_path / "out_a.flac"),
+            "duration": 1.0,
+            "seed": 1,
+            "audio_format": "flac",
+            "n_samples": 30,
+        },
+        {
+            "row": {"prompt": "b"},
+            "stem_path": str(tmp_path / "b.flac"),
+            "out_path": str(tmp_path / "out_b.flac"),
+            "duration": 1.0,
+            "seed": 2,
+            "audio_format": "flac",
+            "n_samples": 40,
+        },
+    ]
+    written = []
+    monkeypatch.setattr(
+        "synthesis.realify.realify.load_stem",
+        lambda path: torch.ones(2, 30) if path.name == "a.flac" else torch.ones(2, 40),
+    )
+    monkeypatch.setattr(
+        "synthesis.realify.realify.write_audio",
+        lambda audio, path, audio_format: written.append((audio.shape[-1], path)),
+    )
+
+    realify_stems_batch(tasks, model=FakeModel(), presets=presets, audio_format="flac")
+    assert calls[0]["init_audio"][0][1].shape[-1] == 40
+    assert calls[0]["init_audio"][1][1].shape[-1] == 40
+    assert written[0][0] == 30
+    assert written[1][0] == 40
 
 
 def test_write_mixtures_for_dataset_uses_pool(tmp_path: Path, monkeypatch):

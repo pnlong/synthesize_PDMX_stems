@@ -1,45 +1,43 @@
-"""Tests for sweep listening session helpers."""
+"""Tests for listening session helpers."""
 
-from experiments.listening.session import (
-    blind_labels,
-    blinded_variant_order,
-    stem_order,
-    storage_key,
-)
+from pathlib import Path
 
+import pandas as pd
 
-def test_blind_labels():
-    assert blind_labels(3) == ["A", "B", "C"]
-    assert blind_labels(27)[-1] == "AA"
+from experiments.listening.catalog import SweepCatalog
+from experiments.listening.session import rubric_for_catalog
 
 
-def test_blinded_variant_order_reproducible():
-    first = blinded_variant_order(
-        ["v1", "v2", "v3"],
-        stem_id="piano_world",
-        session_seed=42,
-    )
-    second = blinded_variant_order(
-        ["v1", "v2", "v3"],
-        stem_id="piano_world",
-        session_seed=42,
-    )
-    assert first == second
-    labels = [label for label, _ in first]
-    assert len(set(labels)) == 3
+def test_rubric_for_catalog_uses_phase1b_guidance(tmp_path: Path):
+    sweep_dir = tmp_path / "phase1b"
+    sweep_dir.mkdir()
+    pd.DataFrame([{
+        "phase": "phase1b_noise_audit",
+        "variant_id": "noise0.45",
+        "stem_id": "piano_test",
+        "path": "/song",
+        "track": 0,
+        "out_path": str(sweep_dir / "variants/noise0.45/data/song/stem_0.flac"),
+    }]).to_csv(sweep_dir / "manifest.csv", index=False)
+
+    catalog = SweepCatalog("preset", sweep_dir)
+    rubric = rubric_for_catalog(catalog)
+    assert "played sections" in rubric["content_help"]
+    assert "silence-corrected" in rubric["content_help"]
 
 
-def test_blinded_variant_order_differs_by_stem():
-    a = blinded_variant_order(["v1", "v2", "v3", "v4"], stem_id="stem_a", session_seed=42)
-    b = blinded_variant_order(["v1", "v2", "v3", "v4"], stem_id="stem_b", session_seed=42)
-    assert [variant for _, variant in a] != [variant for _, variant in b]
+def test_rubric_for_catalog_default_preset(tmp_path: Path):
+    sweep_dir = tmp_path / "phase1"
+    sweep_dir.mkdir()
+    pd.DataFrame([{
+        "phase": "phase1_noise",
+        "variant_id": "noise0.45",
+        "stem_id": "piano_test",
+        "path": "/song",
+        "track": 0,
+        "out_path": str(sweep_dir / "variants/noise0.45/data/song/stem_0.flac"),
+    }]).to_csv(sweep_dir / "manifest.csv", index=False)
 
-
-def test_stem_order_shuffles():
-    ordered = stem_order(["a", "b", "c", "d"], session_seed=7)
-    assert sorted(ordered) == ["a", "b", "c", "d"]
-    assert stem_order(["a", "b", "c", "d"], session_seed=7) == ordered
-
-
-def test_storage_key():
-    assert storage_key("preset", "abc123") == "sweep_test_preset_abc123"
+    catalog = SweepCatalog("preset", sweep_dir)
+    rubric = rubric_for_catalog(catalog)
+    assert rubric["content_help"] == "Same melody, rhythm, and timing as the reference?"
