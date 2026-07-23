@@ -47,6 +47,8 @@ testpaths = [
     "experiments/preset_sweep/tests",
     "experiments/patch_sweep/tests",
     "experiments/listening/tests",
+    "experiments/listening_shared/tests",
+    "experiments/ablation_listening/tests",
     "experiments/tests",
 ]
 markers = [

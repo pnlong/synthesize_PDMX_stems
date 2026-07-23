@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ablation Listening Test</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/shared/slider.css">
+</head>
+<body>
+  <div class="landing">
+    <h1>Ablation Listening Test</h1>
+    <p class="subtitle">Compare blinded A2/B1/B2 samples against a visible <strong>Reference (A1)</strong>. Rate blind samples on content (vs reference) and realism. Rate reference realism only.</p>
+
+    <p>Use wired headphones in a quiet room. All samples in a trial were generated from the same MIDI.</p>
+
+    <table class="scale-table">
+      <thead>
+        <tr><th>Band</th><th>Content</th><th>Realism</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>0–20</td><td>Very different</td><td>Very synthetic</td></tr>
+        <tr><td>20–40</td><td>Different</td><td>Synthetic</td></tr>
+        <tr><td>40–60</td><td>Mostly same</td><td>Mixed</td></tr>
+        <tr><td>60–80</td><td>Same</td><td>Realistic</td></tr>
+        <tr><td>80–100</td><td>Identical</td><td>Very realistic</td></tr>
+      </tbody>
+    </table>
+
+    <p class="hint">Click a band for a quick rating (snaps to 10, 30, 50, 70, or 90). Drag the slider or type a number for a precise score.</p>
+    <p class="hint">Remote access: host with <code>--host 0.0.0.0</code> and share via <code>ngrok http 8767</code>.</p>
+
+    <a class="primary-btn" href="/test?seed=42">Start test</a>
+  </div>
+</body>
+</html>

@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ablation Listening Test</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/shared/slider.css">
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div>
+        <h1 id="title">Ablation Listening Test</h1>
+        <p id="progress" class="progress-text"></p>
+        <p id="save-status" class="save-status hidden"></p>
+      </div>
+      <div class="topbar-actions">
+        <a href="/" class="link-btn">Intro</a>
+        <button id="save-btn" type="button" disabled>Save to server</button>
+        <button id="finish-btn" type="button" disabled>Finish</button>
+      </div>
+    </header>
+
+    <div id="setup" class="test-panel">
+      <h2>Before you begin</h2>
+      <p class="hint">Enter a listener ID (your name or initials). Responses save automatically as you go.</p>
+      <div class="listener-form">
+        <label>Listener ID
+          <input id="listener-id" type="text" required placeholder="phillip">
+        </label>
+        <label>Session seed (optional)
+          <input id="session-seed" type="number" value="42">
+        </label>
+      </div>
+      <button id="start-btn" type="button" class="primary-btn">Begin trials</button>
+    </div>
+
+    <div id="loading" class="loading hidden">Loading…</div>
+
+    <div id="complete" class="complete hidden">
+      <h2>Test complete</h2>
+      <p id="complete-message">Responses saved on the server.</p>
+      <p id="complete-path" class="meta"></p>
+    </div>
+
+    <main id="test-panel" class="test-panel hidden">
+      <section class="trial-info">
+        <h2 id="trial-title"></h2>
+        <p id="trial-meta" class="meta"></p>
+        <p id="trial-note" class="note"></p>
+      </section>
+
+      <section id="reference-section" class="reference-section hidden">
+        <h3>Reference (A1 — basic synthesis)</h3>
+        <p class="hint">Content ground truth. Compare blind samples to this reference. Rate realism only.</p>
+        <div id="reference-audio" class="audio-slot"></div>
+        <div id="reference-sliders"></div>
+      </section>
+
+      <section class="samples-section">
+        <h3>Rate blind samples (A2 / B1 / B2)</h3>
+        <p id="rubric-hint" class="rubric-hint"></p>
+        <div id="samples" class="samples"></div>
+      </section>
+      <footer class="nav-footer">
+        <button id="prev-btn" type="button">← Previous</button>
+        <button id="next-btn" type="button">Next trial →</button>
+      </footer>
+    </main>
+  </div>
+  <script type="module" src="/static/test.js"></script>
+</body>
+</html>

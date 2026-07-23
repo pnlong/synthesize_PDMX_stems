@@ -1,0 +1,23 @@
+# Model listening test manifest — populate after SAO training.
+#
+# Each trial compares generation outputs from two or more model arms on the same
+# prompt/conditioning. Structure mirrors ablation_listening trial_manifest.yaml.
+
+test_id: model_listening_v1
+clip_seconds: 10.0
+seed: 42
+models: []
+trials: []
+
+# Example trial (uncomment and adapt after training):
+# trials:
+#   - id: prompt_01
+#     type: generation
+#     prompt_id: held_out_01
+#     note: "Short piano phrase"
+#     clip_seconds: 10.0
+#     clip_start_seconds: 0.0
+#     audio_format: mp3
+#     conditions:
+#       slakh2100: slakh2100/prompt_01.mp3
+#       spdmx_b2: spdmx_b2/prompt_01.mp3

@@ -1,0 +1,79 @@
+{
+  "n_ratings": 40,
+  "n_listeners": 1,
+  "winner": "slakh_realify",
+  "means_by_condition": {
+    "basic": {
+      "content": 77.4,
+      "realism": 56.4,
+      "content_band": "Same",
+      "realism_band": "Mixed"
+    },
+    "basic_realify": {
+      "content": 72.4,
+      "realism": 81.4,
+      "content_band": "Same",
+      "realism_band": "Very realistic"
+    },
+    "slakh": {
+      "content": 80.4,
+      "realism": 73.4,
+      "content_band": "Identical",
+      "realism_band": "Realistic"
+    },
+    "slakh_realify": {
+      "content": 84.4,
+      "realism": 89.4,
+      "content_band": "Identical",
+      "realism_band": "Very realistic"
+    }
+  },
+  "mixture_means": {
+    "content": {
+      "basic": 77.0,
+      "basic_realify": 72.0,
+      "slakh": 80.0,
+      "slakh_realify": 84.0
+    },
+    "realism": {
+      "basic": 56.5,
+      "basic_realify": 81.5,
+      "slakh": 73.5,
+      "slakh_realify": 89.5
+    }
+  },
+  "stem_means": {
+    "content": {
+      "basic": 77.67,
+      "basic_realify": 72.67,
+      "slakh": 80.67,
+      "slakh_realify": 84.67
+    },
+    "realism": {
+      "basic": 56.33,
+      "basic_realify": 81.33,
+      "slakh": 73.33,
+      "slakh_realify": 89.33
+    }
+  },
+  "factorial_content": {
+    "basic": {
+      "synthetic": 77.4,
+      "realified": 72.4
+    },
+    "slakh": {
+      "synthetic": 80.4,
+      "realified": 84.4
+    }
+  },
+  "factorial_realism": {
+    "basic": {
+      "synthetic": 56.4,
+      "realified": 81.4
+    },
+    "slakh": {
+      "synthetic": 73.4,
+      "realified": 89.4
+    }
+  }
+}

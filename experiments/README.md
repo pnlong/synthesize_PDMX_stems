@@ -14,6 +14,9 @@ experiments/
 ├── TUNING.md                 # methodology for patch + preset tuning
 ├── probe_stems.yaml          # shared probe set (24 stems: 3 per category × 8)
 ├── listening/                # sweep listening-test server (port 8766)
+├── listening_shared/         # shared 0–100 slider UI + scale helpers
+├── ablation_listening/       # Test 1: A1–B2 dataset comparison (port 8767)
+├── model_listening/          # Test 2: SAO downstream comparison (port 8768)
 ├── patch_sweep/              # Slakh: soundfonts, FX, program pools
 │   └── soundfonts.yaml       # candidate GM banks (phase 1)
 └── preset_sweep/             # SA3 init_noise_level + prompt tuning
@@ -76,7 +79,22 @@ uv run python -m synthesis.listening.serve
 
 Compare locked configs across A1–B2 (port 8765).
 
-## Sweep docs
+### Stage 5 — Formal listening tests (0–100 scale)
+
+**Test 1 — dataset ablation (A1–B2):**
+
+```bash
+uv run python -m experiments.ablation_listening.prepare_clips
+uv run python -m experiments.ablation_listening.serve --host 0.0.0.0 --port 8767
+# ngrok http 8767
+uv run python -m experiments.ablation_listening.aggregate \
+  --responses experiments/ablation_listening/output/responses/responses_*.json \
+  --output experiments/ablation_listening/output/results_notes.md
+```
+
+**Test 2 — SAO downstream:** see [`model_listening/README.md`](model_listening/README.md) (populate after training).
+
+Shared UI and ngrok notes: [`listening_shared/README.md`](listening_shared/README.md).
 
 - [`TUNING.md`](TUNING.md) — overall methodology (start here)
 - [`patch_sweep/GUIDE.md`](patch_sweep/GUIDE.md) — **step-by-step Slakh tuning runbook**

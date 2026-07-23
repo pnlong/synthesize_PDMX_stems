@@ -1,0 +1,151 @@
+test_id: ablation_listening_v1
+clip_seconds: 10.0
+seed: 42
+ablations_dir: /deepfreeze/pnlong/SPDMX/dev/ablations
+trials:
+- id: mix_01
+  type: mixture
+  song_id: 11/15/QmTdtCtn1Meh4EAQMSbdFyVZCoKfv1MVc56A2jRRsLgHyM
+  song_path: /deepfreeze/pnlong/SPDMX/dev/ablations/basic/data/11/15/QmTdtCtn1Meh4EAQMSbdFyVZCoKfv1MVc56A2jRRsLgHyM
+  track: null
+  category: null
+  clip_seconds: 10.0
+  clip_start_seconds: 0.0
+  audio_format: mp3
+  conditions:
+    basic: mix_01/basic.mp3
+    basic_realify: mix_01/basic_realify.mp3
+    slakh: mix_01/slakh.mp3
+    slakh_realify: mix_01/slakh_realify.mp3
+- id: mix_02
+  type: mixture
+  song_id: 9/7/QmR8mMxk49HBt6sqZ2iNqk6qFbEukrML7dLWJpp57vxSXh
+  song_path: /deepfreeze/pnlong/SPDMX/dev/ablations/basic/data/9/7/QmR8mMxk49HBt6sqZ2iNqk6qFbEukrML7dLWJpp57vxSXh
+  track: null
+  category: null
+  clip_seconds: 10.0
+  clip_start_seconds: 0.0
+  audio_format: mp3
+  conditions:
+    basic: mix_02/basic.mp3
+    basic_realify: mix_02/basic_realify.mp3
+    slakh: mix_02/slakh.mp3
+    slakh_realify: mix_02/slakh_realify.mp3
+- id: mix_03
+  type: mixture
+  song_id: 15/27/QmXJNMzu9GiLw6C9pRRDx6jzLY8deSxt5jWDKauFmvhPN5
+  song_path: /deepfreeze/pnlong/SPDMX/dev/ablations/basic/data/15/27/QmXJNMzu9GiLw6C9pRRDx6jzLY8deSxt5jWDKauFmvhPN5
+  track: null
+  category: null
+  clip_seconds: 10.0
+  clip_start_seconds: 0.0
+  audio_format: mp3
+  conditions:
+    basic: mix_03/basic.mp3
+    basic_realify: mix_03/basic_realify.mp3
+    slakh: mix_03/slakh.mp3
+    slakh_realify: mix_03/slakh_realify.mp3
+- id: mix_04
+  type: mixture
+  song_id: 17/15/QmZddxhx5uth5CNzY9ji6VWUQ3eQ6aMpcW6yUbnfKZsh4K
+  song_path: /deepfreeze/pnlong/SPDMX/dev/ablations/basic/data/17/15/QmZddxhx5uth5CNzY9ji6VWUQ3eQ6aMpcW6yUbnfKZsh4K
+  track: null
+  category: null
+  clip_seconds: 10.0
+  clip_start_seconds: 0.0
+  audio_format: mp3
+  conditions:
+    basic: mix_04/basic.mp3
+    basic_realify: mix_04/basic_realify.mp3
+    slakh: mix_04/slakh.mp3
+    slakh_realify: mix_04/slakh_realify.mp3
+- id: stem_piano
+  type: stem
+  song_id: 17/2/QmZ3vfJw1vS5Me9KDoUYSm7RYU4FYSAwioiFHbtogRihgd
+  song_path: /deepfreeze/pnlong/SPDMX/dev/ablations/basic/data/17/2/QmZ3vfJw1vS5Me9KDoUYSm7RYU4FYSAwioiFHbtogRihgd
+  track: 0
+  category: piano
+  note: classical piano (GM 0)
+  clip_seconds: 10.0
+  clip_start_seconds: 1.0
+  audio_format: mp3
+  conditions:
+    basic: stem_piano/basic.mp3
+    basic_realify: stem_piano/basic_realify.mp3
+    slakh: stem_piano/slakh.mp3
+    slakh_realify: stem_piano/slakh_realify.mp3
+- id: stem_drums
+  type: stem
+  song_id: 8/1/QmQ2wVW8DmTc8zSG5SeUW4Ura2fL2AF68MrGCyqdgYtct8
+  song_path: /deepfreeze/pnlong/SPDMX/dev/ablations/basic/data/8/1/QmQ2wVW8DmTc8zSG5SeUW4Ura2fL2AF68MrGCyqdgYtct8
+  track: 5
+  category: drums
+  note: Concert Bass Drum
+  clip_seconds: 10.0
+  clip_start_seconds: 0.0
+  audio_format: mp3
+  conditions:
+    basic: stem_drums/basic.mp3
+    basic_realify: stem_drums/basic_realify.mp3
+    slakh: stem_drums/slakh.mp3
+    slakh_realify: stem_drums/slakh_realify.mp3
+- id: stem_strings
+  type: stem
+  song_id: 0/22/QmaGgp5RbbCsxSv2czHmZgS9LEi3vHtJXrS7UQa5QR1bJC
+  song_path: /deepfreeze/pnlong/SPDMX/dev/ablations/basic/data/0/22/QmaGgp5RbbCsxSv2czHmZgS9LEi3vHtJXrS7UQa5QR1bJC
+  track: 0
+  category: strings
+  note: "Viol\xEDn"
+  clip_seconds: 10.0
+  clip_start_seconds: 0.0
+  audio_format: mp3
+  conditions:
+    basic: stem_strings/basic.mp3
+    basic_realify: stem_strings/basic_realify.mp3
+    slakh: stem_strings/slakh.mp3
+    slakh_realify: stem_strings/slakh_realify.mp3
+- id: stem_wind
+  type: stem
+  song_id: 8/1/QmQ2wVW8DmTc8zSG5SeUW4Ura2fL2AF68MrGCyqdgYtct8
+  song_path: /deepfreeze/pnlong/SPDMX/dev/ablations/basic/data/8/1/QmQ2wVW8DmTc8zSG5SeUW4Ura2fL2AF68MrGCyqdgYtct8
+  track: 1
+  category: wind
+  note: Flute B
+  clip_seconds: 10.0
+  clip_start_seconds: 0.0
+  audio_format: mp3
+  conditions:
+    basic: stem_wind/basic.mp3
+    basic_realify: stem_wind/basic_realify.mp3
+    slakh: stem_wind/slakh.mp3
+    slakh_realify: stem_wind/slakh_realify.mp3
+- id: stem_voice
+  type: stem
+  song_id: 10/24/QmSHtwDNitZEyTm7A4bvsTJ4yZNjnjCo2ev3expp7b4pLS
+  song_path: /deepfreeze/pnlong/SPDMX/dev/ablations/basic/data/10/24/QmSHtwDNitZEyTm7A4bvsTJ4yZNjnjCo2ev3expp7b4pLS
+  track: 2
+  category: voice
+  note: choral soprano (GM 52 Choir Aahs)
+  clip_seconds: 10.0
+  clip_start_seconds: 0.0
+  audio_format: mp3
+  conditions:
+    basic: stem_voice/basic.mp3
+    basic_realify: stem_voice/basic_realify.mp3
+    slakh: stem_voice/slakh.mp3
+    slakh_realify: stem_voice/slakh_realify.mp3
+- id: stem_polyphonic
+  type: stem
+  song_id: 7/19/QmPfjDmFbF97N6T6ge4PFFiTQ9VxAFsqLPArCRoLuaTGb1
+  song_path: /deepfreeze/pnlong/SPDMX/dev/ablations/basic/data/7/19/QmPfjDmFbF97N6T6ge4PFFiTQ9VxAFsqLPArCRoLuaTGb1
+  track: 0
+  category: polyphonic
+  note: Koto
+  clip_seconds: 10.0
+  clip_start_seconds: 0.0
+  audio_format: mp3
+  conditions:
+    basic: stem_polyphonic/basic.mp3
+    basic_realify: stem_polyphonic/basic_realify.mp3
+    slakh: stem_polyphonic/slakh.mp3
+    slakh_realify: stem_polyphonic/slakh_realify.mp3

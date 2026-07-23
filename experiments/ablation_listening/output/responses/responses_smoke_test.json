@@ -1,0 +1,317 @@
+{
+  "test_id": "ablation_listening_v1",
+  "listener_id": "smoke_test",
+  "session_seed": 42,
+  "ratings": [
+    {
+      "trial_id": "mix_01",
+      "trial_type": "mixture",
+      "category": null,
+      "samples": [
+        {
+          "blind_label": "A",
+          "condition_id": "basic",
+          "content": 77,
+          "realism": 56
+        },
+        {
+          "blind_label": "B",
+          "condition_id": "basic_realify",
+          "content": 72,
+          "realism": 81
+        },
+        {
+          "blind_label": "C",
+          "condition_id": "slakh",
+          "content": 80,
+          "realism": 73
+        },
+        {
+          "blind_label": "D",
+          "condition_id": "slakh_realify",
+          "content": 84,
+          "realism": 89
+        }
+      ]
+    },
+    {
+      "trial_id": "mix_02",
+      "trial_type": "mixture",
+      "category": null,
+      "samples": [
+        {
+          "blind_label": "A",
+          "condition_id": "basic",
+          "content": 79,
+          "realism": 57
+        },
+        {
+          "blind_label": "B",
+          "condition_id": "basic_realify",
+          "content": 74,
+          "realism": 82
+        },
+        {
+          "blind_label": "C",
+          "condition_id": "slakh",
+          "content": 82,
+          "realism": 74
+        },
+        {
+          "blind_label": "D",
+          "condition_id": "slakh_realify",
+          "content": 86,
+          "realism": 90
+        }
+      ]
+    },
+    {
+      "trial_id": "mix_03",
+      "trial_type": "mixture",
+      "category": null,
+      "samples": [
+        {
+          "blind_label": "A",
+          "condition_id": "basic",
+          "content": 75,
+          "realism": 57
+        },
+        {
+          "blind_label": "B",
+          "condition_id": "basic_realify",
+          "content": 70,
+          "realism": 82
+        },
+        {
+          "blind_label": "C",
+          "condition_id": "slakh",
+          "content": 78,
+          "realism": 74
+        },
+        {
+          "blind_label": "D",
+          "condition_id": "slakh_realify",
+          "content": 82,
+          "realism": 90
+        }
+      ]
+    },
+    {
+      "trial_id": "mix_04",
+      "trial_type": "mixture",
+      "category": null,
+      "samples": [
+        {
+          "blind_label": "A",
+          "condition_id": "basic",
+          "content": 77,
+          "realism": 56
+        },
+        {
+          "blind_label": "B",
+          "condition_id": "basic_realify",
+          "content": 72,
+          "realism": 81
+        },
+        {
+          "blind_label": "C",
+          "condition_id": "slakh",
+          "content": 80,
+          "realism": 73
+        },
+        {
+          "blind_label": "D",
+          "condition_id": "slakh_realify",
+          "content": 84,
+          "realism": 89
+        }
+      ]
+    },
+    {
+      "trial_id": "stem_piano",
+      "trial_type": "stem",
+      "category": "piano",
+      "samples": [
+        {
+          "blind_label": "A",
+          "condition_id": "basic",
+          "content": 78,
+          "realism": 56
+        },
+        {
+          "blind_label": "B",
+          "condition_id": "basic_realify",
+          "content": 73,
+          "realism": 81
+        },
+        {
+          "blind_label": "C",
+          "condition_id": "slakh",
+          "content": 81,
+          "realism": 73
+        },
+        {
+          "blind_label": "D",
+          "condition_id": "slakh_realify",
+          "content": 85,
+          "realism": 89
+        }
+      ]
+    },
+    {
+      "trial_id": "stem_drums",
+      "trial_type": "stem",
+      "category": "drums",
+      "samples": [
+        {
+          "blind_label": "A",
+          "condition_id": "basic",
+          "content": 78,
+          "realism": 56
+        },
+        {
+          "blind_label": "B",
+          "condition_id": "basic_realify",
+          "content": 73,
+          "realism": 81
+        },
+        {
+          "blind_label": "C",
+          "condition_id": "slakh",
+          "content": 81,
+          "realism": 73
+        },
+        {
+          "blind_label": "D",
+          "condition_id": "slakh_realify",
+          "content": 85,
+          "realism": 89
+        }
+      ]
+    },
+    {
+      "trial_id": "stem_strings",
+      "trial_type": "stem",
+      "category": "strings",
+      "samples": [
+        {
+          "blind_label": "A",
+          "condition_id": "basic",
+          "content": 78,
+          "realism": 56
+        },
+        {
+          "blind_label": "B",
+          "condition_id": "basic_realify",
+          "content": 73,
+          "realism": 81
+        },
+        {
+          "blind_label": "C",
+          "condition_id": "slakh",
+          "content": 81,
+          "realism": 73
+        },
+        {
+          "blind_label": "D",
+          "condition_id": "slakh_realify",
+          "content": 85,
+          "realism": 89
+        }
+      ]
+    },
+    {
+      "trial_id": "stem_wind",
+      "trial_type": "stem",
+      "category": "wind",
+      "samples": [
+        {
+          "blind_label": "A",
+          "condition_id": "basic",
+          "content": 75,
+          "realism": 56
+        },
+        {
+          "blind_label": "B",
+          "condition_id": "basic_realify",
+          "content": 70,
+          "realism": 81
+        },
+        {
+          "blind_label": "C",
+          "condition_id": "slakh",
+          "content": 78,
+          "realism": 73
+        },
+        {
+          "blind_label": "D",
+          "condition_id": "slakh_realify",
+          "content": 82,
+          "realism": 89
+        }
+      ]
+    },
+    {
+      "trial_id": "stem_voice",
+      "trial_type": "stem",
+      "category": "voice",
+      "samples": [
+        {
+          "blind_label": "A",
+          "condition_id": "basic",
+          "content": 79,
+          "realism": 57
+        },
+        {
+          "blind_label": "B",
+          "condition_id": "basic_realify",
+          "content": 74,
+          "realism": 82
+        },
+        {
+          "blind_label": "C",
+          "condition_id": "slakh",
+          "content": 82,
+          "realism": 74
+        },
+        {
+          "blind_label": "D",
+          "condition_id": "slakh_realify",
+          "content": 86,
+          "realism": 90
+        }
+      ]
+    },
+    {
+      "trial_id": "stem_polyphonic",
+      "trial_type": "stem",
+      "category": "polyphonic",
+      "samples": [
+        {
+          "blind_label": "A",
+          "condition_id": "basic",
+          "content": 78,
+          "realism": 57
+        },
+        {
+          "blind_label": "B",
+          "condition_id": "basic_realify",
+          "content": 73,
+          "realism": 82
+        },
+        {
+          "blind_label": "C",
+          "condition_id": "slakh",
+          "content": 81,
+          "realism": 74
+        },
+        {
+          "blind_label": "D",
+          "condition_id": "slakh_realify",
+          "content": 85,
+          "realism": 90
+        }
+      ]
+    }
+  ]
+}

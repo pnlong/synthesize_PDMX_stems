@@ -2,6 +2,7 @@
 
 from pathlib import Path
 from unittest.mock import patch
+import queue
 
 import numpy as np
 import pandas as pd
@@ -399,7 +400,27 @@ def test_realify_stem_chunks_long_stems(tmp_path: Path, monkeypatch):
 def test_run_realify_gpu_uses_spawn_pool(tmp_path: Path, monkeypatch):
     captured = {}
 
+    class FakeQueue:
+        def __init__(self):
+            self._items = []
+
+        def put(self, item):
+            captured.setdefault("queue_puts", []).append(item)
+            self._items.append(item)
+
+        def get(self, timeout=None):
+            if not self._items:
+                raise queue.Empty
+            return self._items.pop(0)
+
+    class FakeManager:
+        def Queue(self):
+            return FakeQueue()
+
     class FakeContext:
+        def Manager(self):
+            return FakeManager()
+
         def Pool(self, **kwargs):
             captured["pool_kwargs"] = kwargs
             return self
@@ -439,12 +460,14 @@ def test_run_realify_gpu_uses_spawn_pool(tmp_path: Path, monkeypatch):
     )
 
     assert captured["pool_kwargs"]["processes"] == 2
-    assert captured["pool_kwargs"]["initargs"] == (
+    initargs = captured["pool_kwargs"]["initargs"]
+    assert initargs[:4] == (
         "medium",
         str(tmp_path / "presets" / "categories.yaml"),
         1,
         True,
     )
+    assert initargs[4] is not None
     assert captured["imap_func"] == "_realify_gpu_worker_shard"
     assert captured["imap_chunksize"] == 1
     assert captured["pool_closed"] is True

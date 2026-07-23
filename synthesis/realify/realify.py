@@ -6,7 +6,9 @@ import argparse
 import logging
 import multiprocessing
 import os
+import queue
 import shutil
+import threading
 import warnings
 from pathlib import Path
 
@@ -59,6 +61,51 @@ _REALIFY_MODEL = None
 _REALIFY_PRESETS: dict | None = None
 _REALIFY_BATCH_SIZE = REALIFY_BATCH_SIZE
 _REALIFY_WORKER_CONFIG: dict | None = None
+_REALIFY_PROGRESS_QUEUE = None
+_REALIFY_PROGRESS_SENTINEL = object()
+
+
+def _report_realify_progress(n: int) -> None:
+    if _REALIFY_PROGRESS_QUEUE is not None and n:
+        _REALIFY_PROGRESS_QUEUE.put(n)
+
+
+def _run_pool_with_stem_progress(
+    pool,
+    shard_args: list,
+    *,
+    total_tasks: int,
+    desc: str,
+    worker_fn,
+) -> None:
+    """Run shard workers and update tqdm as each realify batch finishes."""
+    progress_queue = _REALIFY_PROGRESS_QUEUE
+    if progress_queue is None:
+        raise RuntimeError("Progress queue was not initialized for worker pool")
+
+    def drain_progress(progress_bar: tqdm) -> None:
+        while True:
+            try:
+                item = progress_queue.get(timeout=0.2)
+            except queue.Empty:
+                continue
+            if item is _REALIFY_PROGRESS_SENTINEL:
+                break
+            progress_bar.update(int(item))
+
+    with tqdm(total=total_tasks, desc=desc, unit="stem") as progress:
+        drain_thread = threading.Thread(
+            target=drain_progress,
+            args=(progress,),
+            daemon=True,
+        )
+        drain_thread.start()
+        try:
+            for _ in pool.imap(worker_fn, shard_args, chunksize=1):
+                pass
+        finally:
+            progress_queue.put(_REALIFY_PROGRESS_SENTINEL)
+            drain_thread.join(timeout=30)
 
 
 def stem_seed(sample_seed: int, song_path: str, track: int) -> int:
@@ -572,6 +619,7 @@ def process_realify_tasks(
                 silence_enforce=silence_enforce,
             )
             progress.update(len(batch))
+            _report_realify_progress(len(batch))
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
     finally:
@@ -688,10 +736,13 @@ def _init_gpu_realify_worker(
     presets_filepath: str,
     batch_size: int,
     silence_enforce: bool,
+    progress_queue=None,
 ):
     global _REALIFY_MODEL, _REALIFY_PRESETS, _REALIFY_BATCH_SIZE, _REALIFY_WORKER_CONFIG
+    global _REALIFY_PROGRESS_QUEUE
 
     configure_sa3_env()
+    _REALIFY_PROGRESS_QUEUE = progress_queue
     _REALIFY_WORKER_CONFIG = {
         "model_name": model_name,
         "presets_filepath": presets_filepath,
@@ -730,10 +781,13 @@ def _init_cpu_realify_worker(
     presets_filepath: str,
     batch_size: int,
     silence_enforce: bool,
+    progress_queue=None,
 ):
     global _REALIFY_MODEL, _REALIFY_PRESETS, _REALIFY_BATCH_SIZE, _REALIFY_WORKER_CONFIG
+    global _REALIFY_PROGRESS_QUEUE
 
     configure_sa3_env()
+    _REALIFY_PROGRESS_QUEUE = progress_queue
     _REALIFY_WORKER_CONFIG = {
         "model_name": model_name,
         "presets_filepath": presets_filepath,
@@ -840,12 +894,14 @@ def _run_realify_gpu(
     shard_size = (len(tasks) + n_workers - 1) // n_workers
     print(
         f"Realify: {n_workers} workers × ~{shard_size} stems each; "
-        "progress bar updates per shard (not per stem). "
+        "progress updates as stems complete. "
         "Model load in workers is silent for a few minutes first.",
         flush=True,
     )
 
     ctx = multiprocessing.get_context("spawn")
+    manager = ctx.Manager()
+    progress_queue = manager.Queue()
     shards = [tasks[i::n_workers] for i in range(n_workers)]
     shard_args = [
         (gpu_indices[i], shards[i])
@@ -854,14 +910,21 @@ def _run_realify_gpu(
     pool = ctx.Pool(
         processes=n_workers,
         initializer=_init_gpu_realify_worker,
-        initargs=(model, str(presets_filepath), batch_size, silence_enforce),
+        initargs=(model, str(presets_filepath), batch_size, silence_enforce, progress_queue),
     )
+    global _REALIFY_PROGRESS_QUEUE
+    _REALIFY_PROGRESS_QUEUE = progress_queue
     try:
         desc = f"Realifying stems ({n_workers} GPUs)"
-        with tqdm(total=len(tasks), desc=desc, unit="stem") as progress:
-            for count in pool.imap(_realify_gpu_worker_shard, shard_args, chunksize=1):
-                progress.update(count)
+        _run_pool_with_stem_progress(
+            pool,
+            shard_args,
+            total_tasks=len(tasks),
+            desc=desc,
+            worker_fn=_realify_gpu_worker_shard,
+        )
     finally:
+        _REALIFY_PROGRESS_QUEUE = None
         _shutdown_pool(pool)
 
 
@@ -893,20 +956,26 @@ def _run_realify_cpu(
         return
 
     shards = [tasks[i::n_workers] for i in range(n_workers)]
-    pool = multiprocessing.Pool(
+    ctx = multiprocessing.get_context("spawn")
+    manager = ctx.Manager()
+    progress_queue = manager.Queue()
+    pool = ctx.Pool(
         processes=n_workers,
         initializer=_init_cpu_realify_worker,
-        initargs=(model, str(presets_filepath), batch_size, silence_enforce),
+        initargs=(model, str(presets_filepath), batch_size, silence_enforce, progress_queue),
     )
+    global _REALIFY_PROGRESS_QUEUE
+    _REALIFY_PROGRESS_QUEUE = progress_queue
     try:
-        with tqdm(
-            total=len(tasks),
+        _run_pool_with_stem_progress(
+            pool,
+            shards,
+            total_tasks=len(tasks),
             desc=f"Realifying stems ({n_workers} CPU workers)",
-            unit="stem",
-        ) as progress:
-            for count in pool.imap(_realify_worker_shard, shards, chunksize=1):
-                progress.update(count)
+            worker_fn=_realify_worker_shard,
+        )
     finally:
+        _REALIFY_PROGRESS_QUEUE = None
         _shutdown_pool(pool)
 
 
