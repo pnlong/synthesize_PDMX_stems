@@ -8,11 +8,12 @@ import pytest
 import soundfile as sf
 import yaml
 
-from experiments.patch_sweep.config import PHASE1, PHASE3
+from experiments.patch_sweep.config import PHASE1, PHASE2, PHASE3
 from experiments.patch_sweep.sweep import (
     MANIFEST_COLUMNS,
     build_manifest_rows,
     build_sweep_tasks,
+    resolve_render_settings,
     song_path_from_id,
     variant_output_path,
     write_manifest,
@@ -82,6 +83,41 @@ def test_variant_output_path(tmp_path: Path):
         / "0/13/QmTest"
         / "stem_0.flac"
     )
+
+
+def test_resolve_render_settings_phase2_archive_winner(tmp_path: Path):
+    """Phase 2 must resolve archive soundfont ids from phase-1 swipe winners."""
+    catalog = {
+        "candidates": [
+            {"id": "sgm_v2", "file": "SGM-V2.01.sf2"},
+            {"id": "airfont_380_final", "file": "archive-2019-04/airfont_380_final.sf2"},
+        ]
+    }
+    winners_path = tmp_path / "winners.yaml"
+    winners_path.write_text(yaml.safe_dump({
+        "phases": {
+            PHASE1: {
+                "completed": True,
+                "winners": {"piano": ["airfont_380_final"]},
+            },
+        },
+    }))
+    sf_dir = tmp_path / "fonts"
+    sf_dir.mkdir()
+
+    sf_path, soundfont_id, fx_profile, pool_id = resolve_render_settings(
+        phase=PHASE2,
+        variant={"id": "fx_dry", "fx_profile": "dry"},
+        grid_cfg={"fx_profile": "dry", "pool_id": None},
+        category="piano",
+        catalog=catalog,
+        winners_path=winners_path,
+        soundfont_dir=sf_dir,
+    )
+    assert soundfont_id == "airfont_380_final"
+    assert sf_path.endswith("archive-2019-04/airfont_380_final.sf2")
+    assert fx_profile == "dry"
+    assert pool_id is None
 
 
 def test_build_manifest_rows_phase1(tmp_path: Path, monkeypatch):

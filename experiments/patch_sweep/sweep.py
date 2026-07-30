@@ -19,11 +19,17 @@ from tqdm import tqdm
 from experiments.patch_sweep.config import (
     EXPERIMENT_DIR,
     PHASE1,
+    PHASE1_ARCHIVE,
+    PHASE1_PHASES,
     PHASE2,
     PHASE3,
     PHASE_GRID_FILES,
     PHASE_OUTPUT_SUBDIRS,
     PHASES,
+    SWEEP_PHASES,
+    archive_variants_from_catalog,
+    load_archive_soundfont_catalog,
+    load_combined_soundfont_catalog,
     load_soundfont_catalog,
     load_yaml,
     phase_output_dir,
@@ -59,6 +65,7 @@ from synthesis.audio import (
     synthesis_audio_format,
 )
 from synthesis.listening.catalog import default_ablations_dir
+from synthesis.cli_common import add_audio_format_arg
 from synthesis.patches import apply_patch_to_midi_track, patch_group_key, patch_seed, select_patch
 from synthesis.paths import ablation_raw_dir
 
@@ -146,7 +153,7 @@ def resolve_render_settings(
     default_fx = grid_cfg.get("fx_profile")
     default_pool = grid_cfg.get("pool_id")
 
-    if phase == PHASE1:
+    if phase in PHASE1_PHASES:
         soundfont_id = variant["soundfont_id"]
         sf_file = soundfont_file_for_id(soundfont_id, catalog)
         fx_profile = variant.get("fx_profile") or default_fx or "dry"
@@ -442,8 +449,9 @@ def run_patch_sweep(
     pdmx_filepath: str = PDMX_FILEPATH,
     limit_stems: int | None = None,
     limit_variants: int | None = None,
+    categories: set[str] | None = None,
 ) -> pd.DataFrame:
-    if phase not in PHASES:
+    if phase not in SWEEP_PHASES:
         raise ValueError(f"Unknown phase: {phase}")
 
     source_dir = source_dir.resolve()
@@ -454,18 +462,29 @@ def run_patch_sweep(
 
     probe_cfg = load_yaml(probe_stems_path)
     grid_cfg = load_yaml(grid_path)
-    catalog = load_soundfont_catalog()
+    if phase == PHASE1:
+        catalog = load_soundfont_catalog()
+    else:
+        # Phase 2/3 resolve soundfonts from phase-1 winners, which may be archive ids.
+        catalog = load_combined_soundfont_catalog()
 
     probe_stems = list(probe_cfg["stems"])
     validate_probe_stems(probe_stems)
-    variants = list(grid_cfg["variants"])
+    if categories:
+        probe_stems = [probe for probe in probe_stems if probe.get("category") in categories]
+        if not probe_stems:
+            raise ValueError(f"No probe stems matched categories: {sorted(categories)}")
+
+    variants = list(grid_cfg.get("variants") or [])
+    if phase == PHASE1_ARCHIVE and not variants:
+        variants = archive_variants_from_catalog(load_archive_soundfont_catalog())
     if limit_stems is not None:
         probe_stems = probe_stems[:limit_stems]
     if limit_variants is not None:
         variants = variants[:limit_variants]
 
     for variant in variants:
-        if phase == PHASE1 and "soundfont_id" not in variant:
+        if phase in PHASE1_PHASES and "soundfont_id" not in variant:
             raise ValueError(f"Phase 1 variant missing soundfont_id: {variant}")
         if phase == PHASE2 and "fx_profile" not in variant:
             raise ValueError(f"Phase 2 variant missing fx_profile: {variant}")
@@ -553,7 +572,7 @@ def parse_args(args=None, namespace=None):
     parser.add_argument(
         "--phase",
         required=True,
-        choices=list(PHASES),
+        choices=list(SWEEP_PHASES),
         help="Tuning phase to run.",
     )
     parser.add_argument(
@@ -601,18 +620,23 @@ def parse_args(args=None, namespace=None):
     )
     parser.add_argument("--limit-stems", default=None, type=int)
     parser.add_argument("--limit-variants", default=None, type=int)
-    parser.add_argument("--sample-seed", default=ABLATION_SAMPLE_SEED, type=int)
     parser.add_argument(
-        "--mp3",
-        action="store_true",
-        help="Write MP3 stems.",
+        "--categories",
+        default=None,
+        type=str,
+        help="Comma-separated listening categories to render (default: all probe stems).",
     )
+    parser.add_argument("--sample-seed", default=ABLATION_SAMPLE_SEED, type=int)
+    add_audio_format_arg(parser)
     return parser.parse_args(args=args, namespace=namespace)
 
 
 def main():
     args = parse_args()
     grid_path = args.grid or PHASE_GRID_FILES[args.phase]
+    categories = None
+    if args.categories:
+        categories = {part.strip() for part in args.categories.split(",") if part.strip()}
 
     run_patch_sweep(
         phase=args.phase,
@@ -623,8 +647,11 @@ def main():
         winners_path=args.winners,
         soundfont_dir=args.soundfont_dir,
         jobs=args.jobs,
-        audio_format=synthesis_audio_format(args.mp3),
+        audio_format=synthesis_audio_format(args.flac),
         sample_seed=args.sample_seed,
+        limit_stems=args.limit_stems,
+        limit_variants=args.limit_variants,
+        categories=categories,
     )
 
 

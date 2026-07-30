@@ -45,13 +45,13 @@ Create both after clone: `uv run python -m shared.setup_symlinks`
 
 ```
 data/<mirrored-song-path>/
-├── stem_0.flac   # or stem_0.mp3 with --mp3
-├── stem_1.flac
+├── stem_0.mp3    # or stem_0.flac with --flac
+├── stem_1.mp3
 ├── ...
-└── mixture.flac  # or mixture.mp3 with --mp3
+└── mixture.mp3   # or mixture.flac with --flac
 ```
 
-Default on-disk format is FLAC (PCM_16). Pass `--mp3` to write MP3 stems and mixtures for prototyping (less storage). Use the same `--mp3` flag for realify so it reads and writes the matching format.
+Default on-disk format is **MP3**. Pass `--flac` to write FLAC stems and mixtures (PCM_16). Use the same `--flac` flag for realify so it reads and writes the matching format.
 
 ## Mixture procedure
 
@@ -66,7 +66,7 @@ Constant across all ablations (A1–B2), basic and slakh, synthesis and realify:
 1. Stems are loudness-normalized toward −23 LUFS (BS.1770) with per-stem peak limiting at 1.0, then padded to equal length.
 2. Sum stems sample-wise.
 3. If mixture peak > `MIXTURE_PEAK_LIMIT` (1.0), apply uniform gain `limit / peak`.
-4. Write `mixture.flac` (stem files on disk unchanged).
+4. Write `mixture.mp3` (or `mixture.flac` with `--flac`; stem files on disk unchanged).
 
 Implemented in [`audio.py`](audio.py). Called from `synthesize.py` after stems and from `realify.py` after realify completes.
 

@@ -39,8 +39,8 @@ uv run python -m synthesis.synthesize --render-mode basic
 uv run python -m synthesis.synthesize --render-mode slakh
 
 # Prototyping: MP3 instead of FLAC (smaller; use same flag for realify)
-uv run python -m synthesis.synthesize --render-mode basic --mp3
-uv run python -m synthesis.synthesize --render-mode basic --mp3 --realify
+uv run python -m synthesis.synthesize --render-mode basic
+uv run python -m synthesis.synthesize --render-mode basic --realify
 
 # A2 / B2 — realify (GPU only; requires A1 / B1 stems first)
 uv run python -m synthesis.synthesize --render-mode basic --realify

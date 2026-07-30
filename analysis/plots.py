@@ -78,3 +78,95 @@ def plot_percentiles(
     fig.tight_layout()
     fig.savefig(output_path, dpi=150)
     plt.close(fig)
+
+
+def plot_gm_program_bar(
+    stems: pd.DataFrame,
+    output_path: str | Path,
+    *,
+    top_n: int = 40,
+):
+    """Horizontal bar chart of GM program id counts (top N + Other)."""
+    from analysis.gm_programs import gm_id_label
+
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if stems.empty:
+        counts = pd.Series(dtype=int)
+    else:
+        counts = stems["gm_id"].value_counts()
+
+    if top_n > 0 and len(counts) > top_n:
+        head = counts.head(top_n)
+        other = int(counts.iloc[top_n:].sum())
+        plot_counts = head.copy()
+        if other:
+            plot_counts.loc[-1] = other
+    else:
+        plot_counts = counts
+
+    plot_counts = plot_counts.sort_values(ascending=True)
+
+    fig_height = max(6, 0.28 * len(plot_counts))
+    fig, ax = plt.subplots(figsize=(12, fig_height))
+    bars = ax.barh(
+        [gm_id_label(int(v)) if v >= 0 else "Other" for v in plot_counts.index],
+        plot_counts.values,
+        color="C0",
+        alpha=0.9,
+    )
+    ax.bar_label(bars, fmt="%d", padding=3, fontsize=8)
+    ax.set_xlabel("Stem count (non-empty MIDI tracks)")
+    ax.set_ylabel("GM program id")
+    ax.set_title("PDMX General MIDI program usage")
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=150)
+    plt.close(fig)
+
+
+def plot_track_name_bar(
+    stems: pd.DataFrame,
+    output_path: str | Path,
+    *,
+    top_n: int = 40,
+):
+    """Horizontal bar chart of track name counts (top N + Other)."""
+    from analysis.track_names import UNNAMED_TRACK
+
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if stems.empty:
+        counts = pd.Series(dtype=int)
+    else:
+        counts = stems["track_name"].value_counts()
+
+    if top_n > 0 and len(counts) > top_n:
+        head = counts.head(top_n)
+        other = int(counts.iloc[top_n:].sum())
+        plot_counts = head.copy()
+        if other:
+            plot_counts.loc["__other__"] = other
+    else:
+        plot_counts = counts
+
+    plot_counts = plot_counts.sort_values(ascending=True)
+    labels = [
+        name if name != "__other__" else "Other"
+        for name in plot_counts.index
+    ]
+
+    fig_height = max(6, 0.28 * len(plot_counts))
+    fig, ax = plt.subplots(figsize=(12, fig_height))
+    bars = ax.barh(labels, plot_counts.values, color="C0", alpha=0.9)
+    ax.bar_label(bars, fmt="%d", padding=3, fontsize=8)
+    ax.set_xlabel("Track count (non-empty MIDI tracks)")
+    ax.set_ylabel("Track name")
+    ax.set_title("PDMX MIDI track name usage")
+    if UNNAMED_TRACK in labels:
+        idx = labels.index(UNNAMED_TRACK)
+        bars[idx].set_color("C3")
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=150)
+    plt.close(fig)

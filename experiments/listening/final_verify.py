@@ -8,6 +8,7 @@ from experiments.listening.catalog import SweepCatalog
 from experiments.patch_sweep.config import (
     EXPERIMENT_DIR as PATCH_EXPERIMENT_DIR,
     PHASE1 as PATCH_PHASE1,
+    PHASE1_ARCHIVE as PATCH_PHASE1_ARCHIVE,
     PHASE2 as PATCH_PHASE2,
     PHASE3 as PATCH_PHASE3,
     PHASES as PATCH_PHASES,
@@ -88,6 +89,47 @@ def winners_path_for(sweep_type: str, path: Path | None = None) -> Path:
     return experiment_config(sweep_type)["experiment_dir"] / "winners.yaml"
 
 
+def _normalize_winner_ids(value) -> set[str]:
+    if value is None:
+        return set()
+    if isinstance(value, list):
+        return {str(item) for item in value if item}
+    return {str(value)}
+
+
+def patch_phase1_sweep_dir(winners_path: Path | None = None) -> Path:
+    """Pick phase-1 render output for verification (archive vs legacy 7-bank)."""
+    import pandas as pd
+
+    cfg = _patch_config()
+    root = cfg["default_output_dir"]()
+    legacy_dir = cfg["phase_output_dir"](root, cfg["phase1"])
+    archive_dir = cfg["phase_output_dir"](root, PATCH_PHASE1_ARCHIVE)
+    path = winners_path_for("patch", winners_path)
+    phase1 = cfg["phase_winners"](cfg["phase1"], path)
+    winner_ids: set[str] = set()
+    for value in phase1.values():
+        winner_ids |= _normalize_winner_ids(value)
+
+    def has_manifest(directory: Path) -> bool:
+        return (directory / "manifest.csv").is_file()
+
+    if winner_ids and has_manifest(archive_dir):
+        archive_ids = set(pd.read_csv(archive_dir / "manifest.csv")["variant_id"].astype(str))
+        if winner_ids & archive_ids:
+            if not has_manifest(legacy_dir):
+                return archive_dir
+            legacy_ids = set(pd.read_csv(legacy_dir / "manifest.csv")["variant_id"].astype(str))
+            if len(winner_ids & archive_ids) >= len(winner_ids & legacy_ids):
+                return archive_dir
+
+    if has_manifest(legacy_dir):
+        return legacy_dir
+    if has_manifest(archive_dir):
+        return archive_dir
+    return legacy_dir
+
+
 def verification_phase(sweep_type: str, winners_path: Path | None = None) -> str:
     cfg = experiment_config(sweep_type)
     path = winners_path_for(sweep_type, winners_path)
@@ -112,22 +154,29 @@ def readiness_errors(sweep_type: str, winners_path: Path | None = None) -> list[
     if sweep_type == "preset" and not cfg["phase_is_complete"](cfg["phase1b"], path):
         errors.append(f"{cfg['phase1b']} not complete in {path}")
     verify_phase = verification_phase(sweep_type, path)
-    sweep_dir = cfg["phase_output_dir"](
-        cfg["default_output_dir"](),
-        verify_phase,
-    )
+    if sweep_type == "patch":
+        sweep_dir = patch_phase1_sweep_dir(path)
+    else:
+        sweep_dir = cfg["phase_output_dir"](
+            cfg["default_output_dir"](),
+            verify_phase,
+        )
     if not (sweep_dir / "manifest.csv").is_file():
         if sweep_type == "preset" and verify_phase == cfg["phase4"]:
             errors.append(
                 f"Missing phase-4 verification render: run "
                 f"`uv run python -m experiments.preset_sweep.sweep --phase {cfg['phase4']}`"
             )
+        elif sweep_type == "patch":
+            errors.append(f"Missing phase-1 soundfont manifest: {sweep_dir / 'manifest.csv'}")
         else:
             errors.append(f"Missing manifest for {verify_phase}: {sweep_dir / 'manifest.csv'}")
     return errors
 
 
 def final_sweep_dir(sweep_type: str, winners_path: Path | None = None) -> Path:
+    if sweep_type == "patch":
+        return patch_phase1_sweep_dir(winners_path)
     cfg = experiment_config(sweep_type)
     phase = verification_phase(sweep_type, winners_path)
     return cfg["phase_output_dir"](cfg["default_output_dir"](), phase)

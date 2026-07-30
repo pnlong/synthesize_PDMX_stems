@@ -6,10 +6,12 @@ from shared.config import (
     ABLATIONS_DIR_NAME,
     ANALYSIS_DIR_NAME,
     DEV_DIR_NAME,
+    INSTRUMENTS_DIR_NAME,
     SONG_LENGTHS_DIR_NAME,
     SPDMX_DATASET_DIR_NAME,
     STEMS_DIR_NAME,
     STEMS_REALIFY_DIR_NAME,
+    TRACK_NAMES_DIR_NAME,
 )
 
 
@@ -51,6 +53,14 @@ def analysis_root(output_dir: str) -> str:
 
 def song_lengths_dir(output_dir: str) -> str:
     return f"{analysis_root(output_dir)}/{SONG_LENGTHS_DIR_NAME}"
+
+
+def instruments_dir(output_dir: str) -> str:
+    return f"{analysis_root(output_dir)}/{INSTRUMENTS_DIR_NAME}"
+
+
+def track_names_dir(output_dir: str) -> str:
+    return f"{analysis_root(output_dir)}/{TRACK_NAMES_DIR_NAME}"
 
 
 def spdmx_dataset_dir(output_dir: str) -> str:

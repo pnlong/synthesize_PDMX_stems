@@ -252,6 +252,82 @@ def test_build_verification_meta_marks_filter_pass(tmp_path: Path):
     assert piano["auto_winner_variant_id"] == "good"
 
 
+def test_verification_from_patch_swipe_votes():
+    from experiments.listening.verification import verification_from_patch_swipe_votes
+
+    shortlists = {
+        "piano": ["sf_a", "sf_b", "sf_c"],
+        "drums": ["sf_d"],
+    }
+    votes = [
+        {"category": "piano", "variant_id": "sf_a", "tier": "strong_accept"},
+        {"category": "piano", "variant_id": "sf_b", "tier": "strong_reject"},
+        {"category": "drums", "variant_id": "sf_d", "tier": "strong_accept"},
+    ]
+    doc = verification_from_patch_swipe_votes(votes, shortlists)
+    assert doc["verification_mode"] == "soundfont_shortlist_swipe"
+    by_cat = {entry["category"]: entry["approved"] for entry in doc["categories"]}
+    assert by_cat["piano"] == ["sf_a"]
+    assert by_cat["drums"] == ["sf_d"]
+    assert validate_verification(doc) == []
+
+
+def test_build_patch_verify_swipe_cards(tmp_path: Path):
+    from experiments.listening.catalog import SweepCatalog
+    from experiments.listening.verification import build_patch_verify_swipe_cards
+    import yaml
+
+    sweep_dir = tmp_path / "phase1_archive_soundfonts"
+    song_dir = tmp_path / "basic" / "data" / "0/13/QmTest"
+    song_dir.mkdir(parents=True)
+    (song_dir / "stem_0.flac").write_bytes(b"x")
+
+    clip_path = (
+        sweep_dir / "clips" / "variants" / "sf_a" / "data" / "0/13/QmTest" / "stem_0_c0.mp3"
+    )
+    clip_path.parent.mkdir(parents=True)
+    clip_path.write_bytes(b"mp3")
+
+    pd.DataFrame([{
+        "phase": "phase1_archive_soundfonts",
+        "variant_id": "sf_a",
+        "soundfont_id": "sf_a",
+        "stem_id": "piano_a",
+        "category": "piano",
+        "path": str(song_dir),
+        "track": 0,
+        "out_path": str(clip_path),
+        "clip_id": "piano_a_c0",
+        "clip_index": 0,
+    }]).to_csv(sweep_dir / "clip_manifest.csv", index=False)
+
+    pd.DataFrame([{
+        "variant_id": "sf_a",
+        "soundfont_id": "sf_a",
+        "stem_id": "piano_a",
+        "category": "piano",
+        "path": str(song_dir),
+        "track": 0,
+        "out_path": str(sweep_dir / "variants" / "sf_a" / "data" / "0/13/QmTest" / "stem_0.flac"),
+    }]).to_csv(sweep_dir / "manifest.csv", index=False)
+    variant_dir = sweep_dir / "variants" / "sf_a" / "data" / "0/13/QmTest"
+    variant_dir.mkdir(parents=True)
+    (variant_dir / "stem_0.flac").write_bytes(b"x")
+
+    probe_path = tmp_path / "probe_stems.yaml"
+    probe_path.write_text(yaml.dump({
+        "stems": [
+            {"id": "piano_a", "category": "piano", "song_id": "0/13/QmTest", "track": 0},
+        ],
+    }))
+
+    catalog = SweepCatalog("patch", sweep_dir, tmp_path / "basic", probe_stems_path=probe_path)
+    cards = build_patch_verify_swipe_cards(catalog, {"piano": ["sf_a", "sf_missing"]})
+    assert len(cards) == 1
+    assert cards[0]["variant_id"] == "sf_a"
+    assert cards[0]["category"] == "piano"
+
+
 def test_build_preset_realify_verification_meta(tmp_path: Path):
     from experiments.listening.catalog import SweepCatalog
     import yaml

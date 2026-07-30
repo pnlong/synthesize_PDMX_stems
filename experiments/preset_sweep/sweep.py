@@ -13,17 +13,21 @@ import yaml
 from experiments.paths import DEFAULT_PROBE_STEMS, preset_sweep_output_root
 from experiments.probe_stems import validate_probe_stems
 from experiments.preset_sweep.clips_dir import expose_clips_dir
+from synthesis.cli_common import add_audio_format_arg
 from experiments.preset_sweep.config import (
     EXPERIMENT_DIR,
     LOCKED_VERIFY_VARIANT,
     PHASE1,
     PHASE1B,
     PHASE2,
+    PHASE2B,
     PHASE3,
     PHASE4,
     PHASE_GRID_FILES,
     SWEEP_PHASES,
+    build_adherence_audit_variants,
     build_noise_audit_variants,
+    higher_noise_level,
     load_yaml,
     phase_output_dir,
     resolve_silence_enforce,
@@ -151,6 +155,16 @@ def _require_phase_prerequisites(phase: str, winners_path: Path) -> None:
                 f"{PHASE2} requires completed {PHASE1B} noise audit in {winners_path}. "
                 f"Run phase 1b, listening test, and record_winners first."
             )
+    if phase == PHASE2B:
+        if not phase_is_complete(PHASE1, winners_path):
+            raise RuntimeError(f"{PHASE2B} requires completed {PHASE1} winners.")
+        if not phase_is_complete(PHASE1B, winners_path):
+            raise RuntimeError(f"{PHASE2B} requires completed {PHASE1B} noise audit.")
+        if not phase_is_complete(PHASE2, winners_path):
+            raise RuntimeError(
+                f"{PHASE2B} requires completed {PHASE2} prompt winners in {winners_path}. "
+                f"Run phase 2, listening test, and record_winners first."
+            )
     if phase == PHASE3:
         if not phase_is_complete(PHASE1, winners_path):
             raise RuntimeError(f"{PHASE3} requires completed {PHASE1} winners.")
@@ -207,6 +221,27 @@ def resolve_preset_settings(
             variant["prompt_variant"],
             int(variant.get("steps", default_steps)),
             float(variant.get("cfg_scale", default_cfg)),
+        )
+
+    if phase == PHASE2B:
+        category = category or ""
+        if variant.get("prompt_source") == "phase2":
+            prompt_variant = resolve_phase2_prompt_variant(category, winners_path) or "current"
+        else:
+            prompt_variant = variant["prompt_variant"]
+        winner_level = resolve_phase1_init_noise_level(category, winners_path)
+        if winner_level is None:
+            raise RuntimeError(f"No phase-1 noise winner for category: {category}")
+        noise_source = variant.get("noise_source", "winner")
+        if noise_source == "higher":
+            init_noise_level = higher_noise_level(winner_level)
+        else:
+            init_noise_level = winner_level
+        return (
+            init_noise_level,
+            prompt_variant,
+            int(grid_cfg.get("steps", default_steps)),
+            float(grid_cfg.get("cfg_scale", default_cfg)),
         )
 
     init_noise_level = resolve_phase1_init_noise_level(category or "", winners_path)
@@ -283,18 +318,17 @@ def build_sweep_tasks(
     winners_path: Path,
 ) -> list[dict]:
     tasks = []
-    for probe in probe_stems:
-        song_path = song_path_from_id(source_dir, probe["song_id"])
-        track = int(probe["track"])
-        stem_format = str(probe.get("audio_format") or audio_format)
-        source_stem_path = stem_path(song_path, track, stem_format)
-        if not stem_is_valid(source_stem_path):
-            raise FileNotFoundError(f"Missing or invalid probe stem: {source_stem_path}")
+    for variant in variants:
+        variant_id = variant["id"]
+        for probe in probe_stems:
+            song_path = song_path_from_id(source_dir, probe["song_id"])
+            track = int(probe["track"])
+            stem_format = str(probe.get("audio_format") or audio_format)
+            source_stem_path = stem_path(song_path, track, stem_format)
+            if not stem_is_valid(source_stem_path):
+                raise FileNotFoundError(f"Missing or invalid probe stem: {source_stem_path}")
 
-        category = probe.get("category")
-
-        for variant in variants:
-            variant_id = variant["id"]
+            category = probe.get("category")
             init_noise_level, prompt_variant, steps, cfg_scale = resolve_preset_settings(
                 phase=phase,
                 variant=variant,
@@ -343,10 +377,30 @@ def build_sweep_tasks(
                 "out_path": str(out_path),
                 "stem_path": str(source_stem_path),
                 "duration": stem_duration_seconds(source_stem_path),
-                "audio_format": stem_format,
+                "audio_format": audio_format,
+                "source_audio_format": stem_format,
                 "seed": stem_seed(sample_seed, str(song_path), track),
             })
     return tasks
+
+
+def order_sweep_tasks_for_batching(tasks: list[dict]) -> list[dict]:
+    """Sort tasks so stems sharing a preset and duration are adjacent for batching."""
+
+    def sort_key(task: dict) -> tuple:
+        preset = task["preset"]
+        negative = preset.get("negative_prompt")
+        return (
+            preset.get("init_noise_level"),
+            preset.get("prompt_variant"),
+            preset.get("steps"),
+            preset.get("cfg_scale"),
+            negative or "",
+            task["duration"],
+            task["row"].get("stem_id", ""),
+        )
+
+    return sorted(tasks, key=sort_key)
 
 
 def build_manifest_rows(
@@ -389,7 +443,7 @@ def build_manifest_rows(
                 song_path,
                 source_dir,
                 track,
-                stem_format,
+                audio_format,
             )
             rows.append({
                 "phase": phase,
@@ -450,6 +504,43 @@ def prepare_phase1b_audit(
     variants = build_noise_audit_variants(phase1_winners)
     return clips_dir, probe_stems, variants
 
+
+def prepare_phase2b_audit(
+    *,
+    sweep_root: Path,
+    source_dir: Path,
+    output_dir: Path,
+    grid_cfg: dict,
+    winners_path: Path,
+    sample_seed: int,
+) -> tuple[Path, list[dict], list[dict]]:
+    phase1b_dir = phase_output_dir(sweep_root, PHASE1B)
+    phase1b_manifest = phase1b_dir / "diverse_stems.yaml"
+    phase1b_clips = phase1b_dir / "clips"
+
+    if phase1b_manifest.is_file() and phase1b_clips.is_dir():
+        output_dir.mkdir(parents=True, exist_ok=True)
+        manifest_path = output_dir / "diverse_stems.yaml"
+        if not manifest_path.is_file():
+            shutil.copy2(phase1b_manifest, manifest_path)
+        probe_stems = load_diverse_stems_manifest(manifest_path)
+        clips_dir = phase1b_clips
+    else:
+        clips_dir, probe_stems, _ = prepare_phase1b_audit(
+            source_dir=source_dir,
+            output_dir=output_dir,
+            grid_cfg=grid_cfg,
+            winners_path=winners_path,
+            sample_seed=sample_seed,
+        )
+
+    phase1_winners = phase_winners(PHASE1, winners_path)
+    include_negative = bool(grid_cfg.get("include_negative_prompt", False))
+    variants = build_adherence_audit_variants(
+        phase1_winners,
+        include_negative=include_negative,
+    )
+    return clips_dir, probe_stems, variants
 
 
 def _link_phase4_clip_assets(*, sweep_root: Path, output_dir: Path) -> Path:
@@ -561,6 +652,7 @@ def run_preset_sweep(
     limit_stems: int | None = None,
     limit_variants: int | None = None,
     silence_enforce: bool | None = None,
+    backend: str = "pytorch",
 ) -> pd.DataFrame:
     if phase not in SWEEP_PHASES:
         raise ValueError(f"Unknown phase: {phase}")
@@ -579,6 +671,16 @@ def run_preset_sweep(
 
     if phase == PHASE1B:
         clips_dir, probe_stems, variants = prepare_phase1b_audit(
+            source_dir=source_dir,
+            output_dir=output_dir,
+            grid_cfg=grid_cfg,
+            winners_path=winners_path,
+            sample_seed=sample_seed,
+        )
+        realify_source_dir = clips_dir
+    elif phase == PHASE2B:
+        clips_dir, probe_stems, variants = prepare_phase2b_audit(
+            sweep_root=sweep_root,
             source_dir=source_dir,
             output_dir=output_dir,
             grid_cfg=grid_cfg,
@@ -613,6 +715,8 @@ def run_preset_sweep(
             raise ValueError(f"Phase 1 variant missing init_noise_level: {variant}")
         if phase == PHASE2 and "prompt_variant" not in variant:
             raise ValueError(f"Phase 2 variant missing prompt_variant: {variant}")
+        if phase == PHASE2B and "noise_source" not in variant:
+            raise ValueError(f"Phase 2b variant missing noise_source: {variant}")
         if phase == PHASE3 and ("steps" not in variant or "cfg_scale" not in variant):
             raise ValueError(f"Phase 3 variant missing steps/cfg_scale: {variant}")
         if phase == PHASE4 and variant.get("id") != LOCKED_VERIFY_VARIANT:
@@ -629,6 +733,7 @@ def run_preset_sweep(
         sample_seed=sample_seed,
         winners_path=winners_path,
     )
+    tasks = order_sweep_tasks_for_batching(tasks)
 
     manifest_rows = build_manifest_rows(
         phase=phase,
@@ -653,6 +758,10 @@ def run_preset_sweep(
     print(f"Tasks queued: {len(tasks)} (skipped existing outputs)")
     if silence_enforce:
         print("Silence enforcement: enabled (reference-gated post-SA3 silence)")
+    if backend == "trt":
+        print("Realify backend: tensorrt (audio-to-audio eager path)")
+    if batch_size > 1:
+        print(f"Realify batch size: {batch_size}")
     log_realify_plan(
         source_dir=source_dir,
         output_dir=output_dir,
@@ -669,15 +778,16 @@ def run_preset_sweep(
     empty_presets: dict = {}
     if use_gpu:
         if len(tasks) == 1:
-            sa3_model = load_model(model)
+            sa3_model = load_realify_model(model, backend=backend, device_index=select_realify_gpu_indices()[0])
             process_realify_tasks(
                 tasks,
                 model=sa3_model,
                 presets=empty_presets,
                 audio_format=audio_format,
-                batch_size=1,
+                batch_size=batch_size,
                 desc="Preset sweep (GPU)",
                 silence_enforce=silence_enforce,
+                backend=backend,
             )
         else:
             _run_realify_gpu(
@@ -687,6 +797,7 @@ def run_preset_sweep(
                 batch_size=batch_size,
                 audio_format=audio_format,
                 silence_enforce=silence_enforce,
+                backend=backend,
             )
     else:
         _run_realify_cpu(
@@ -697,6 +808,7 @@ def run_preset_sweep(
             batch_size=batch_size,
             audio_format=audio_format,
             silence_enforce=silence_enforce,
+            backend=backend,
         )
 
     return pd.read_csv(manifest_path)
@@ -757,14 +869,16 @@ def parse_args(args=None, namespace=None):
         type=int,
         help="SA3 stems per GPU forward pass.",
     )
+    parser.add_argument(
+        "--backend",
+        default="pytorch",
+        choices=["pytorch", "trt"],
+        help="SA3 inference backend (trt requires TensorRT engines installed).",
+    )
     parser.add_argument("--limit-stems", default=None, type=int)
     parser.add_argument("--limit-variants", default=None, type=int)
     parser.add_argument("--sample-seed", default=ABLATION_SAMPLE_SEED, type=int)
-    parser.add_argument(
-        "--mp3",
-        action="store_true",
-        help="Read/write MP3 stems (must match source ablation format).",
-    )
+    add_audio_format_arg(parser)
     return parser.parse_args(args=args, namespace=namespace)
 
 
@@ -784,10 +898,11 @@ def main():
         model=args.model,
         jobs=args.jobs,
         batch_size=args.realify_batch_size,
-        audio_format=synthesis_audio_format(args.mp3),
+        audio_format=synthesis_audio_format(args.flac),
         sample_seed=args.sample_seed,
         limit_stems=args.limit_stems,
         limit_variants=args.limit_variants,
+        backend=args.backend,
     )
 
 

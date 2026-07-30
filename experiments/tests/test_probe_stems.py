@@ -9,6 +9,7 @@ import yaml
 from experiments.probe_stems import (
     PROBE_CATEGORIES,
     TARGET_SAMPLES_PER_CATEGORY,
+    active_probe_stems,
     category_counts,
     load_probe_stems,
     read_track_midi_meta,
@@ -24,7 +25,7 @@ def test_default_probe_stems_has_three_per_category():
     stems = load_probe_stems()
     validate_probe_stems(stems, validate_midi_programs=Path(PDMX_FILEPATH).is_file())
     counts = category_counts(stems)
-    assert len(stems) == len(PROBE_CATEGORIES) * TARGET_SAMPLES_PER_CATEGORY
+    assert len(active_probe_stems(stems)) == len(PROBE_CATEGORIES) * TARGET_SAMPLES_PER_CATEGORY
     for category in PROBE_CATEGORIES:
         assert counts[category] == TARGET_SAMPLES_PER_CATEGORY
 

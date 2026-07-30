@@ -22,6 +22,7 @@ from shared.config import (
     NA_STRING,
     OUTPUT_DIR,
     REALIFY_BATCH_SIZE,
+    REALIFY_CONTENT_FIDELITY_ENFORCE,
     REALIFY_SILENCE_ENFORCE,
     RENDER_MODE_BASIC,
     RENDER_MODE_SLAKH,
@@ -78,7 +79,7 @@ def synthesize_song_at_index(
     """Synthesize one song. Returns (song_row, stem_rows) for main-process CSV writes."""
     path_output = dataset.at[i, "path_output"]
     song_dir = Path(path_output)
-    audio_format = synthesis_audio_format(args.mp3)
+    audio_format = synthesis_audio_format(args.flac)
 
     midi = mido.MidiFile(filename=dataset.at[i, "mid"], charset="utf8")
     n_tracks = len(midi.tracks)
@@ -170,15 +171,16 @@ def synthesize_song_at_index(
         for j, track_path in enumerate(track_paths):
             meta = track_render_meta[j]
             soundfont_filepath = meta.get("soundfont_filepath") or args.soundfont_filepath
+            fx_profile = meta.get("fx_profile")
             if args.render_mode == RENDER_MODE_SLAKH:
                 from experiments.patch_sweep.config import soundfont_file_for_id
-                from experiments.patch_sweep.winners import pick_soundfont_id
+                from experiments.patch_sweep.winners import pick_fx_profile, pick_soundfont_id
 
                 soundfont_ids = meta.get("soundfont_ids") or []
                 if not soundfont_ids and meta.get("soundfont_id"):
                     soundfont_ids = [meta["soundfont_id"]]
+                category = meta.get("category") or "default"
                 if soundfont_ids:
-                    category = meta.get("category") or "default"
                     picked = pick_soundfont_id(
                         list(soundfont_ids),
                         category=category,
@@ -190,9 +192,19 @@ def synthesize_song_at_index(
                     )
                 elif meta.get("soundfont"):
                     soundfont_filepath = str(Path(SOUNDFONT_DIR) / meta["soundfont"])
+
+                fx_profiles = meta.get("fx_profiles") or []
+                if not fx_profiles and meta.get("fx_profile"):
+                    fx_profiles = [meta["fx_profile"]]
+                if fx_profiles:
+                    fx_profile = pick_fx_profile(
+                        list(fx_profiles),
+                        category=category,
+                        song_path=path_output,
+                        sample_seed=args.sample_seed,
+                    )
             elif meta.get("soundfont"):
                 soundfont_filepath = str(Path(SOUNDFONT_DIR) / meta["soundfont"])
-            fx_profile = meta.get("fx_profile")
             waveform = get_waveform_tensor(
                 track_path,
                 soundfont_filepath,
@@ -305,7 +317,7 @@ def run_synthesis(args, output_dir: str):
             work_indices.append(i)
             continue
         n_tracks = int(dataset.at[i, "n_tracks"])
-        audio_format = synthesis_audio_format(args.mp3)
+        audio_format = synthesis_audio_format(args.flac)
         if not song_is_complete(Path(path_output), n_tracks, audio_format):
             work_indices.append(i)
 
@@ -377,15 +389,21 @@ def raw_synthesis_command(args) -> str:
     cmd = f"uv run python -m synthesis.synthesize --render-mode {args.render_mode}"
     if args.full:
         cmd += " --full"
-    if args.mp3:
-        cmd += " --mp3"
+    if args.flac:
+        cmd += " --flac"
     return cmd
 
 
 def run_realify_pass(args, source_dir: str, dest_dir: str):
     from synthesis.realify.realify import run_realify
 
-    audio_format = synthesis_audio_format(args.mp3)
+    audio_format = synthesis_audio_format(args.flac)
+    content_fidelity_enforce = REALIFY_CONTENT_FIDELITY_ENFORCE
+    if getattr(args, "content_fidelity_enforce", False):
+        content_fidelity_enforce = True
+    if getattr(args, "no_content_fidelity_enforce", False):
+        content_fidelity_enforce = False
+
     run_realify(
         source_dir=source_dir,
         output_dir=dest_dir,
@@ -397,6 +415,7 @@ def run_realify_pass(args, source_dir: str, dest_dir: str):
         sample_seed=args.sample_seed,
         reset=args.reset,
         silence_enforce=REALIFY_SILENCE_ENFORCE and not args.no_silence_enforce,
+        content_fidelity_enforce=content_fidelity_enforce,
     )
 
 
@@ -410,7 +429,7 @@ def main():
         dest_dir = ablation_realify_dir(args.output_dir, args.render_mode)
 
     if args.realify:
-        audio_format = synthesis_audio_format(args.mp3)
+        audio_format = synthesis_audio_format(args.flac)
         require_raw_synthesis(
             source_dir,
             run_command=raw_synthesis_command(args),

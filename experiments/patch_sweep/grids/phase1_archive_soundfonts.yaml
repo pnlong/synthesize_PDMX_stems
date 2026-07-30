@@ -1,0 +1,8 @@
+# Phase 1 archive: all 90 IA soundfonts (dry, no program remap).
+# Variants are loaded from archive_soundfonts.yaml at sweep time — no tag filtering.
+phase: phase1_archive_soundfonts
+fx_profile: dry
+pool_id: null
+source_catalog: archive_soundfonts.yaml
+
+variants: []

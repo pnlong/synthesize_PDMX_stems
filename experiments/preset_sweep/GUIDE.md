@@ -9,9 +9,9 @@ Follow these steps in order. Each phase has a **blinded listening test** (you on
 ls synthesis/ablations_output/basic/data/
 
 # GPU with enough VRAM for SA3 medium (see synthesis/realify/README.md)
-# Optional: smaller MP3 outputs for listening
-export SWEEP_MP3="--mp3"
 ```
+
+Stems default to **MP3**. Pass `--flac` on sweep/synthesis commands for lossless FLAC.
 
 ---
 
@@ -23,8 +23,7 @@ Compare **5 noise levels** with `prompt_variant: current`, `steps: 8`, `cfg_scal
 
 ```bash
 uv run python -m experiments.preset_sweep.sweep \
-  --phase phase1_noise $SWEEP_MP3
-```
+  --phase phase1_noise```
 
 ~5 variants × 24 stems = **120** SA3 forwards.  
 Output: `experiments/preset_sweep/output/phase1_noise/`
@@ -79,8 +78,7 @@ Requires `winners.yaml` phase 1 `completed: true`.
 
 ```bash
 uv run python -m experiments.preset_sweep.sweep \
-  --phase phase1b_noise_audit $SWEEP_MP3
-```
+  --phase phase1b_noise_audit```
 
 Builds `clips/` (10s references) + realified variants with silence enforcement enabled. Default: **5 diverse stems per category** (40 total) × ~2 noise levels each.
 
@@ -111,8 +109,7 @@ Requires `winners.yaml` phases 1 and 1b `completed: true`.
 
 ```bash
 uv run python -m experiments.preset_sweep.sweep \
-  --phase phase2_prompts $SWEEP_MP3
-```
+  --phase phase2_prompts```
 
 ~3 variants × 24 stems = **72** SA3 forwards.  
 Output: `experiments/preset_sweep/output/phase2_prompts/`
@@ -132,6 +129,43 @@ Phase 2 tip: apply the **content gate** strictly — pick highest realism among 
 
 ---
 
+## Phase 2b — adherence prompt audit (diverse clips)
+
+After phase 2, stress-test whether the **`adherence` prompt** allows **higher realism at equal or elevated noise** without active-region content drift. Uses the same **diverse 10s clips** as phase 1b (reuses `phase1b_noise_audit/clips/` when present).
+
+For each category you blind-compare:
+
+- **Baseline** — phase-2 prompt winner at phase-1 winner noise and at **one grid step higher** (0.10)
+- **Adherence** — new explicit preservation prompt at the same two noise levels
+
+Optional: set `include_negative_prompt: true` in the grid YAML to add `adherence_neg_*` variants with a paired negative prompt.
+
+### 2b.1 Render
+
+Requires `winners.yaml` phases 1, 1b, and 2 `completed: true`.
+
+```bash
+uv run python -m experiments.preset_sweep.sweep \
+  --phase phase2b_adherence_prompt```
+
+Default: **5 diverse stems per category** × **4 variants** (baseline/adherence × winner/higher).  
+Output: `experiments/preset_sweep/output/phase2b_adherence_prompt/`
+
+### 2b.2 Listen → record
+
+```bash
+uv run python -m experiments.listening.serve --sweep preset \
+  --preset-sweep-dir experiments/preset_sweep/output/phase2b_adherence_prompt
+
+uv run python -m experiments.preset_sweep.record_winners \
+  --phase phase2b_adherence_prompt \
+  --responses experiments/preset_sweep/output/phase2b_adherence_prompt/responses/responses_....json
+```
+
+Phase 2b tip: rate **content in played sections only** (silence enforcement is on). Prefer **adherence** only if it beats baseline on **realism** at **equal or higher noise** without dropping below the content gate (mean ≥ 4.5). If adherence only wins at lower noise, keep the phase-2 prompt winner.
+
+---
+
 ## Phase 3 — Diffusion budget (optional)
 
 Compare **3 steps × cfg_scale profiles** using each category's locked noise + prompt from phases 1–2.
@@ -144,8 +178,7 @@ Requires phase 1 and 2 winners.
 
 ```bash
 uv run python -m experiments.preset_sweep.sweep \
-  --phase phase3_diffusion $SWEEP_MP3
-```
+  --phase phase3_diffusion```
 
 ~3 variants × 24 stems = **72** SA3 forwards.  
 Output: `experiments/preset_sweep/output/phase3_diffusion/`
@@ -169,8 +202,7 @@ Render **locked presets** on the same **diverse 10s clips** from phase 1b (~40 s
 
 ```bash
 uv run python -m experiments.preset_sweep.sweep \
-  --phase phase4_verify_diverse $SWEEP_MP3
-```
+  --phase phase4_verify_diverse```
 
 Reuses `phase1b_noise_audit/clips/` (symlinked). One realified variant per stem (`locked`).  
 Output: `experiments/preset_sweep/output/phase4_verify_diverse/`
@@ -280,6 +312,7 @@ Compare A1 (basic) vs A2 (basic_realify) on port **8765**.
 | 1 Noise | `phase1_noise` | 5 | — | no |
 | 1b Audit | `phase1b_noise_audit` | ~2 per category | phase 1 | **yes** |
 | 2 Prompts | `phase2_prompts` | 3 | phase 1 + 1b | no |
+| 2b Adherence | `phase2b_adherence_prompt` | ~4 per category | phase 1 + 1b + 2 | **yes** |
 | 3 Diffusion | `phase3_diffusion` | 3 | phase 1 + 2 (optional before lock) | no |
 | 4 Verify render | `phase4_verify_diverse` | 1 (`locked`) | phase 1 + 1b + 2 | no |
 

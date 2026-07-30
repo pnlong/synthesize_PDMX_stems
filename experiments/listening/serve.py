@@ -82,6 +82,14 @@ class SweepListeningHandler(BaseHTTPRequestHandler):
             self._serve_static_file(STATIC_DIR / "verify.html")
             return
 
+        if path in ("/verify-swipe", "/verify-swipe.html"):
+            self._serve_static_file(STATIC_DIR / "verify_swipe.html")
+            return
+
+        if path in ("/swipe", "/swipe.html"):
+            self._serve_static_file(STATIC_DIR / "swipe.html")
+            return
+
         if path.startswith("/api/"):
             self._handle_api(path, query)
             return
@@ -122,8 +130,45 @@ class SweepListeningHandler(BaseHTTPRequestHandler):
             self._save_verification(sweep_type, payload)
             return
 
+        mode = payload.get("mode")
         checkpoint = bool(payload.pop("checkpoint", False))
-        if checkpoint:
+        if mode == "swipe":
+            from experiments.listening.swipe import (
+                build_swipe_cards,
+                merge_swipe_vote_lists,
+                normalize_swipe_cascades,
+                order_swipe_cards,
+            )
+
+            category = payload.get("category")
+            order = payload.get("order") or "shuffle"
+            seed = int(payload.get("session_seed") or payload.get("seed") or 42)
+            cards = order_swipe_cards(
+                build_swipe_cards(catalog, category=category),
+                order=order,
+                seed=seed,
+            )
+            existing_votes: list[dict] = []
+            if checkpoint:
+                session_path = catalog.swipe_session_responses_path()
+                if session_path.is_file():
+                    with open(session_path) as f:
+                        existing_payload = json.load(f)
+                    existing_votes = existing_payload.get("votes") or []
+            merged_votes = merge_swipe_vote_lists(
+                existing_votes,
+                payload.get("votes") or [],
+            )
+            payload["votes"] = normalize_swipe_cascades(
+                cards,
+                merged_votes,
+            )
+            if checkpoint:
+                out_path = catalog.swipe_session_responses_path()
+            else:
+                timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+                out_path = catalog.responses_dir() / f"swipe_{timestamp}.json"
+        elif checkpoint:
             out_path = catalog.session_responses_path()
         else:
             timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -132,11 +177,55 @@ class SweepListeningHandler(BaseHTTPRequestHandler):
         self._send_json({"saved": str(out_path), "checkpoint": checkpoint})
 
     def _save_verification(self, sweep_type: str, payload: dict) -> None:
-        from experiments.listening.final_verify import final_catalog
+        from experiments.listening.final_verify import final_catalog, winners_path_for
         from experiments.listening.verification import (
+            PATCH_VERIFY_SOURCE,
+            patch_verify_swipe_session_path,
             validate_verification,
+            verification_from_patch_swipe_votes,
             verification_in_progress_path,
         )
+
+        checkpoint = bool(payload.get("checkpoint", False))
+        verification_mode = payload.get("verification_mode")
+
+        if verification_mode == "soundfont_shortlist_swipe":
+            if sweep_type != "patch":
+                self._send_error(HTTPStatus.BAD_REQUEST, "Verify swipe is patch-only")
+                return
+            try:
+                catalog, _ = final_catalog(sweep_type)
+            except RuntimeError as exc:
+                self._send_error(HTTPStatus.BAD_REQUEST, str(exc))
+                return
+
+            if checkpoint:
+                out_path = patch_verify_swipe_session_path(catalog)
+                out_path.write_text(json.dumps(json_safe(payload), indent=2))
+                self._send_json({"saved": str(out_path), "checkpoint": True})
+                return
+
+            from experiments.patch_sweep.config import PHASE1 as PATCH_PHASE1
+            from experiments.patch_sweep.winners import phase_winners
+
+            shortlists = phase_winners(PATCH_PHASE1, winners_path_for(sweep_type))
+            payload = verification_from_patch_swipe_votes(
+                payload.get("votes") or [],
+                shortlists,
+                source_responses=PATCH_VERIFY_SOURCE,
+            )
+            errors = validate_verification(payload)
+            if errors:
+                self._send_error(HTTPStatus.BAD_REQUEST, "; ".join(errors))
+                return
+            timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+            out_path = (
+                catalog.responses_dir()
+                / f"verification_final_winners_yaml_{timestamp}.json"
+            )
+            out_path.write_text(json.dumps(json_safe(payload), indent=2))
+            self._send_json({"saved": str(out_path), "checkpoint": False})
+            return
 
         source_responses = payload.get("source_responses")
         if not source_responses:
@@ -198,6 +287,7 @@ class SweepListeningHandler(BaseHTTPRequestHandler):
                 "stems": catalog.list_stems(),
                 "stem_order": stem_order(stem_ids, session_seed),
                 "session_seed": session_seed,
+                "sample_page_size": 12,
             })
             return
 
@@ -232,6 +322,29 @@ class SweepListeningHandler(BaseHTTPRequestHandler):
             self._handle_verify_api(sweep_type, catalog, path, query)
             return
 
+        if path == f"/api/{sweep_type}/swipe/meta":
+            category = query.get("category", [None])[0] or None
+            order = query.get("order", ["shuffle"])[0]
+            seed = int(query.get("seed", ["42"])[0])
+            if not catalog.swipe_available():
+                self._send_error(
+                    HTTPStatus.BAD_REQUEST,
+                    "Clip manifest missing. Run: uv run python -m experiments.patch_sweep.make_clips",
+                )
+                return
+            self._send_json(catalog.get_swipe_meta(category=category, order=order, seed=seed))
+            return
+
+        if path == f"/api/{sweep_type}/swipe/responses/session":
+            session_path = catalog.swipe_session_responses_path()
+            if session_path.is_file():
+                with open(session_path) as f:
+                    payload = json.load(f)
+            else:
+                payload = {"mode": "swipe", "votes": []}
+            self._send_json(payload)
+            return
+
         self._send_error(HTTPStatus.NOT_FOUND, "Not found")
 
     def _handle_verify_api(
@@ -249,12 +362,15 @@ class SweepListeningHandler(BaseHTTPRequestHandler):
             winners_path_for,
         )
         from experiments.listening.verification import (
+            PATCH_VERIFY_SOURCE,
             PRESET_VERIFY_SOURCE,
             build_category_verification,
             build_patch_shortlist_verification_meta,
+            build_patch_verify_swipe_meta,
             build_preset_realify_verification_meta,
             build_verification_meta,
             list_response_files,
+            patch_verify_swipe_session_path,
             resolve_responses_path,
             verification_in_progress_path,
         )
@@ -279,6 +395,43 @@ class SweepListeningHandler(BaseHTTPRequestHandler):
         )
         winners_path = winners_path_for(sweep_type)
 
+        if path == f"/api/{sweep_type}/verify/swipe/meta":
+            if sweep_type != "patch":
+                self._send_error(HTTPStatus.BAD_REQUEST, "Verify swipe is patch-only")
+                return
+            from experiments.patch_sweep.config import PHASE1 as PATCH_PHASE1
+            from experiments.patch_sweep.winners import phase_winners
+
+            order = query.get("order", ["sequential"])[0]
+            seed = int(query.get("seed", ["42"])[0])
+            shortlists = phase_winners(PATCH_PHASE1, winners_path)
+            try:
+                meta = build_patch_verify_swipe_meta(
+                    verify_catalog,
+                    shortlists,
+                    order=order,
+                    seed=seed,
+                    verification_phase=verify_phase,
+                )
+            except RuntimeError as exc:
+                self._send_error(HTTPStatus.BAD_REQUEST, str(exc))
+                return
+            self._send_json(meta)
+            return
+
+        if path == f"/api/{sweep_type}/verify/swipe/session":
+            if sweep_type != "patch":
+                self._send_error(HTTPStatus.BAD_REQUEST, "Verify swipe is patch-only")
+                return
+            session_path = patch_verify_swipe_session_path(verify_catalog)
+            if session_path.is_file():
+                with open(session_path) as f:
+                    payload = json.load(f)
+            else:
+                payload = {"mode": "verification", "votes": []}
+            self._send_json(payload)
+            return
+
         if path == f"/api/{sweep_type}/verify/responses":
             if sweep_type == "preset":
                 self._send_json({"files": [], "source": PRESET_VERIFY_SOURCE})
@@ -289,14 +442,19 @@ class SweepListeningHandler(BaseHTTPRequestHandler):
         responses_name = query.get("responses", [""])[0]
         if sweep_type == "preset":
             responses_name = responses_name or PRESET_VERIFY_SOURCE
-        elif not responses_name:
-            self._send_error(HTTPStatus.BAD_REQUEST, "Missing responses query param")
-            return
+        elif sweep_type == "patch":
+            responses_name = responses_name or PATCH_VERIFY_SOURCE
 
         use_preset_winners = (
             sweep_type == "preset" and responses_name == PRESET_VERIFY_SOURCE
         )
-        if not use_preset_winners:
+        use_patch_winners = (
+            sweep_type == "patch" and responses_name == PATCH_VERIFY_SOURCE
+        )
+        if not use_preset_winners and not use_patch_winners:
+            if not responses_name:
+                self._send_error(HTTPStatus.BAD_REQUEST, "Missing responses query param")
+                return
             responses_path = resolve_responses_path(verify_catalog, responses_name)
             if responses_path is None:
                 self._send_error(
@@ -310,8 +468,11 @@ class SweepListeningHandler(BaseHTTPRequestHandler):
                 from experiments.patch_sweep.winners import phase_winners
                 from experiments.patch_sweep.config import PHASE1 as PATCH_PHASE1
 
-                responses = load_responses(responses_path)
                 shortlists = phase_winners(PATCH_PHASE1, winners_path)
+                if use_patch_winners:
+                    responses = {"ratings": []}
+                else:
+                    responses = load_responses(responses_path)
                 meta = build_patch_shortlist_verification_meta(
                     verify_catalog,
                     responses,
@@ -553,7 +714,7 @@ def main(args=None) -> None:
         sweep_dir = resolve_sweep_catalog_dir(
             sweep_type,
             sweep_root,
-            prefer_verification_phase=True,
+            prefer_verification_phase=dir_overrides[sweep_type] is None,
         )
         manifest_name = "manifest.csv"
         if sweep_type == opts.sweep or (sweep_dir / manifest_name).is_file():
@@ -569,9 +730,17 @@ def main(args=None) -> None:
     url = f"http://{opts.host}:{opts.port}"
     print(f"Serving sweep listening test at {url}")
     for sweep_type, catalog in catalogs.items():
-        print(f"  {sweep_type}: {catalog.sweep_dir} ({len(catalog.list_stems())} stems)")
+        n_variants = len(catalog.variants())
+        n_stems = len(catalog.list_stems())
+        print(f"  {sweep_type}: {catalog.sweep_dir} ({n_stems} stems, {n_variants} variants/stem)")
+        if n_variants > 12:
+            print(
+                f"    Note: {n_variants} variants per stem — UI paginates 12 at a time; "
+                f"use /test?type={sweep_type}"
+            )
     print(f"  Test UI: {url}/test")
     print(f"  Verification UI: {url}/verify")
+    print(f"  Patch verify swipe: {url}/verify-swipe?type=patch")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

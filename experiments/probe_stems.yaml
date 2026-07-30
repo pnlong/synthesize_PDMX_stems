@@ -137,21 +137,81 @@ stems:
     track: 3
     note: "organ/synth hybrid"
 
+  # --- guitar (3) ---
+  - id: guitar_acoustic
+    category: guitar
+    song_id: "8/55/QmQYCNhSTnQpKorvAmfqaoHP8Zf6n2ME1VPFPEPvimsJ3w"
+    track: 0
+    note: "classical guitar"
+
+  - id: guitar_electric
+    category: guitar
+    song_id: "13/29/QmVKzvGJrK1w5z2E3bFnvbGf7JZarW3tp2g1AJpV96MnYz"
+    track: 1
+    note: "electric guitar"
+
+  - id: guitar_steel
+    category: guitar
+    song_id: "10/18/QmSEZYnF2u3d7jnGyYmjjtsgeUdNBq4Si7EJbHswDYbo1B"
+    track: 7
+    note: "acoustic guitar (treble clef)"
+
+  # --- brass (3) ---
+  - id: trumpet
+    category: brass
+    song_id: "14/49/QmWVAKfYxd5fYSS82pXH5QwrtK6g5Y4VNFNYSPrrwLBvyX"
+    track: 0
+    note: "B♭ trumpet"
+
+  - id: trombone
+    category: brass
+    song_id: "12/41/QmURiXVuscyfhjMW2ARu3TyTi8zL4uHocftA11ALGQGV6K"
+    track: 0
+    note: "trombone"
+
+  - id: horn
+    category: brass
+    song_id: "10/18/QmSEZYnF2u3d7jnGyYmjjtsgeUdNBq4Si7EJbHswDYbo1B"
+    track: 6
+    note: "horn in F"
+
   # --- polyphonic (3) ---
-  - id: poly_flute
+  - id: koto
+    category: polyphonic
+    song_id: "7/19/QmPfjDmFbF97N6T6ge4PFFiTQ9VxAFsqLPArCRoLuaTGb1"
+    track: 0
+    note: "koto (ethnic)"
+
+  - id: electric_bass
     category: polyphonic
     song_id: "10/18/QmSEZYnF2u3d7jnGyYmjjtsgeUdNBq4Si7EJbHswDYbo1B"
+    track: 5
+    note: "electric bass"
+
+  - id: bass_guitar
+    category: polyphonic
+    song_id: "1/14/QmbCfKA5maYfdXmX6SwhYNSxPKxvkcfifuQ9qVXscFPrK2"
+    track: 6
+    note: "bass guitar"
+
+  # --- polyphonic legacy (kept for in-progress swipe sessions) ---
+  - id: poly_flute
+    category: polyphonic
+    legacy: true
+    song_id: "10/18/QmSEZYnF2u3d7jnGyYmjjtsgeUdNBq4Si7EJbHswDYbo1B"
     track: 0
-    note: "flute in multi-stem arrangement"
+    note: "legacy ensemble flute (retired probe)"
 
   - id: poly_piano
     category: polyphonic
+    legacy: true
     song_id: "10/18/QmSEZYnF2u3d7jnGyYmjjtsgeUdNBq4Si7EJbHswDYbo1B"
     track: 1
-    note: "piano in multi-stem arrangement"
+    note: "legacy ensemble piano (retired probe)"
 
   - id: poly_mix
     category: polyphonic
+    legacy: true
     song_id: "10/18/QmSEZYnF2u3d7jnGyYmjjtsgeUdNBq4Si7EJbHswDYbo1B"
     track: 3
-    note: "violins in multi-stem arrangement (GM 44)"
+    note: "legacy ensemble violins (retired probe)"

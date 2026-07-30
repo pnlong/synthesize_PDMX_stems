@@ -2,47 +2,160 @@ phases:
   phase1_soundfonts:
     completed: true
     winners:
+      brass:
+      - airfont_320_neo
+      - airfont_340
+      - cadenza_lp
+      - creative_8mbgm
+      - gmextbank
+      - gus1live_v12
+      - merlin_silver_v4_10
+      - the_xioad_bank
+      - uhd3
+      - unison
       drums:
-      - arachno
-      - realfont
-      - sgm_v2
-      - airfont_380
-      - generaluser
+      - airfont_340
+      - airfont_380_final
+      - arachno_soundfont_version_1_0
+      - fatboy_v0_786
+      - generaluser_gs_v1_471
+      - jclive21
+      - magicsfver2
+      - merlin_symphony_v1_21
+      - mt32
+      - musica_theoria_v2_gm
+      - pc51d
+      - soundfont_somsak_2016_v2_8
+      - the_xioad_bank
+      - ultimate
+      - yamaha_tyros_4_just_t4_fixed
+      guitar:
+      - bennetng_anothergs_v2_1
+      - cadenza_lp
+      - dsoundfontv4
+      - merlin_audigy_v1_14
+      - merlin_vienna_v3_20
+      - ph_gm2
+      - sgm_v2_01_nicepianosguitarsbass_v1_2
+      - sonivox_gs250
       mallet:
-      - airfont_380
-      - fluidr3
-      - realfont
-      - generaluser
+      - airfont_380_final
+      - creative_8mbgm
+      - creative_emu10k1_8mbgmsfx
+      - jnsgm
       organ:
-      - arachno
-      - realfont
-      - sgm_v2
+      - arachno_soundfont_version_1_0
+      - bennetng_anothergs_v2_1
+      - cadenza_lp
+      - creative_emu10k1_8mbgmsfx
+      - ct2mgm
+      - fatboy_v0_786
+      - magicsfver2
+      - merlin_audigy_v1_14
+      - merlin_creative_v4_15
+      - merlin_gmpro_v3_15
+      - merlin_special_v2_05
+      - merlin_symphony_v1_21
+      - musescore_general_v0_1_3
+      - ph_gm2
+      - reality_gm_gs
+      - tgk3
+      - the_xioad_bank
       piano:
-      - airfont_380
-      - generaluser
+      - airfont_380_final
+      - fatboy_v0_786
+      - merlin_symphony_v1_21
+      - sgm_v2_01
+      - the_xioad_bank
       polyphonic:
-      - airfont_380
-      - sgm_v2
+      - airfont_320_neo
+      - gmextbank
+      - jurgen_gm_gs_bank
+      - sgm_v2_01
+      - sgm_v2_01_nicepianosguitarsbass_v1_2
+      - uhd3
+      - yamaha_tyros_4_just_t4_fixed
       strings:
-      - sgm_v2
-      - fluidr3
+      - airfont_340
+      - airfont_380_final
+      - choriumreva
+      - creative_8mbgm
+      - creative_emu10k1_8mbgmsfx
+      - fluidr3_gm2_2
+      - generaluser_gs_softsynth_v1_44
+      - jclive21
+      - merlin_grand_v5_37
+      - merlin_orchestra_v1_40
+      - merlin_vienna_v3_20
+      - sgm_v2_01
+      - sgm_v2_01_nicepianosguitarsbass_v1_2
+      - the_fairy_tale_bank
+      - yamaha_tyros_4_just_t4_fixed
       voice:
-      - generaluser
-      - airfont_380
-      - arachno
+      - arachno_soundfont_version_1_0
+      - choriumreva
+      - dsoundfontv4
+      - fluidr3_gm2_2
+      - jurgen_gm_gs_bank
+      - merlin_orchestra_v1_40
+      - merlin_symphony_v1_21
+      - musescore_general_v0_1_3
+      - sgm_v2_01
+      - soundfont_somsak_2016_v2_8
       wind:
-      - generaluser
-      - airfont_380
-    recorded_at: '2026-07-13T23:01:27.123681+00:00'
+      - choriumreva
+      - creative_8mbgm
+      - ct8mgm
+      - fluidr3_gm2_2
+      - generaluser_gs_softsynth_v1_44
+      - merlin_creative_v4_15
+      - merlin_gmpro_v3_15
+      - merlin_grand_v5_37
+      - merlin_orchestra_v1_40
+      - merlin_silver_v4_10
+      - merlin_vienna_v3_20
+    recorded_at: '2026-07-30T08:38:17.767157+00:00'
   phase2_fx:
     completed: true
     winners:
-      drums: fx_dry
-      mallet: fx_dry
-      organ: fx_dry
-      piano: fx_dry
-      polyphonic: fx_dry
-      strings: fx_dry
-      voice: fx_warm
-      wind: fx_light
-    recorded_at: '2026-07-13T22:24:40.186613+00:00'
+      brass:
+      - fx_dry
+      - fx_light
+      - fx_warm
+      drums:
+      - fx_dry
+      - fx_light
+      - fx_warm
+      guitar:
+      - fx_dry
+      - fx_light
+      - fx_warm
+      mallet:
+      - fx_dry
+      - fx_light
+      - fx_warm
+      organ:
+      - fx_dry
+      - fx_light
+      - fx_warm
+      piano:
+      - fx_dry
+      - fx_light
+      - fx_warm
+      polyphonic:
+      - fx_dry
+      - fx_light
+      - fx_warm
+      strings:
+      - fx_dry
+      - fx_light
+      - fx_warm
+      voice:
+      - fx_dry
+      - fx_light
+      - fx_warm
+      wind:
+      - fx_dry
+      - fx_light
+      - fx_warm
+    recorded_at: '2026-07-30T08:04:29.327093+00:00'

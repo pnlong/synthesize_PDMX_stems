@@ -22,8 +22,8 @@ def _write_complete_ablation(ablation_dir: Path, n_tracks: int = 1):
 
     sr = 44100
     for j in range(n_tracks):
-        sf.write(str(song_dir / f"stem_{j}.flac"), np.zeros(sr), sr, format="FLAC")
-    sf.write(str(song_dir / "mixture.flac"), np.zeros(sr), sr, format="FLAC")
+        sf.write(str(song_dir / f"stem_{j}.mp3"), np.zeros(sr), sr, format="MP3")
+    sf.write(str(song_dir / "mixture.mp3"), np.zeros(sr), sr, format="MP3")
 
     pd.DataFrame({"path": [str(song_dir)], "n_tracks": [n_tracks]}).to_csv(
         ablation_dir / f"{DATA_DIR_NAME}.csv", index=False
@@ -71,10 +71,10 @@ def test_reset_synthesis_output_removes_stems_and_tables(tmp_path: Path):
     ablation_dir = tmp_path / "basic"
     _write_complete_ablation(ablation_dir)
     assert (ablation_dir / "data.csv").exists()
-    assert (ablation_dir / "data" / "song" / "stem_0.flac").exists()
+    assert (ablation_dir / "data" / "song" / "stem_0.mp3").exists()
 
     reset_synthesis_output(str(ablation_dir))
 
     assert ablation_dir.is_dir()
     assert not (ablation_dir / "data.csv").exists()
-    assert not (ablation_dir / "data" / "song" / "stem_0.flac").exists()
+    assert not (ablation_dir / "data" / "song" / "stem_0.mp3").exists()

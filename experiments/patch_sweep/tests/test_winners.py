@@ -10,6 +10,8 @@ from experiments.patch_sweep.winners import (
     build_locked_render_config,
     fx_profile_from_phase2_variant_id,
     load_winners,
+    phase2_fx_variant_ids,
+    pick_fx_profile,
     pick_soundfont_id,
     phase1_soundfont_ids,
     record_phase_winners,
@@ -85,6 +87,43 @@ def test_soundfont_seed_differs_by_category():
     assert soundfont_seed(42, "/song", "piano") != soundfont_seed(42, "/song", "strings")
 
 
+def test_pick_fx_profile_stable_per_song_category():
+    profiles = ["dry", "light", "warm"]
+    a = pick_fx_profile(
+        profiles,
+        category="piano",
+        song_path="/song/a",
+        sample_seed=42,
+    )
+    b = pick_fx_profile(
+        profiles,
+        category="piano",
+        song_path="/song/a",
+        sample_seed=42,
+    )
+    assert a == b
+    assert a in profiles
+
+
+def test_pick_fx_profile_independent_of_soundfont_pick():
+    profiles = ["dry", "light", "warm"]
+    soundfont_ids = ["sgm_v2", "airfont_380", "generaluser"]
+    sf = pick_soundfont_id(
+        soundfont_ids,
+        category="piano",
+        song_path="/song/a",
+        sample_seed=42,
+    )
+    fx = pick_fx_profile(
+        profiles,
+        category="piano",
+        song_path="/song/a",
+        sample_seed=42,
+    )
+    assert sf in soundfont_ids
+    assert fx in profiles
+
+
 def test_record_phase_winners_shortlist(tmp_path: Path):
     path = tmp_path / "winners.yaml"
     record_phase_winners(
@@ -94,6 +133,15 @@ def test_record_phase_winners_shortlist(tmp_path: Path):
     )
     doc = load_winners(path)
     assert doc["phases"][PHASE1]["winners"]["piano"] == ["sgm_v2", "airfont_380"]
+
+
+def test_phase2_fx_variant_ids_normalizes_scalar(tmp_path: Path):
+    doc = _winners_doc()
+    doc["phases"][PHASE2]["winners"]["piano"] = ["fx_dry", "fx_light", "fx_warm"]
+    path = tmp_path / "winners.yaml"
+    path.write_text(yaml.safe_dump(doc))
+    assert phase2_fx_variant_ids("piano", path) == ["fx_dry", "fx_light", "fx_warm"]
+    assert phase2_fx_variant_ids("strings", path) == ["fx_dry"]
 
 
 def test_build_locked_render_config(tmp_path: Path):
@@ -113,7 +161,30 @@ def test_build_locked_render_config(tmp_path: Path):
     assert locked["categories"]["piano"]["soundfont_ids"] == ["sgm_v2", "airfont_380"]
     assert locked["categories"]["piano"]["soundfont"] == "SGM-V2.01.sf2"
     assert locked["categories"]["piano"]["fx_profile"] == "light"
+    assert locked["categories"]["piano"]["fx_profiles"] == ["light"]
+    assert locked["categories"]["piano"]["fx_variant_ids"] == ["fx_light"]
     assert "pool_id" not in locked["categories"]["piano"]
+
+
+def test_build_locked_render_config_multiple_fx_profiles(tmp_path: Path):
+    doc = _winners_doc()
+    doc["phases"][PHASE2]["winners"]["piano"] = ["fx_dry", "fx_light", "fx_warm"]
+    winners_path = tmp_path / "winners.yaml"
+    winners_path.write_text(yaml.safe_dump(doc))
+
+    catalog_path = tmp_path / "soundfonts.yaml"
+    catalog_path.write_text(yaml.safe_dump({
+        "candidates": [
+            {"id": "sgm_v2", "file": "SGM-V2.01.sf2"},
+            {"id": "airfont_380", "file": "airfont_380_final.sf2"},
+            {"id": "arachno", "file": "Arachno.sf2"},
+        ]
+    }))
+
+    locked = build_locked_render_config(winners_path, catalog_path)
+    assert locked["categories"]["piano"]["fx_variant_ids"] == ["fx_dry", "fx_light", "fx_warm"]
+    assert locked["categories"]["piano"]["fx_profiles"] == ["dry", "light", "warm"]
+    assert locked["categories"]["piano"]["fx_profile"] == "dry"
 
 
 def test_write_locked_config_requires_phases_1_and_2(tmp_path: Path):

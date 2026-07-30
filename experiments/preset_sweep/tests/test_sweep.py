@@ -12,6 +12,7 @@ from experiments.preset_sweep.config import (
     PHASE1,
     PHASE1B,
     PHASE2,
+    PHASE2B,
     PHASE3,
     load_yaml,
     resolve_silence_enforce,
@@ -20,6 +21,7 @@ from experiments.preset_sweep.sweep import (
     MANIFEST_COLUMNS,
     build_manifest_rows,
     build_sweep_tasks,
+    order_sweep_tasks_for_batching,
     resolve_preset_settings,
     run_preset_sweep,
     song_path_from_id,
@@ -111,6 +113,32 @@ def test_resolve_preset_settings_phase2(tmp_path: Path):
     assert prompt == "minimal"
 
 
+def test_resolve_preset_settings_phase2b(tmp_path: Path):
+    winners_path = tmp_path / "winners.yaml"
+    record_phase_winners(PHASE1, {"piano": "noise0.45"}, path=winners_path)
+    record_phase_winners(PHASE2, {"piano": "preservation"}, path=winners_path)
+
+    noise, prompt, steps, cfg = resolve_preset_settings(
+        phase=PHASE2B,
+        variant={"id": "adherence_higher", "prompt_variant": "adherence", "noise_source": "higher"},
+        grid_cfg={"steps": 8, "cfg_scale": 1.0},
+        category="piano",
+        winners_path=winners_path,
+    )
+    assert noise == 0.55
+    assert prompt == "adherence"
+
+    noise, prompt, _, _ = resolve_preset_settings(
+        phase=PHASE2B,
+        variant={"id": "baseline_winner", "prompt_source": "phase2", "noise_source": "winner"},
+        grid_cfg={"steps": 8, "cfg_scale": 1.0},
+        category="piano",
+        winners_path=winners_path,
+    )
+    assert noise == 0.45
+    assert prompt == "preservation"
+
+
 def test_build_sweep_tasks_and_manifest(tmp_path: Path):
     source_dir, song_dir = _write_basic_dataset(tmp_path)
     output_dir = tmp_path / "sweep"
@@ -160,6 +188,30 @@ def test_build_sweep_tasks_and_manifest(tmp_path: Path):
     assert list(manifest.columns) == MANIFEST_COLUMNS
     assert len(manifest) == 2
     assert manifest.iloc[0]["phase"] == PHASE1
+
+
+def test_order_sweep_tasks_for_batching_groups_variants():
+    tasks = [
+        {
+            "preset": {"init_noise_level": 0.45, "steps": 8, "cfg_scale": 1.0},
+            "duration": 10.0,
+            "row": {"stem_id": "b"},
+        },
+        {
+            "preset": {"init_noise_level": 0.25, "steps": 8, "cfg_scale": 1.0},
+            "duration": 10.0,
+            "row": {"stem_id": "a"},
+        },
+        {
+            "preset": {"init_noise_level": 0.25, "steps": 8, "cfg_scale": 1.0},
+            "duration": 10.0,
+            "row": {"stem_id": "c"},
+        },
+    ]
+    ordered = order_sweep_tasks_for_batching(tasks)
+    assert ordered[0]["preset"]["init_noise_level"] == 0.25
+    assert ordered[1]["preset"]["init_noise_level"] == 0.25
+    assert ordered[2]["preset"]["init_noise_level"] == 0.45
 
 
 def test_build_sweep_tasks_skip_existing(tmp_path: Path):

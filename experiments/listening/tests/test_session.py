@@ -41,3 +41,21 @@ def test_rubric_for_catalog_default_preset(tmp_path: Path):
     catalog = SweepCatalog("preset", sweep_dir)
     rubric = rubric_for_catalog(catalog)
     assert rubric["content_help"] == "Same melody, rhythm, and timing as the reference?"
+
+
+def test_rubric_for_catalog_patch_phase1_realism_only(tmp_path: Path):
+    sweep_dir = tmp_path / "phase1_archive"
+    sweep_dir.mkdir()
+    pd.DataFrame([{
+        "phase": "phase1_archive_soundfonts",
+        "variant_id": "fluidr3_gm2_2",
+        "stem_id": "piano_test",
+        "path": "/song",
+        "track": 0,
+        "out_path": str(sweep_dir / "variants/fluidr3_gm2_2/data/song/stem_0.flac"),
+    }]).to_csv(sweep_dir / "manifest.csv", index=False)
+
+    catalog = SweepCatalog("patch", sweep_dir)
+    rubric = rubric_for_catalog(catalog)
+    assert rubric["realism_only"] is True
+    assert "realistic" in rubric["realism_help"]

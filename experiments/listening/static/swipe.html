@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Soundfont Swipe</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/swipe.css">
+</head>
+<body>
+  <div class="app swipe-app">
+    <header class="topbar">
+      <div>
+        <h1 id="title">Soundfont swipe</h1>
+        <p id="progress" class="progress-text"></p>
+        <p id="save-status" class="save-status hidden"></p>
+      </div>
+      <div class="topbar-actions">
+        <a href="/" class="link-btn">Home</a>
+        <button id="finish-btn" type="button" disabled>Finish</button>
+      </div>
+    </header>
+
+    <div id="loading" class="loading">Loading cards…</div>
+
+    <div id="complete" class="complete hidden">
+      <h2>Swipe session complete</h2>
+      <p id="complete-message">Responses saved on the server.</p>
+      <p id="complete-path" class="meta"></p>
+      <p class="hint">Use this file with <code>record_winners --mode swipe</code>.</p>
+    </div>
+
+    <main id="swipe-panel" class="swipe-panel hidden">
+      <p id="card-label" class="card-label"></p>
+      <p id="card-meta" class="card-meta"></p>
+      <div id="audio-slot" class="audio-slot"></div>
+      <p id="autoplay-hint" class="autoplay-hint hidden">Click anywhere or press a key to enable audio</p>
+
+      <div class="keyboard-legend">
+        <span><kbd>←</kbd> strong reject</span>
+        <span><kbd>→</kbd> strong accept</span>
+        <span><kbd>↓</kbd> weak reject</span>
+        <span><kbd>↑</kbd> weak accept</span>
+        <span><kbd>Space</kbd> pause / play</span>
+        <span><kbd>Backspace</kbd> undo</span>
+      </div>
+
+      <div class="swipe-pad" aria-label="Vote controls">
+        <button type="button" class="swipe-pad-btn swipe-tier-weak_accept" data-tier="weak_accept">
+          <span class="swipe-pad-arrow" aria-hidden="true">↑</span>
+          <span class="swipe-pad-label">Weak accept</span>
+        </button>
+        <button type="button" class="swipe-pad-btn swipe-tier-strong_reject" data-tier="strong_reject">
+          <span class="swipe-pad-arrow" aria-hidden="true">←</span>
+          <span class="swipe-pad-label">Strong reject</span>
+        </button>
+        <button type="button" class="swipe-pad-btn swipe-tier-strong_accept" data-tier="strong_accept">
+          <span class="swipe-pad-arrow" aria-hidden="true">→</span>
+          <span class="swipe-pad-label">Strong accept</span>
+        </button>
+        <button type="button" class="swipe-pad-btn swipe-tier-weak_reject" data-tier="weak_reject">
+          <span class="swipe-pad-arrow" aria-hidden="true">↓</span>
+          <span class="swipe-pad-label">Weak reject</span>
+        </button>
+      </div>
+    </main>
+  </div>
+  <script src="/static/swipe.js"></script>
+</body>
+</html>

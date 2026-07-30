@@ -31,7 +31,7 @@ Writes 10s MP3 clips to [`output/clips/`](output/clips/) and [`trial_manifest.ya
 Requires all four ablation dirs on deepfreeze with matching audio for selected songs. Finish A2 realify if needed:
 
 ```bash
-uv run python -m synthesis.synthesize --render-mode basic --realify --mp3
+uv run python -m synthesis.synthesize --render-mode basic --realify
 ```
 
 ### 3. Export WAV + generate webMUSHRA config

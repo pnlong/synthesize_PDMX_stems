@@ -32,6 +32,12 @@ RUBRICS = {
         "realism_help": "Sounds like a realistic, appropriate instrument?",
         "reference_label": "Reference (basic synthesis)",
     },
+    "patch_phase1": {
+        "realism_only": True,
+        "realism_label": "Timbre quality",
+        "realism_help": "How realistic and appropriate does this instrument sound?",
+        "reference_label": "Reference (basic synthesis)",
+    },
 }
 
 
@@ -82,5 +88,9 @@ def rubric_for_catalog(catalog) -> dict:
         phase = str(catalog._manifest.iloc[0].get("phase", ""))
         if phase == "phase1b_noise_audit":
             return RUBRICS["preset_phase1b"]
+    if getattr(catalog, "sweep_type", None) == "patch" and not catalog._manifest.empty:
+        phase = str(catalog._manifest.iloc[0].get("phase", ""))
+        if phase in ("phase1_soundfonts", "phase1_archive_soundfonts"):
+            return RUBRICS["patch_phase1"]
     sweep_type = getattr(catalog, "sweep_type", "preset")
     return RUBRICS.get(sweep_type, RUBRICS["preset"])

@@ -34,6 +34,8 @@ ABLATIONS_DIR_NAME = "ablations"
 # {OUTPUT_DIR}/dev/analysis/ — analysis outputs (song lengths, etc.)
 ANALYSIS_DIR_NAME = "analysis"
 SONG_LENGTHS_DIR_NAME = "song_lengths"
+INSTRUMENTS_DIR_NAME = "instruments"
+TRACK_NAMES_DIR_NAME = "track_names"
 
 # {OUTPUT_DIR}/dev/experiments/ — experiment outputs (preset sweep, etc.)
 EXPERIMENTS_DIR_NAME = "experiments"
@@ -79,12 +81,14 @@ SAMPLE_RATE = 44100
 # 1 = mono (downmix fluidsynth stereo). 2 = stereo (keep fluidsynth L/R).
 STEM_CHANNELS = 1
 GAIN = 1.0
-STEM_FILE_PATTERN = "stem_{track}.flac"
-MIXTURE_FILE_NAME = "mixture.flac"
+STEM_FILE_PATTERN = "stem_{track}.mp3"
+MIXTURE_FILE_NAME = "mixture.mp3"
 MIXTURE_PEAK_LIMIT = 1.0
 FLAC_SUBTYPE = "PCM_16"  # on-disk stems/mixtures; processing uses float32 internally
-DEFAULT_AUDIO_FORMAT = "flac"
-PROTOTYPE_AUDIO_FORMAT = "mp3"
+DEFAULT_AUDIO_FORMAT = "mp3"
+FLAC_AUDIO_FORMAT = "flac"
+# Deprecated alias; use DEFAULT_AUDIO_FORMAT or FLAC_AUDIO_FORMAT.
+PROTOTYPE_AUDIO_FORMAT = DEFAULT_AUDIO_FORMAT
 
 TARGET_LOUDNESS_LUFS = -23.0
 
@@ -117,3 +121,15 @@ REALIFY_SILENCE_OVERLAP_RATIO = 0.5
 REALIFY_SILENCE_THRESHOLD_DB = -60.0
 REALIFY_SILENCE_ACTIVE_MARGIN_MS = 1000.0
 REALIFY_SILENCE_FADE_MS = 200.0
+
+# Post-SA3 content fidelity gate (reference vs realified onset alignment)
+REALIFY_CONTENT_FIDELITY_ENFORCE = False
+REALIFY_CONTENT_FIDELITY_THRESHOLD = 0.85
+REALIFY_CONTENT_FIDELITY_NOISE_STEP = 0.10
+REALIFY_CONTENT_FIDELITY_MIN_NOISE = 0.25
+REALIFY_CONTENT_FIDELITY_MAX_ATTEMPTS = 4
+REALIFY_CONTENT_FIDELITY_ONSET_TOLERANCE_MS = 50.0
+REALIFY_CONTENT_FIDELITY_ACTIVE_MARGIN_MS = 100.0
+
+# Realify inference backend: "pytorch" (default) or "trt" (TensorRT eager audio-to-audio)
+REALIFY_BACKEND = "pytorch"

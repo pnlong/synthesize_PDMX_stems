@@ -24,14 +24,12 @@ def rebuild_mixtures(*, jobs: int = 8, audio_format: str = "mp3") -> None:
         print(f"  {count} mixtures")
 
 
-def run_realify(mode: str, *, mp3: bool = True) -> None:
+def run_realify(mode: str) -> None:
     cmd = [
         "uv", "run", "python", "-m", "synthesis.synthesize",
         "--render-mode", mode,
         "--realify",
     ]
-    if mp3:
-        cmd.append("--mp3")
     print("Running:", " ".join(cmd))
     subprocess.run(cmd, check=True)
 

@@ -5,7 +5,12 @@ import random
 import pandas as pd
 
 from synthesis.realify.captions.generate import generate_captions, generate_captions_from_tables
-from synthesis.realify.captions.metadata import REALIFY_ANCHOR, get_caption, instrument_hint
+from synthesis.realify.captions.metadata import (
+    ADHERENCE_ANCHOR,
+    REALIFY_ANCHOR,
+    get_caption,
+    instrument_hint,
+)
 
 
 def test_get_caption_filters_na_and_shuffles_with_seed():
@@ -61,6 +66,20 @@ def test_get_caption_minimal_variant():
     }
     caption = get_caption(metadata, prompt_variant="minimal")
     assert caption == "solo piano, realistic studio recording, expressive performance"
+
+
+def test_get_caption_adherence_variant():
+    metadata = {
+        "program": 0,
+        "is_drum": False,
+        "name": "Piano",
+        "genres": "rock",
+    }
+    caption = get_caption(metadata, prompt_variant="adherence")
+    assert caption.startswith(ADHERENCE_ANCHOR)
+    assert "Adhere to the original content" in caption
+    assert "rock" not in caption
+    assert "format: solo | instruments: piano" in caption
 
 
 def test_get_caption_preservation_variant():

@@ -1,5 +1,6 @@
 """Unit tests for realify task building and device selection."""
 
+import sys
 from pathlib import Path
 from unittest.mock import patch
 import queue
@@ -149,7 +150,7 @@ def test_build_realify_tasks_skips_invalid_stem(tmp_path: Path, monkeypatch):
 
 
 def test_build_realify_tasks_uses_mp3_when_requested(tmp_path: Path):
-    from shared.config import PROTOTYPE_AUDIO_FORMAT
+    from shared.config import DEFAULT_AUDIO_FORMAT
 
     source_dir = tmp_path / "basic"
     output_dir = tmp_path / "basic_realify"
@@ -168,7 +169,7 @@ def test_build_realify_tasks_uses_mp3_when_requested(tmp_path: Path):
     })
 
     tasks = build_realify_tasks(
-        captions, source_dir, output_dir, audio_format=PROTOTYPE_AUDIO_FORMAT,
+        captions, source_dir, output_dir, audio_format=DEFAULT_AUDIO_FORMAT,
     )
     assert len(tasks) == 1
     assert tasks[0]["stem_path"].endswith("stem_0.mp3")
@@ -397,6 +398,13 @@ def test_realify_stem_chunks_long_stems(tmp_path: Path, monkeypatch):
     assert all(call["duration"] <= 10 - 6.0 + 1e-6 for call in captured)
 
 
+def test_configure_sa3_env_adds_submodule_to_sys_path():
+    from synthesis.realify.realify import configure_sa3_env, sa3_repo_path
+
+    configure_sa3_env()
+    assert str(sa3_repo_path()) in sys.path
+
+
 def test_run_realify_gpu_uses_spawn_pool(tmp_path: Path, monkeypatch):
     captured = {}
 
@@ -467,7 +475,10 @@ def test_run_realify_gpu_uses_spawn_pool(tmp_path: Path, monkeypatch):
         1,
         True,
     )
-    assert initargs[4] is not None
+    assert initargs[4] is False
+    assert initargs[5] == "flac"
+    assert initargs[6] == "pytorch"
+    assert initargs[7] is not None
     assert captured["imap_func"] == "_realify_gpu_worker_shard"
     assert captured["imap_chunksize"] == 1
     assert captured["pool_closed"] is True

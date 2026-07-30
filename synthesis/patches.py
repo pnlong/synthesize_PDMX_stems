@@ -2,8 +2,9 @@
 
 Per-category soundfont shortlists and FX profiles are loaded from
 ``experiments/patch_sweep/winners_locked.yaml`` after the tuning pipeline.
-Production slakh mode randomly picks a soundfont per (song, category) from
-each shortlist while keeping MIDI programs unchanged.
+Production slakh mode randomly picks a soundfont and FX profile per
+(song, category) from each shortlist, independently and deterministically
+from ``sample_seed``.
 """
 
 from __future__ import annotations
@@ -70,10 +71,21 @@ LISTENING_CATEGORY_GM_CLASSES: dict[str, tuple[str, ...]] = {
     "piano": ("piano",),
     "drums": ("drums",),
     "strings": ("strings",),
-    "wind": ("pipe", "reed", "brass"),
+    "wind": ("pipe", "reed"),
     "voice": ("ensemble",),
     "mallet": ("chromatic_percussion",),
     "organ": ("organ",),
+    "guitar": ("guitar",),
+    "brass": ("brass",),
+    "polyphonic": (
+        "synth_lead",
+        "synth_pad",
+        "synth_effects",
+        "ethnic",
+        "percussive",
+        "sound_effects",
+        "bass",
+    ),
 }
 
 WINNERS_LOCKED_PATH = (
@@ -240,15 +252,26 @@ def resolve_probe_category(
         return "organ"
     if any(k in name for k in ("marimba", "vibraphone", "xylophone", "glockenspiel")):
         return "mallet"
-    if any(k in name for k in ("voice", "soprano", "alto", "tenor", "baritone", "choir", "vocal")):
+    if any(k in name for k in ("voice", "soprano", "baritone", "choir", "vocal")):
         return "voice"
     if any(k in name for k in ("violin", "viola", "cello", "contrabass", "string")):
         return "strings"
+    if any(k in name for k in ("guitar", "gitar", "gitarre", "luit")):
+        return "guitar"
+    if any(
+        k in name
+        for k in ("trumpet", "trombone", "horn", "tuba", "brass", "cornet", "flugelhorn")
+    ):
+        return "brass"
     if any(k in name for k in ("flute", "clarinet", "saxophone", "sax", "oboe", "bassoon", "piccolo")):
         return "wind"
     gm = _gm_class(program, is_drum)
     if gm == "piano":
         return "piano"
+    if gm == "guitar":
+        return "guitar"
+    if gm == "brass":
+        return "brass"
     if gm in ("reed", "pipe"):
         return "wind"
     if gm == "strings":
@@ -259,6 +282,8 @@ def resolve_probe_category(
         return "organ"
     if gm == "ensemble":
         return "voice"
+    if gm in LISTENING_CATEGORY_GM_CLASSES["polyphonic"]:
+        return "polyphonic"
     return "polyphonic"
 
 

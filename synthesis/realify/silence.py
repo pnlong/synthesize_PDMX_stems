@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass
 
 import torch
 
@@ -189,3 +190,60 @@ def apply_silence_enforcement(
     output = realified.clone()
     output[..., force_silent] = 0.0
     return apply_boundary_crossfade(output, realified, force_silent, fade_samples)
+
+
+@dataclass(frozen=True)
+class SilenceHallucinationResult:
+    n_hallucination_samples: int
+    hallucination_duration_sec: float
+    max_hallucination_db: float
+    passed: bool
+
+
+def score_silence_hallucinations(
+    reference: torch.Tensor,
+    realified: torch.Tensor,
+    *,
+    chunk_ms: float = REALIFY_SILENCE_CHUNK_MS,
+    overlap_ratio: float = REALIFY_SILENCE_OVERLAP_RATIO,
+    threshold_db: float = REALIFY_SILENCE_THRESHOLD_DB,
+    active_margin_ms: float = REALIFY_SILENCE_ACTIVE_MARGIN_MS,
+    sample_rate: int = SAMPLE_RATE,
+) -> SilenceHallucinationResult:
+    """Count energy in reference-silent regions where realified is not silent."""
+    reference = ensure_stem_channels(reference)
+    realified = ensure_stem_channels(realified)
+    n_samples = min(reference.shape[-1], realified.shape[-1])
+    if n_samples <= 0:
+        return SilenceHallucinationResult(0, 0.0, -math.inf, True)
+
+    reference = reference[..., :n_samples]
+    realified = realified[..., :n_samples]
+    chunk_samples = ms_to_samples(chunk_ms, sample_rate)
+    overlap_samples = max(0, int(chunk_samples * overlap_ratio))
+    margin_samples = ms_to_samples(active_margin_ms, sample_rate)
+
+    mask = detect_hallucination_mask(
+        reference,
+        realified,
+        chunk_samples=chunk_samples,
+        overlap_samples=overlap_samples,
+        threshold_db=threshold_db,
+        margin_samples=margin_samples,
+    )
+    n_hallucination = int(mask.sum().item())
+    duration_sec = n_hallucination / sample_rate
+
+    max_db = -math.inf
+    if n_hallucination > 0:
+        indices = mask.nonzero(as_tuple=False).flatten()
+        for idx in indices[:: max(1, len(indices) // 100)]:
+            sample_db = window_peak_db(realified, int(idx.item()), int(idx.item()) + 1)
+            max_db = max(max_db, sample_db)
+
+    return SilenceHallucinationResult(
+        n_hallucination_samples=n_hallucination,
+        hallucination_duration_sec=duration_sec,
+        max_hallucination_db=max_db,
+        passed=n_hallucination == 0,
+    )

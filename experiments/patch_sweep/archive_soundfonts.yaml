@@ -1,0 +1,726 @@
+collection: free-soundfonts-sf2-2019-04
+archive_url: https://archive.org/download/free-soundfonts-sf2-2019-04
+local_dir: /home/pnlong/spdmx/soundfonts/archive-2019-04
+candidates:
+- id: 16_5mg_gm_gs_mt32_v2_51_bank
+  file: archive-2019-04/16.5mg_gm_gs_mt32_v2.51_bank.sf2
+  archive_name: 16.5mg_gm_gs_mt32_v2.51_bank.sf2
+  size_mb: 16.9
+  source: https://archive.org/download/free-soundfonts-sf2-2019-04
+  tags:
+  - general
+  phase1_status: archive_candidate
+- id: 24_1mg_mega_sound_v2_0_bank
+  file: archive-2019-04/24.1mg_mega_sound_v2.0_bank.SF2
+  archive_name: 24.1mg_mega_sound_v2.0_bank.SF2
+  size_mb: 24.7
+  source: https://archive.org/download/free-soundfonts-sf2-2019-04
+  tags:
+  - general
+  phase1_status: archive_candidate
+- id: 27_3mg_symphony_hall_bank
+  file: archive-2019-04/27.3mg_symphony_hall_bank.SF2
+  archive_name: 27.3mg_symphony_hall_bank.SF2
+  size_mb: 28.0
+  source: https://archive.org/download/free-soundfonts-sf2-2019-04
+  tags:
+  - piano
+  - orchestra
+  phase1_status: archive_candidate
+- id: 32mbgmstereo_ntonyx_com
+  file: archive-2019-04/32MbGMStereo[ntonyx.com].sf2
+  archive_name: 32MbGMStereo[ntonyx.com].sf2
+  size_mb: 32.5
+  source: https://archive.org/download/free-soundfonts-sf2-2019-04
+  tags:
+  - general
+  phase1_status: archive_candidate
+- id: 41_8mg_saphyr_two_thousand_gm_gs_bank
+  file: archive-2019-04/41.8mg_saphyr_two_thousand_gm_gs_bank.sf2
+  archive_name: 41.8mg_saphyr_two_thousand_gm_gs_bank.sf2
+  size_mb: 42.9
+  source: https://archive.org/download/free-soundfonts-sf2-2019-04
+  tags:
+  - piano
+  phase1_status: archive_candidate
+- id: 8bitsf
+  file: archive-2019-04/8bitsf.SF2
+  archive_name: 8bitsf.SF2
+  size_mb: 6.7
+  source: https://archive.org/download/free-soundfonts-sf2-2019-04
+  tags:
+  - general
+  phase1_status: archive_candidate
+- id: acapella_gm
+  file: archive-2019-04/Acapella GM.sf2
+  archive_name: Acapella GM.sf2
+  size_mb: 20.6
+  source: https://archive.org/download/free-soundfonts-sf2-2019-04
+  tags:
+  - choir
+  phase1_status: archive_candidate
+- id: airfont_320_neo
+  file: archive-2019-04/airfont_320_neo.sf2
+  archive_name: airfont_320_neo.sf2
+  size_mb: 19.8
+  source: https://archive.org/download/free-soundfonts-sf2-2019-04
+  tags:
+  - general
+  phase1_status: archive_candidate
+- id: airfont_340
+  file: archive-2019-04/airfont_340.sf2
+  archive_name: airfont_340.sf2
+  size_mb: 80.5
+  source: https://archive.org/download/free-soundfonts-sf2-2019-04
+  tags:
+  - general
+  phase1_status: archive_candidate
+- id: airfont_380_final
+  file: archive-2019-04/airfont_380_final.sf2
+  archive_name: airfont_380_final.sf2
+  size_mb: 275.9
+  source: https://archive.org/download/free-soundfonts-sf2-2019-04
+  tags:
+  - general
+  phase1_status: archive_candidate
+- id: arachno_soundfont_version_1_0
+  file: archive-2019-04/Arachno_SoundFont_Version_1.0.sf2
+  archive_name: Arachno_SoundFont_Version_1.0.sf2
+  size_mb: 155.4
+  source: https://archive.org/download/free-soundfonts-sf2-2019-04
+  tags:
+  - orchestra
+  phase1_status: archive_candidate
+- id: aspirin_160_gmgs_2015
+  file: archive-2019-04/Aspirin_160_GMGS_2015.sf2
+  archive_name: Aspirin_160_GMGS_2015.sf2
+  size_mb: 16.6
+  source: https://archive.org/download/free-soundfonts-sf2-2019-04
+  tags:
+  - general
+  phase1_status: archive_candidate
+- id: bennetng_anothergs_v2_1
+  file: archive-2019-04/bennetng_AnotherGS_v2-1.sf2
+  archive_name: bennetng_AnotherGS_v2-1.sf2
+  size_mb: 34.1
+  source: https://archive.org/download/free-soundfonts-sf2-2019-04
+  tags:
+  - general
+  phase1_status: archive_candidate
+- id: cadenza_lp
+  file: archive-2019-04/cadenza-lp.sf2
+  archive_name: cadenza-lp.sf2
+  size_mb: 46.0
+  source: https://archive.org/download/free-soundfonts-sf2-2019-04
+  tags:
+  - piano
+  phase1_status: archive_candidate
+- id: choriumreva
+  file: archive-2019-04/ChoriumRevA.SF2
+  archive_name: ChoriumRevA.SF2
+  size_mb: 28.9
+  source: https://archive.org/download/free-soundfonts-sf2-2019-04
+  tags:
+  - piano
+  - choir
+  phase1_status: archive_candidate
+- id: creative_emu10k1_8mbgmsfx
+  file: archive-2019-04/Creative (emu10k1)8MBGMSFX.SF2
+  archive_name: Creative (emu10k1)8MBGMSFX.SF2
+  size_mb: 7.6
+  source: https://archive.org/download/free-soundfonts-sf2-2019-04
+  tags:
+  - general
+  phase1_status: archive_candidate
+- id: creative_labs_2m_gm_2gmgsmt
+  file: archive-2019-04/Creative Labs 2M GM_2gmgsmt.sf2
+  archive_name: Creative Labs 2M GM_2gmgsmt.sf2
+  size_mb: 2.1
+  source: https://archive.org/download/free-soundfonts-sf2-2019-04
+  tags:
+  - general
+  phase1_status: archive_candidate
+- id: creative_labs_4m_gm_4gmgsmt
+  file: archive-2019-04/Creative Labs 4M GM_4gmgsmt.sf2
+  archive_name: Creative Labs 4M GM_4gmgsmt.sf2
+  size_mb: 4.2
+  source: https://archive.org/download/free-soundfonts-sf2-2019-04
+  tags:
+  - general
+  phase1_status: archive_candidate
+- id: creative_1mgm
+  file: archive-2019-04/Creative_1mgm.sf2
+  archive_name: Creative_1mgm.sf2
+  size_mb: 1.1
+  source: https://archive.org/download/free-soundfonts-sf2-2019-04
+  tags:
+  - general
+  phase1_status: archive_candidate
+- id: creative_28mbgm
+  file: archive-2019-04/CREATIVE_28MBGM.sf2
+  archive_name: CREATIVE_28MBGM.sf2
+  size_mb: 29.7
+  source: https://archive.org/download/free-soundfonts-sf2-2019-04
+  tags:
+  - general
+  phase1_status: archive_candidate
+- id: creative_8mbgm
+  file: archive-2019-04/CREATIVE_8MBGM.SF2
+  archive_name: CREATIVE_8MBGM.SF2
+  size_mb: 7.6
+  source: https://archive.org/download/free-soundfonts-sf2-2019-04
+  tags:
+  - general
+  phase1_status: archive_candidate
+- id: ct2mgm
+  file: archive-2019-04/CT2MGM.SF2
+  archive_name: CT2MGM.SF2
+  size_mb: 2.2
+  source: https://archive.org/download/free-soundfonts-sf2-2019-04
+  tags:
+  - general
+  phase1_status: archive_candidate
+- id: ct8mgm
+  file: archive-2019-04/CT8MGM.SF2
+  archive_name: CT8MGM.SF2
+  size_mb: 7.6
+  source: https://archive.org/download/free-soundfonts-sf2-2019-04
+  tags:
+  - general
+  phase1_status: archive_candidate
+- id: dsoundfontv4
+  file: archive-2019-04/DSoundFontV4.sf2
+  archive_name: DSoundFontV4.sf2
+  size_mb: 580.2
+  source: https://archive.org/download/free-soundfonts-sf2-2019-04
+  tags:
+  - general
+  phase1_status: archive_candidate
+- id: fatboy_v0_786
+  file: archive-2019-04/FatBoy-v0.786.sf2
+  archive_name: FatBoy-v0.786.sf2
+  size_mb: 330.5
+  source: https://archive.org/download/free-soundfonts-sf2-2019-04
+  tags:
+  - general
+  phase1_status: archive_candidate
+- id: florestan_basic_gm_gs
+  file: archive-2019-04/Florestan_Basic_GM_GS.sf2
+  archive_name: Florestan_Basic_GM_GS.sf2
+  size_mb: 3.3
+  source: https://archive.org/download/free-soundfonts-sf2-2019-04
+  tags:
+  - general
+  phase1_status: archive_candidate
+- id: fluidr3_gm2_2
+  file: archive-2019-04/FluidR3_GM2-2.SF2
+  archive_name: FluidR3_GM2-2.SF2
+  size_mb: 148.3
+  source: https://archive.org/download/free-soundfonts-sf2-2019-04
+  tags:
+  - orchestra
+  phase1_status: archive_candidate
+- id: fmsynthesis1_40
+  file: archive-2019-04/FMSynthesis1.40.sf2
+  archive_name: FMSynthesis1.40.sf2
+  size_mb: 129.7
+  source: https://archive.org/download/free-soundfonts-sf2-2019-04
+  tags:
+  - general
+  phase1_status: archive_candidate
+- id: generaluser_gs_v1_471
+  file: archive-2019-04/GeneralUser GS v1.471.sf2
+  archive_name: GeneralUser GS v1.471.sf2
+  size_mb: 31.3
+  source: https://archive.org/download/free-soundfonts-sf2-2019-04
+  tags:
+  - general
+  phase1_status: archive_candidate
+- id: generaluser_gs_softsynth_v1_44
+  file: archive-2019-04/GeneralUser_GS_SoftSynth_v1.44.sf2
+  archive_name: GeneralUser_GS_SoftSynth_v1.44.sf2
+  size_mb: 31.3
+  source: https://archive.org/download/free-soundfonts-sf2-2019-04
+  tags:
+  - general
+  phase1_status: archive_candidate
+- id: gmextbank
+  file: archive-2019-04/GMExtBank.SF2
+  archive_name: GMExtBank.SF2
+  size_mb: 133.3
+  source: https://archive.org/download/free-soundfonts-sf2-2019-04
+  tags:
+  - general
+  phase1_status: archive_candidate
+- id: gus1live_v12
+  file: archive-2019-04/Gus1live_v12.sf2
+  archive_name: Gus1live_v12.sf2
+  size_mb: 16.6
+  source: https://archive.org/download/free-soundfonts-sf2-2019-04
+  tags:
+  - general
+  phase1_status: archive_candidate
+- id: gxscc_gm_033
+  file: archive-2019-04/GXSCC_gm_033.sf2
+  archive_name: GXSCC_gm_033.sf2
+  size_mb: 0.1
+  source: https://archive.org/download/free-soundfonts-sf2-2019-04
+  tags:
+  - general
+  phase1_status: archive_candidate
+- id: jclive21
+  file: archive-2019-04/JClive21.sf2
+  archive_name: JClive21.sf2
+  size_mb: 52.5
+  source: https://archive.org/download/free-soundfonts-sf2-2019-04
+  tags:
+  - general
+  phase1_status: archive_candidate
+- id: jnsgm
+  file: archive-2019-04/Jnsgm.sf2
+  archive_name: Jnsgm.sf2
+  size_mb: 33.2
+  source: https://archive.org/download/free-soundfonts-sf2-2019-04
+  tags:
+  - general
+  phase1_status: archive_candidate
+- id: jurgen_gm_gs_bank
+  file: archive-2019-04/Jurgen_GM_GS_Bank.sf2
+  archive_name: Jurgen_GM_GS_Bank.sf2
+  size_mb: 63.5
+  source: https://archive.org/download/free-soundfonts-sf2-2019-04
+  tags:
+  - general
+  phase1_status: archive_candidate
+- id: magicsfver2
+  file: archive-2019-04/MagicSFver2.sf2
+  archive_name: MagicSFver2.sf2
+  size_mb: 71.2
+  source: https://archive.org/download/free-soundfonts-sf2-2019-04
+  tags:
+  - general
+  phase1_status: archive_candidate
+- id: merlin_audigy_v1_14
+  file: archive-2019-04/merlin_audigy(v1.14).sf2
+  archive_name: merlin_audigy(v1.14).sf2
+  size_mb: 38.8
+  source: https://archive.org/download/free-soundfonts-sf2-2019-04
+  tags:
+  - general
+  phase1_status: archive_candidate
+- id: merlin_creative_v4_15
+  file: archive-2019-04/merlin_creative(v4.15).sf2
+  archive_name: merlin_creative(v4.15).sf2
+  size_mb: 23.8
+  source: https://archive.org/download/free-soundfonts-sf2-2019-04
+  tags:
+  - general
+  phase1_status: archive_candidate
+- id: merlin_gmpro_v3_15
+  file: archive-2019-04/merlin_GMpro(v3.15).sf2
+  archive_name: merlin_GMpro(v3.15).sf2
+  size_mb: 49.0
+  source: https://archive.org/download/free-soundfonts-sf2-2019-04
+  tags:
+  - general
+  phase1_status: archive_candidate
+- id: merlin_gmv32_v3_2
+  file: archive-2019-04/merlin_gmv32(v3.2).sf2
+  archive_name: merlin_gmv32(v3.2).sf2
+  size_mb: 35.4
+  source: https://archive.org/download/free-soundfonts-sf2-2019-04
+  tags:
+  - general
+  phase1_status: archive_candidate
+- id: merlin_gold_v4_10
+  file: archive-2019-04/merlin_gold(v4.10).sf2
+  archive_name: merlin_gold(v4.10).sf2
+  size_mb: 38.8
+  source: https://archive.org/download/free-soundfonts-sf2-2019-04
+  tags:
+  - general
+  phase1_status: archive_candidate
+- id: merlin_grand_v5_37
+  file: archive-2019-04/merlin_grand(v5.37).sf2
+  archive_name: merlin_grand(v5.37).sf2
+  size_mb: 61.4
+  source: https://archive.org/download/free-soundfonts-sf2-2019-04
+  tags:
+  - piano
+  phase1_status: archive_candidate
+- id: merlin_orchestra_v1_40
+  file: archive-2019-04/merlin_orchestra(v1.40).sf2
+  archive_name: merlin_orchestra(v1.40).sf2
+  size_mb: 70.8
+  source: https://archive.org/download/free-soundfonts-sf2-2019-04
+  tags:
+  - orchestra
+  phase1_status: archive_candidate
+- id: merlin_silver_v4_10
+  file: archive-2019-04/merlin_silver(v4.10).sf2
+  archive_name: merlin_silver(v4.10).sf2
+  size_mb: 11.6
+  source: https://archive.org/download/free-soundfonts-sf2-2019-04
+  tags:
+  - general
+  phase1_status: archive_candidate
+- id: merlin_special_v2_05
+  file: archive-2019-04/merlin_special(v2.05).sf2
+  archive_name: merlin_special(v2.05).sf2
+  size_mb: 57.5
+  source: https://archive.org/download/free-soundfonts-sf2-2019-04
+  tags:
+  - general
+  phase1_status: archive_candidate
+- id: merlin_symphony_v1_21
+  file: archive-2019-04/merlin_symphony(v1.21).sf2
+  archive_name: merlin_symphony(v1.21).sf2
+  size_mb: 171.3
+  source: https://archive.org/download/free-soundfonts-sf2-2019-04
+  tags:
+  - orchestra
+  phase1_status: archive_candidate
+- id: merlin_vienna_v3_20
+  file: archive-2019-04/merlin_vienna(v3.20).sf2
+  archive_name: merlin_vienna(v3.20).sf2
+  size_mb: 90.2
+  source: https://archive.org/download/free-soundfonts-sf2-2019-04
+  tags:
+  - general
+  phase1_status: archive_candidate
+- id: microsoft_gm
+  file: archive-2019-04/Microsoft_gm.sf2
+  archive_name: Microsoft_gm.sf2
+  size_mb: 3.2
+  source: https://archive.org/download/free-soundfonts-sf2-2019-04
+  tags:
+  - general
+  phase1_status: archive_candidate
+- id: mt32
+  file: archive-2019-04/MT32.sf2
+  archive_name: MT32.sf2
+  size_mb: 7.6
+  source: https://archive.org/download/free-soundfonts-sf2-2019-04
+  tags:
+  - general
+  phase1_status: archive_candidate
+- id: musescore_general_v0_1_3
+  file: archive-2019-04/MuseScore_General(v0.1.3).sf2
+  archive_name: MuseScore_General(v0.1.3).sf2
+  size_mb: 218.4
+  source: https://archive.org/download/free-soundfonts-sf2-2019-04
+  tags:
+  - piano
+  phase1_status: archive_candidate
+- id: musica_theoria_v2_gm
+  file: archive-2019-04/Musica_Theoria_v2_(GM).sf2
+  archive_name: Musica_Theoria_v2_(GM).sf2
+  size_mb: 30.5
+  source: https://archive.org/download/free-soundfonts-sf2-2019-04
+  tags:
+  - general
+  phase1_status: archive_candidate
+- id: nintendo_64_ver_2_0
+  file: archive-2019-04/Nintendo_64_ver_2.0.sf2
+  archive_name: Nintendo_64_ver_2.0.sf2
+  size_mb: 12.5
+  source: https://archive.org/download/free-soundfonts-sf2-2019-04
+  tags:
+  - general
+  phase1_status: archive_candidate
+- id: nokia_30
+  file: archive-2019-04/Nokia_30.sf2
+  archive_name: Nokia_30.sf2
+  size_mb: 2.2
+  source: https://archive.org/download/free-soundfonts-sf2-2019-04
+  tags:
+  - general
+  phase1_status: archive_candidate
+- id: nokia_3220_rh_37
+  file: archive-2019-04/Nokia_3220__RH-37.sf2
+  archive_name: Nokia_3220__RH-37.sf2
+  size_mb: 3.1
+  source: https://archive.org/download/free-soundfonts-sf2-2019-04
+  tags:
+  - general
+  phase1_status: archive_candidate
+- id: nokia_6230i_rm_72
+  file: archive-2019-04/Nokia_6230i_RM-72_.sf2
+  archive_name: Nokia_6230i_RM-72_.sf2
+  size_mb: 0.2
+  source: https://archive.org/download/free-soundfonts-sf2-2019-04
+  tags:
+  - general
+  phase1_status: archive_candidate
+- id: nokia_s30
+  file: archive-2019-04/Nokia_S30.sf2
+  archive_name: Nokia_S30.sf2
+  size_mb: 6.3
+  source: https://archive.org/download/free-soundfonts-sf2-2019-04
+  tags:
+  - general
+  phase1_status: archive_candidate
+- id: nokia_series_40_5th_edition_fp1_gm
+  file: archive-2019-04/Nokia_Series_40_5th_edition_FP1__GM_.sf2
+  archive_name: Nokia_Series_40_5th_edition_FP1__GM_.sf2
+  size_mb: 8.7
+  source: https://archive.org/download/free-soundfonts-sf2-2019-04
+  tags:
+  - general
+  phase1_status: archive_candidate
+- id: opl_3_fm_128m_sound_blaster_16
+  file: archive-2019-04/OPL-3_FM_128M(Sound_Blaster_16).sf2
+  archive_name: OPL-3_FM_128M(Sound_Blaster_16).sf2
+  size_mb: 135.0
+  source: https://archive.org/download/free-soundfonts-sf2-2019-04
+  tags:
+  - general
+  phase1_status: archive_candidate
+- id: pc51d
+  file: archive-2019-04/PC51d.sf2
+  archive_name: PC51d.sf2
+  size_mb: 58.8
+  source: https://archive.org/download/free-soundfonts-sf2-2019-04
+  tags:
+  - general
+  phase1_status: archive_candidate
+- id: ph_gm2
+  file: archive-2019-04/ph-gm2.SF2
+  archive_name: ph-gm2.SF2
+  size_mb: 39.7
+  source: https://archive.org/download/free-soundfonts-sf2-2019-04
+  tags:
+  - general
+  phase1_status: archive_candidate
+- id: realfont_2_1
+  file: archive-2019-04/RealFont_2_1.SF2
+  archive_name: RealFont_2_1.SF2
+  size_mb: 106.0
+  source: https://archive.org/download/free-soundfonts-sf2-2019-04
+  tags:
+  - general
+  phase1_status: archive_candidate
+- id: reality_gm_gs
+  file: archive-2019-04/Reality_gm_gs.SF2
+  archive_name: Reality_gm_gs.SF2
+  size_mb: 32.8
+  source: https://archive.org/download/free-soundfonts-sf2-2019-04
+  tags:
+  - general
+  phase1_status: archive_candidate
+- id: roland_soundcanvas_sc_55_up
+  file: archive-2019-04/Roland SOUNDCanvas SC-55 Up.sf2
+  archive_name: Roland SOUNDCanvas SC-55 Up.sf2
+  size_mb: 185.7
+  source: https://archive.org/download/free-soundfonts-sf2-2019-04
+  tags:
+  - general
+  phase1_status: archive_candidate
+- id: roland_sc_55
+  file: archive-2019-04/Roland_SC-55.sf2
+  archive_name: Roland_SC-55.sf2
+  size_mb: 25.7
+  source: https://archive.org/download/free-soundfonts-sf2-2019-04
+  tags:
+  - general
+  phase1_status: archive_candidate
+- id: roland_sc_55_by_strikinguac
+  file: archive-2019-04/Roland_SC-55_by_StrikingUAC.sf2
+  archive_name: Roland_SC-55_by_StrikingUAC.sf2
+  size_mb: 56.2
+  source: https://archive.org/download/free-soundfonts-sf2-2019-04
+  tags:
+  - general
+  phase1_status: archive_candidate
+- id: roland_sc_55_v1_1_full_pack
+  file: archive-2019-04/Roland_SC-55_v1.1 full pack.sf2
+  archive_name: Roland_SC-55_v1.1 full pack.sf2
+  size_mb: 9.9
+  source: https://archive.org/download/free-soundfonts-sf2-2019-04
+  tags:
+  - general
+  phase1_status: archive_candidate
+- id: roland_sc_55_v2_2_by_patch93_and_xan1242
+  file: archive-2019-04/Roland_SC-55_v2.2_by_Patch93_and_xan1242.sf2
+  archive_name: Roland_SC-55_v2.2_by_Patch93_and_xan1242.sf2
+  size_mb: 47.3
+  source: https://archive.org/download/free-soundfonts-sf2-2019-04
+  tags:
+  - general
+  phase1_status: archive_candidate
+- id: roland_sc_88
+  file: archive-2019-04/Roland_SC-88.sf2
+  archive_name: Roland_SC-88.sf2
+  size_mb: 22.8
+  source: https://archive.org/download/free-soundfonts-sf2-2019-04
+  tags:
+  - general
+  phase1_status: archive_candidate
+- id: roland_scc_1_scc1t2_sf2
+  file: archive-2019-04/Roland_SCC-1_scc1t2.sf2.sf2
+  archive_name: Roland_SCC-1_scc1t2.sf2.sf2
+  size_mb: 3.3
+  source: https://archive.org/download/free-soundfonts-sf2-2019-04
+  tags:
+  - general
+  phase1_status: archive_candidate
+- id: sc_55
+  file: archive-2019-04/SC-55.sf2
+  archive_name: SC-55.sf2
+  size_mb: 137.7
+  source: https://archive.org/download/free-soundfonts-sf2-2019-04
+  tags:
+  - general
+  phase1_status: archive_candidate
+- id: sgm_v2_01_nicepianosguitarsbass_v1_2
+  file: archive-2019-04/SGM-v2.01-NicePianosGuitarsBass-V1.2.sf2
+  archive_name: SGM-v2.01-NicePianosGuitarsBass-V1.2.sf2
+  size_mb: 324.8
+  source: https://archive.org/download/free-soundfonts-sf2-2019-04
+  tags:
+  - piano
+  phase1_status: archive_candidate
+- id: sgm_v2_01
+  file: archive-2019-04/SGM-V2.01.sf2
+  archive_name: SGM-V2.01.sf2
+  size_mb: 247.4
+  source: https://archive.org/download/free-soundfonts-sf2-2019-04
+  tags:
+  - general
+  phase1_status: archive_candidate
+- id: sonivox_gs250
+  file: archive-2019-04/SONiVOX_GS250.sf2
+  archive_name: SONiVOX_GS250.sf2
+  size_mb: 263.6
+  source: https://archive.org/download/free-soundfonts-sf2-2019-04
+  tags:
+  - general
+  phase1_status: archive_candidate
+- id: soundfont_somsak_2016_v2_8
+  file: archive-2019-04/Soundfont_SOMSAK_2016-V2.8.SF2
+  archive_name: Soundfont_SOMSAK_2016-V2.8.SF2
+  size_mb: 179.5
+  source: https://archive.org/download/free-soundfonts-sf2-2019-04
+  tags:
+  - general
+  phase1_status: archive_candidate
+- id: super_nintendo_unofficial_update
+  file: archive-2019-04/Super_Nintendo_Unofficial_update.sf2
+  archive_name: Super_Nintendo_Unofficial_update.sf2
+  size_mb: 1.9
+  source: https://archive.org/download/free-soundfonts-sf2-2019-04
+  tags:
+  - general
+  phase1_status: archive_candidate
+- id: synergi_8mb
+  file: archive-2019-04/synergi-8mb.sf2
+  archive_name: synergi-8mb.sf2
+  size_mb: 8.5
+  source: https://archive.org/download/free-soundfonts-sf2-2019-04
+  tags:
+  - general
+  phase1_status: archive_candidate
+- id: tgk3
+  file: archive-2019-04/tgk3.SF2
+  archive_name: tgk3.SF2
+  size_mb: 42.4
+  source: https://archive.org/download/free-soundfonts-sf2-2019-04
+  tags:
+  - general
+  phase1_status: archive_candidate
+- id: the_fairy_tale_bank
+  file: archive-2019-04/The_Fairy_Tale_Bank.sf2
+  archive_name: The_Fairy_Tale_Bank.sf2
+  size_mb: 209.8
+  source: https://archive.org/download/free-soundfonts-sf2-2019-04
+  tags:
+  - general
+  phase1_status: archive_candidate
+- id: the_ultimate_megadrive_soundfont_v1_5
+  file: archive-2019-04/The_Ultimate Megadrive_Soundfont[v1.5].sf2
+  archive_name: The_Ultimate Megadrive_Soundfont[v1.5].sf2
+  size_mb: 63.2
+  source: https://archive.org/download/free-soundfonts-sf2-2019-04
+  tags:
+  - general
+  phase1_status: archive_candidate
+- id: the_ultimate_wii_soundfont_v1_1
+  file: archive-2019-04/The_Ultimate_Wii_Soundfont_V1-1.sf2
+  archive_name: The_Ultimate_Wii_Soundfont_V1-1.sf2
+  size_mb: 17.7
+  source: https://archive.org/download/free-soundfonts-sf2-2019-04
+  tags:
+  - general
+  phase1_status: archive_candidate
+- id: the_xioad_bank
+  file: archive-2019-04/The_Xioad_Bank.sf2
+  archive_name: The_Xioad_Bank.sf2
+  size_mb: 64.7
+  source: https://archive.org/download/free-soundfonts-sf2-2019-04
+  tags:
+  - general
+  phase1_status: archive_candidate
+- id: timbres_of_heaven_gm_gs_xg_sfx_v_3_4_final
+  file: archive-2019-04/Timbres Of Heaven GM_GS_XG_SFX V 3.4 Final.sf2
+  archive_name: Timbres Of Heaven GM_GS_XG_SFX V 3.4 Final.sf2
+  size_mb: 395.2
+  source: https://archive.org/download/free-soundfonts-sf2-2019-04
+  tags:
+  - general
+  phase1_status: archive_candidate
+- id: timgm6mb
+  file: archive-2019-04/TimGM6mb.sf2
+  archive_name: TimGM6mb.sf2
+  size_mb: 6.0
+  source: https://archive.org/download/free-soundfonts-sf2-2019-04
+  tags:
+  - general
+  phase1_status: archive_candidate
+- id: uhd3
+  file: archive-2019-04/UHD3.sf2
+  archive_name: UHD3.sf2
+  size_mb: 67.4
+  source: https://archive.org/download/free-soundfonts-sf2-2019-04
+  tags:
+  - general
+  phase1_status: archive_candidate
+- id: ultimate
+  file: archive-2019-04/Ultimate.SF2
+  archive_name: Ultimate.SF2
+  size_mb: 8.5
+  source: https://archive.org/download/free-soundfonts-sf2-2019-04
+  tags:
+  - general
+  phase1_status: archive_candidate
+- id: unison
+  file: archive-2019-04/Unison.SF2
+  archive_name: Unison.SF2
+  size_mb: 29.3
+  source: https://archive.org/download/free-soundfonts-sf2-2019-04
+  tags:
+  - general
+  phase1_status: archive_candidate
+- id: weedsgm3
+  file: archive-2019-04/WeedsGM3.sf2
+  archive_name: WeedsGM3.sf2
+  size_mb: 54.9
+  source: https://archive.org/download/free-soundfonts-sf2-2019-04
+  tags:
+  - general
+  phase1_status: archive_candidate
+- id: yamaha_tyros_4_just_t4_fixed
+  file: archive-2019-04/yamaha tyros 4_just_t4_fixed.sf2
+  archive_name: yamaha tyros 4_just_t4_fixed.sf2
+  size_mb: 526.0
+  source: https://archive.org/download/free-soundfonts-sf2-2019-04
+  tags:
+  - general
+  phase1_status: archive_candidate
+- id: yamaha_xg_sound_set
+  file: archive-2019-04/Yamaha_XG_Sound_Set.sf2
+  archive_name: Yamaha_XG_Sound_Set.sf2
+  size_mb: 3.9
+  source: https://archive.org/download/free-soundfonts-sf2-2019-04
+  tags:
+  - general
+  phase1_status: archive_candidate

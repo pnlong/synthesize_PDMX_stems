@@ -356,3 +356,111 @@ def test_resolve_sweep_catalog_dir_prefers_phase_with_manifest(tmp_path: Path, m
     )
     assert resolved == phase2.resolve()
 
+
+def test_resolve_sweep_catalog_dir_honors_explicit_phase_dir(
+    tmp_path: Path,
+    monkeypatch,
+):
+    output_root = tmp_path / "output"
+    phase2b = output_root / "phase2b_adherence_prompt"
+    phase4 = output_root / "phase4_verify_diverse"
+    phase2b.mkdir(parents=True)
+    phase4.mkdir(parents=True)
+    (phase2b / "manifest.csv").write_text("phase,variant_id\n")
+    (phase4 / "manifest.csv").write_text("phase,variant_id\n")
+
+    monkeypatch.setattr(
+        "experiments.listening.final_verify.readiness_errors",
+        lambda sweep_type, winners_path=None: [],
+    )
+    monkeypatch.setattr(
+        "experiments.listening.final_verify.final_sweep_dir",
+        lambda sweep_type, winners_path=None: phase4,
+    )
+
+    resolved = resolve_sweep_catalog_dir(
+        "preset",
+        phase2b,
+        prefer_verification_phase=False,
+    )
+    assert resolved == phase2b.resolve()
+
+
+def test_sweep_catalog_swipe_meta_and_clip_audio(tmp_path: Path):
+    source_dir = tmp_path / "basic"
+    sweep_dir = tmp_path / "sweep"
+    song_id = "0/13/QmTest"
+    song_dir = source_dir / "data" / song_id
+    song_dir.mkdir(parents=True)
+    (song_dir / "stem_0.flac").write_bytes(b"fake")
+
+    clip_path_a = (
+        sweep_dir / "clips" / "variants" / "sf_a" / "data" / song_id / "stem_0_c0.mp3"
+    )
+    clip_path_b = (
+        sweep_dir / "clips" / "variants" / "sf_b" / "data" / song_id / "stem_0_c0.mp3"
+    )
+    clip_path_a.parent.mkdir(parents=True)
+    clip_path_b.parent.mkdir(parents=True)
+    clip_path_a.write_bytes(b"clip-a")
+    clip_path_b.write_bytes(b"clip-b")
+
+    pd.DataFrame([
+        {
+            "variant_id": "sf_a",
+            "stem_id": "piano_test",
+            "category": "piano",
+            "path": str(song_dir),
+            "track": 0,
+            "clip_id": "piano_test_c0",
+            "clip_index": 0,
+            "clip_start_seconds": 10.0,
+            "clip_seconds": 10.0,
+            "out_path": str(clip_path_a),
+        },
+        {
+            "variant_id": "sf_b",
+            "stem_id": "piano_test",
+            "category": "piano",
+            "path": str(song_dir),
+            "track": 0,
+            "clip_id": "piano_test_c0",
+            "clip_index": 0,
+            "clip_start_seconds": 10.0,
+            "clip_seconds": 10.0,
+            "out_path": str(clip_path_b),
+        },
+    ]).to_csv(sweep_dir / "clip_manifest.csv", index=False)
+
+    probe_path = tmp_path / "probe_stems.yaml"
+    probe_path.write_text(yaml.dump({
+        "stems": [{
+            "id": "piano_test",
+            "category": "piano",
+            "song_id": song_id,
+            "track": 0,
+            "note": "worldmusic piano",
+        }],
+    }))
+
+    catalog = SweepCatalog(
+        "patch",
+        sweep_dir,
+        source_dir,
+        probe_stems_path=probe_path,
+    )
+    assert catalog.swipe_available() is True
+
+    meta = catalog.get_swipe_meta(category="piano", order="sequential", seed=1)
+    assert meta["total_cards"] == 2
+    assert meta["mode"] == "swipe"
+    assert meta["cards"][0]["audio"]["url"].startswith("/audio/patch/variant/")
+
+    all_meta = catalog.get_swipe_meta(order="sequential", seed=1)
+    assert all_meta["total_cards"] == 2
+    assert all_meta["category"] is None
+    assert set(all_meta["categories"]) == {"piano"}
+
+    resolved = catalog.resolve_variant_audio("sf_a", song_id, "stem_0_c0.mp3")
+    assert resolved == clip_path_a.resolve()
+

@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     from experiments.listening.catalog import SweepCatalog
 
 PRESET_VERIFY_SOURCE = "winners.yaml"
+PATCH_VERIFY_SOURCE = "winners.yaml"
 
 
 def variant_stats(df: pd.DataFrame) -> pd.DataFrame:
@@ -209,6 +210,140 @@ def build_patch_shortlist_verification_meta(
         "mean_rating_threshold": DEFAULT_MEAN_RATING_THRESHOLD,
         "categories": categories,
     }
+
+
+def build_patch_verify_swipe_cards(
+    catalog: SweepCatalog,
+    shortlists: dict[str, list[str]],
+) -> list[dict]:
+    """One listening card per shortlisted soundfont (representative 10s clip)."""
+    from experiments.listening.catalog import song_id_from_manifest_row
+
+    clip_manifest = catalog._clip_manifest
+    if clip_manifest.empty:
+        raise RuntimeError(
+            "Clip manifest missing. Run make_clips on phase-1 soundfont output first."
+        )
+
+    probes = catalog._probe_by_id
+    cards: list[dict] = []
+    for category in sorted(shortlists):
+        for soundfont_id in shortlists[category]:
+            if not soundfont_id:
+                continue
+            rows = clip_manifest[
+                (clip_manifest["category"].astype(str) == str(category))
+                & (clip_manifest["variant_id"].astype(str) == str(soundfont_id))
+            ]
+            if rows.empty:
+                continue
+            rows = rows.sort_values(["stem_id", "clip_index"])
+            row = rows.iloc[0]
+            variant_id = str(row["variant_id"])
+            clip_id = str(row["clip_id"])
+            stem_id = str(row["stem_id"])
+            probe = probes.get(stem_id, {})
+            clip_index = int(row.get("clip_index") or 0)
+            n_clips = int(
+                clip_manifest[
+                    (clip_manifest["stem_id"] == stem_id)
+                    & (clip_manifest["variant_id"] == variant_id)
+                ]["clip_id"].nunique()
+            )
+            out_path = Path(str(row["out_path"]))
+            cards.append({
+                "card_id": f"{category}|{variant_id}|{clip_id}",
+                "category": str(category),
+                "soundfont_id": variant_id,
+                "variant_id": variant_id,
+                "clip_id": clip_id,
+                "stem_id": stem_id,
+                "track": int(row.get("track") or probe.get("track") or 0),
+                "clip_index": clip_index,
+                "clips_per_stem": n_clips,
+                "label": (
+                    f"{category} · {variant_id} · "
+                    f"{probe.get('note') or stem_id} · clip {clip_index + 1}/{n_clips}"
+                ),
+                "audio": catalog._variant_cell_from_row(row),
+                "filename": out_path.name,
+                "song_id": song_id_from_manifest_row(row),
+            })
+    return cards
+
+
+def build_patch_verify_swipe_meta(
+    catalog: SweepCatalog,
+    shortlists: dict[str, list[str]],
+    *,
+    order: str = "sequential",
+    seed: int = 42,
+    verification_phase: str | None = None,
+) -> dict:
+    from experiments.listening.swipe import order_swipe_cards, swipe_storage_key
+
+    cards = build_patch_verify_swipe_cards(catalog, shortlists)
+    cards = order_swipe_cards(cards, order=order, seed=seed)
+    session_id = f"{catalog.sweep_dir.resolve().name}_verify"
+    categories = sorted({str(card["category"]) for card in cards if card.get("category")})
+    return {
+        "sweep_type": catalog.sweep_type,
+        "mode": "verification",
+        "verification_mode": "soundfont_shortlist_swipe",
+        "available": catalog.available(),
+        "manifest_id": catalog.clip_manifest_id() or catalog.manifest_id(),
+        "session_id": session_id,
+        "storage_key": swipe_storage_key(catalog.sweep_type, session_id),
+        "source_responses": PATCH_VERIFY_SOURCE,
+        "verification_phase": verification_phase,
+        "order": order,
+        "seed": seed,
+        "total_cards": len(cards),
+        "categories": categories,
+        "cards": cards,
+        "keyboard": {
+            "strong_reject": "ArrowLeft",
+            "strong_accept": "ArrowRight",
+            "replay": "Space",
+            "undo": "Backspace",
+        },
+    }
+
+
+def verification_from_patch_swipe_votes(
+    votes: list[dict],
+    shortlists: dict[str, list[str]],
+    *,
+    source_responses: str = PATCH_VERIFY_SOURCE,
+) -> dict:
+    """Convert binary swipe votes into patch verification JSON for lock."""
+    vote_index = {
+        (str(vote.get("category")), str(vote.get("variant_id"))): vote
+        for vote in votes
+        if vote.get("category") and vote.get("variant_id")
+    }
+    categories = []
+    for category in sorted(shortlists):
+        approved: list[str] = []
+        for soundfont_id in shortlists[category]:
+            vote = vote_index.get((str(category), str(soundfont_id)))
+            if vote and str(vote.get("tier")) == "strong_accept":
+                approved.append(str(soundfont_id))
+        categories.append({
+            "category": str(category),
+            "approved": approved,
+        })
+    return {
+        "mode": "verification",
+        "sweep_type": "patch",
+        "verification_mode": "soundfont_shortlist_swipe",
+        "source_responses": source_responses,
+        "categories": categories,
+    }
+
+
+def patch_verify_swipe_session_path(catalog: SweepCatalog) -> Path:
+    return catalog.responses_dir() / "verification_swipe_in_progress.json"
 
 
 def build_preset_realify_verification_meta(

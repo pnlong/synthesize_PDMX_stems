@@ -12,63 +12,116 @@ uv run python -m shared.setup_symlinks
 
 # A1 basic ablation probe stems exist
 ls synthesis/ablations_output/basic/data/
+```
 
-# Optional: smaller MP3 outputs for listening
-export SWEEP_MP3="--mp3"
+Stems default to **MP3** (smaller, faster for listening sweeps). Pass `--flac` on sweep/synthesis commands for lossless FLAC.
+
+---
+
+## Phase 1 — Soundfonts (recommended: full archive)
+
+Compare **all 90 archive GM banks** per category — no tag filtering, so sneaky good fonts aren't missed. Same MIDI across variants; only timbre changes.
+
+Build a **shortlist per category** from swipe votes (4 tiers). Every soundfont with at least one **strong accept** clip is included; if none, up to **3 weak accepts** per category.
+
+### 1.1 Render (priority categories first)
+
+```bash
+# piano + voice + strings: 90 soundfonts × 9 stems ≈ 810 renders
+uv run python -m experiments.patch_sweep.sweep \
+  --phase phase1_archive_soundfonts \
+  --categories piano,voice,strings \
+  -j 8
+# Or all 24 probe stems: 90 × 24 ≈ 2160 renders
+uv run python -m experiments.patch_sweep.sweep \
+  --phase phase1_archive_soundfonts -j 8```
+
+Output: `experiments/patch_sweep/output/phase1_archive_soundfonts/`
+
+Use `--limit-variants 10` for a smoke test. Archive candidates come from [`archive_soundfonts.yaml`](archive_soundfonts.yaml) automatically.
+
+### 1.2 Build 10s clips
+
+Slice each rendered stem into **3 aligned 10-second windows** per probe (chosen from the basic reference for content density):
+
+```bash
+uv run python -m experiments.patch_sweep.make_clips \
+  --sweep-dir experiments/patch_sweep/output/phase1_archive_soundfonts \
+  --categories piano,voice,strings \
+  --clips-per-stem 3 \
+  -j 8
+```
+
+Output: `{sweep_dir}/clips/variants/...` plus `clip_manifest.yaml` and `clip_manifest.csv`.
+
+Re-run with `--force` to rebuild clips after changing window selection.
+
+### 1.3 Swipe listening test (recommended)
+
+```bash
+uv run python -m experiments.listening.serve --sweep patch \
+  --patch-sweep-dir experiments/patch_sweep/output/phase1_archive_soundfonts
+```
+
+Open [http://127.0.0.1:8766/swipe?type=patch](http://127.0.0.1:8766/swipe?type=patch) (all categories in one session).
+
+- One card = one **10s clip** from one blinded soundfont
+- Clips **auto-play**; use arrow keys only after the first click (browser autoplay policy)
+- `←` strong reject · `→` strong accept · `↓` weak reject · `↑` weak accept
+- `Space` replay · `Backspace` undo last vote
+- Work through **all categories in one session** by default (no `category` param)
+- Optional: `?category=piano` to limit to one listening category
+- Default order is shuffled (`?order=shuffle&seed=42`); already-voted cards are skipped on resume (by stable `card_id`, not queue index)
+- Progress saves after **every swipe** to `responses/swipe_in_progress.json`; resume across sessions
+- **Finish** on the last card writes `responses/swipe_YYYYMMDDTHHMMSSZ.json`
+
+Legacy star-rating UI (`/test?type=patch`) remains for the 7-bank phase 1 path.
+
+### 1.4 Record shortlists
+
+```bash
+uv run python -m experiments.patch_sweep.record_winners \
+  --phase phase1_archive_soundfonts \
+  --mode swipe \
+  --responses experiments/patch_sweep/output/phase1_archive_soundfonts/responses/swipe_YYYYMMDDTHHMMSSZ.json
+```
+
+Writes per-category shortlists into [`winners.yaml`](winners.yaml) under the `phase1_soundfonts` key (what phase 2 reads).
+
+Winner rules (default):
+
+- Include **all** variants with ≥1 **strong accept** clip vote
+- Else include up to **3** variants with **weak accept** votes (most accepts first)
+- **Error** if only reject tiers exist — re-swipe or pass `--allow-reject-fallback`
+
+Rating-mode fallback (legacy):
+
+```bash
+uv run python -m experiments.patch_sweep.record_winners \
+  --phase phase1_archive_soundfonts \
+  --mode rating \
+  --responses .../responses/responses_....json \
+  --realism-threshold 4.0
 ```
 
 ---
 
-## Phase 1 — Soundfonts (dry, no program remap)
+## Phase 1 (legacy) — 7 candidate banks
 
-Compare **7 candidate GM banks**. Same MIDI, different samples. Build a **shortlist per category** (not a single winner): every soundfont with mean(content, realism) / 2 **≥ 4.1** is included.
-
-### 1.1 Render
+Quick audition of the original shortlist before the archive download:
 
 ```bash
 uv run python -m experiments.patch_sweep.sweep \
-  --phase phase1_soundfonts -j 8 $SWEEP_MP3
-```
+  --phase phase1_soundfonts -j 8```
 
-~7 variants × 24 stems = **168** CPU renders.  
-Output: `experiments/patch_sweep/output/phase1_soundfonts/`
-
-### 1.2 Blinded listening test
-
-```bash
-uv run python -m experiments.listening.serve --sweep patch \
-  --patch-sweep-dir experiments/patch_sweep/output/phase1_soundfonts
-```
-
-Open [http://127.0.0.1:8766/test?type=patch](http://127.0.0.1:8766/test?type=patch)
-
-- Reference = A1 basic stem (unchanged)
-- Rate each blinded sample: **content** + **realism**
-- Phase 1 tip: content should be nearly equal; **realism** is the main signal
-- Each **Next stem** auto-saves to `responses/responses_in_progress.json` on the server
-- **Finish** writes a timestamped `responses/responses_YYYYMMDDTHHMMSSZ.json` and shows the path on screen (no forced browser download)
-- **Save to server** in the header forces a checkpoint anytime
-
-### 1.3 Record winners
+Listening test uses **realism only** (same as archive). To record with the old combined threshold instead:
 
 ```bash
 uv run python -m experiments.patch_sweep.record_winners \
   --phase phase1_soundfonts \
-  --responses experiments/patch_sweep/output/phase1_soundfonts/responses/responses_YYYYMMDDTHHMMSSZ.json
-```
-
-This writes per-category **shortlists** (e.g. `piano: [sgm_v2, airfont_380]`) into [`winners.yaml`](winners.yaml). Soundfonts below the threshold are dropped; if none pass, the best-rated one is kept as a fallback.
-
-Default threshold is **4.1** (average of content + realism). Override with `--mean-rating-threshold`.
-
-Optional: inspect aggregate report:
-
-```bash
-uv run python -m experiments.listening.aggregate \
-  --sweep patch \
-  --sweep-dir experiments/patch_sweep/output/phase1_soundfonts \
-  --responses experiments/patch_sweep/output/phase1_soundfonts/responses/responses_....json \
-  --output experiments/patch_sweep/results_notes.md
+  --use-mean-rating \
+  --mean-rating-threshold 4.1 \
+  --responses .../responses_....json
 ```
 
 ---
@@ -83,22 +136,45 @@ Requires `winners.yaml` phase 1 `completed: true`.
 
 ```bash
 uv run python -m experiments.patch_sweep.sweep \
-  --phase phase2_fx -j 8 $SWEEP_MP3
-```
+  --phase phase2_fx -j 8```
 
 ~3 variants × 24 stems = **72** renders.  
 Output: `experiments/patch_sweep/output/phase2_fx/`
 
-### 2.2 Listen → record
+### 2.2 Build 10s clips
+
+Same clip pipeline as phase 1 — aligned windows from basic reference, 3 clips per stem:
+
+```bash
+uv run python -m experiments.patch_sweep.make_clips \
+  --sweep-dir experiments/patch_sweep/output/phase2_fx \
+  --clips-per-stem 3 \
+  -j 8
+```
+
+~3 FX profiles × 24 stems × 3 clips ≈ **216 swipe cards** (one category at a time).
+
+### 2.3 Swipe listening test
 
 ```bash
 uv run python -m experiments.listening.serve --sweep patch \
   --patch-sweep-dir experiments/patch_sweep/output/phase2_fx
+```
 
+Open [http://127.0.0.1:8766/swipe?type=patch](http://127.0.0.1:8766/swipe?type=patch).
+
+Same keyboard map and checkpoint/resume behavior as phase 1. With only 3 FX variants, `?order=group_stem` is useful for direct A/B on the same 10s passage.
+
+### 2.4 Record winners
+
+```bash
 uv run python -m experiments.patch_sweep.record_winners \
   --phase phase2_fx \
-  --responses experiments/patch_sweep/output/phase2_fx/responses/responses_....json
+  --mode swipe \
+  --responses experiments/patch_sweep/output/phase2_fx/responses/swipe_YYYYMMDDTHHMMSSZ.json
 ```
+
+Uses the same tier pools as phase 1: **all** variants with ≥1 strong accept are kept; if none, up to **3** weak accepts. Legacy star-rating path remains via `--mode rating`.
 
 ---
 
@@ -140,10 +216,12 @@ categories:
     soundfont_ids: [sgm_v2, airfont_380]
     soundfont_id: sgm_v2
     soundfont: SGM-V2.01.sf2
-    fx_profile: light
+    fx_variant_ids: [fx_dry, fx_light]
+    fx_profiles: [dry, light]
+    fx_profile: dry
 ```
 
-Production slakh mode **randomly picks** a soundfont per (song, category) from each shortlist. MIDI programs are unchanged (no GM pool remapping).
+Production slakh mode **randomly picks** a soundfont and FX profile per (song, category) from each shortlist, independently and deterministically from `sample_seed`. MIDI programs are unchanged (no GM pool remapping).
 
 `synthesis/patches.py` loads this automatically as `SLAKH_CATEGORY_RENDER`.
 
@@ -157,8 +235,7 @@ Re-render a few probe stems in slakh mode and confirm they differ from A1:
 
 ```bash
 uv run python -m experiments.patch_sweep.sweep \
-  --phase phase2_fx --limit-stems 2 --limit-variants 1 $SWEEP_MP3
-```
+  --phase phase2_fx --limit-stems 2 --limit-variants 1```
 
 Or run synthesis on a single song if you have a quick test path.
 

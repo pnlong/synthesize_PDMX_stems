@@ -14,10 +14,20 @@ REALIFY_ANCHOR = (
     "Same performance and timing. Realistic recorded sound, expressive performance."
 )
 
-PROMPT_VARIANTS = ("current", "minimal", "preservation")
+PROMPT_VARIANTS = ("current", "minimal", "preservation", "adherence")
 
 PRESERVATION_ANCHOR = (
     "Preserve the exact melody, rhythm, and timing. Same notes and phrasing."
+)
+
+ADHERENCE_ANCHOR = (
+    "Adhere to the original content. Same melody, rhythm, timing, and phrasing. "
+    "Make it sound more realistic, as if it were being performed and recorded."
+)
+
+ADHERENCE_NEGATIVE_PROMPT = (
+    "added notes, changed melody, improvisation, new rhythmic content, "
+    "hallucinated performance"
 )
 
 
@@ -64,6 +74,12 @@ def get_caption(
 
     if prompt_variant == "preservation":
         parts = [f"{PRESERVATION_ANCHOR} Realistic recorded {label}."]
+        if include_instrument_hint:
+            parts.append(instrument_hint(program, is_drum, name))
+        return ". ".join(parts)
+
+    if prompt_variant == "adherence":
+        parts = [ADHERENCE_ANCHOR]
         if include_instrument_hint:
             parts.append(instrument_hint(program, is_drum, name))
         return ". ".join(parts)

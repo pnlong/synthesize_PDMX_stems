@@ -1,12 +1,14 @@
 const params = new URLSearchParams(window.location.search);
 const SWEEP_TYPE = params.get("type") || "preset";
 const SESSION_SEED = Number(params.get("seed") || "42");
+const SAMPLE_PAGE_SIZE = 12;
 
 const state = {
   meta: null,
   stemOrder: [],
   stemIndex: 0,
   stemDetail: null,
+  samplePage: 0,
   ratings: {},
   storageKey: null,
 };
@@ -23,6 +25,10 @@ const stemNoteEl = document.getElementById("stem-note");
 const referenceLabelEl = document.getElementById("reference-label");
 const referenceAudioEl = document.getElementById("reference-audio");
 const rubricHintEl = document.getElementById("rubric-hint");
+const samplePageNavEl = document.getElementById("sample-page-nav");
+const samplePageInfoEl = document.getElementById("sample-page-info");
+const samplePrevBtn = document.getElementById("sample-prev-btn");
+const sampleNextBtn = document.getElementById("sample-next-btn");
 const samplesEl = document.getElementById("samples");
 const prevBtn = document.getElementById("prev-btn");
 const nextBtn = document.getElementById("next-btn");
@@ -54,9 +60,7 @@ function loadSavedRatings() {
 }
 
 function stemSampleCount(entry) {
-  return Object.values(entry?.samples || {}).filter(
-    (sample) => isRated(sample.content) && isRated(sample.realism)
-  ).length;
+  return Object.values(entry?.samples || {}).filter((sample) => isSampleRated(sample)).length;
 }
 
 function mergeRatings(local, serverRatings) {
@@ -135,9 +139,7 @@ function isStemComplete(stemId) {
     if (samples.length === 0) {
       return false;
     }
-    const fullyRated = samples.filter(
-      (s) => isRated(s.content) && isRated(s.realism)
-    );
+    const fullyRated = samples.filter((s) => isSampleRated(s));
     const nVariants = state.meta.variants.length;
     return (
       fullyRated.length === samples.length &&
@@ -148,7 +150,7 @@ function isStemComplete(stemId) {
   const samples = state.stemDetail.samples || [];
   return samples.every((sample) => {
     const r = stemRatings(stemId).samples[sample.variant_id];
-    return r && isRated(r.content) && isRated(r.realism);
+    return r && isSampleRated(r);
   });
 }
 
@@ -178,6 +180,41 @@ function renderAudio(container, cell) {
 
 function isRated(value) {
   return Number.isInteger(value) && value >= 1 && value <= 5;
+}
+
+function realismOnly() {
+  return Boolean(state.meta?.rubric?.realism_only);
+}
+
+function samplePageCount(samples) {
+  return Math.max(1, Math.ceil((samples?.length || 0) / SAMPLE_PAGE_SIZE));
+}
+
+function visibleSamples(samples, page) {
+  const start = page * SAMPLE_PAGE_SIZE;
+  return samples.slice(start, start + SAMPLE_PAGE_SIZE);
+}
+
+function updateSamplePageNav(samples) {
+  const totalPages = samplePageCount(samples);
+  const usePagination = samples.length > SAMPLE_PAGE_SIZE;
+  samplePageNavEl.classList.toggle("hidden", !usePagination);
+  if (!usePagination) {
+    return;
+  }
+  const start = state.samplePage * SAMPLE_PAGE_SIZE + 1;
+  const end = Math.min((state.samplePage + 1) * SAMPLE_PAGE_SIZE, samples.length);
+  samplePageInfoEl.textContent =
+    `Samples ${start}-${end} of ${samples.length} · page ${state.samplePage + 1}/${totalPages}`;
+  samplePrevBtn.disabled = state.samplePage <= 0;
+  sampleNextBtn.disabled = state.samplePage >= totalPages - 1;
+}
+
+function isSampleRated(sample) {
+  if (realismOnly()) {
+    return isRated(sample.realism);
+  }
+  return isRated(sample.content) && isRated(sample.realism);
 }
 
 function renderStarRating(stemId, sample, field, label, help) {
@@ -262,7 +299,7 @@ function renderStarRating(stemId, sample, field, label, help) {
 
 function isSampleComplete(stemId, variantId) {
   const r = stemRatings(stemId).samples[variantId];
-  return r && isRated(r.content) && isRated(r.realism);
+  return r && isSampleRated(r);
 }
 
 function renderStem() {
@@ -280,12 +317,17 @@ function renderStem() {
 
   const rubric = state.meta.rubric;
   referenceLabelEl.textContent = rubric.reference_label;
-  rubricHintEl.textContent = `${rubric.content_label}: ${rubric.content_help} · ${rubric.realism_label}: ${rubric.realism_help}`;
+  rubricHintEl.textContent = realismOnly()
+    ? `${rubric.realism_label}: ${rubric.realism_help}`
+    : `${rubric.content_label}: ${rubric.content_help} · ${rubric.realism_label}: ${rubric.realism_help}`;
 
   renderAudio(referenceAudioEl, detail.reference);
 
+  const pageSamples = visibleSamples(detail.samples, state.samplePage);
+  updateSamplePageNav(detail.samples);
+
   samplesEl.innerHTML = "";
-  for (const sample of detail.samples) {
+  for (const sample of pageSamples) {
     const card = document.createElement("div");
     card.className = "sample-card";
 
@@ -302,9 +344,11 @@ function renderStem() {
     renderAudio(audioSlot, sample.audio);
     card.append(audioSlot);
 
-    card.append(
-      renderStarRating(detail.id, sample, "content", rubric.content_label, rubric.content_help)
-    );
+    if (!realismOnly()) {
+      card.append(
+        renderStarRating(detail.id, sample, "content", rubric.content_label, rubric.content_help)
+      );
+    }
     card.append(
       renderStarRating(detail.id, sample, "realism", rubric.realism_label, rubric.realism_help)
     );
@@ -321,6 +365,7 @@ function renderStem() {
 
 async function loadStem(index) {
   state.stemIndex = index;
+  state.samplePage = 0;
   const stemId = currentStemId();
   state.stemDetail = await fetchJson(
     `/api/${SWEEP_TYPE}/stems/${encodeURIComponent(stemId)}?session_seed=${SESSION_SEED}`
@@ -342,11 +387,11 @@ function buildExportPayload() {
       continue;
     }
     const samples = Object.values(entry.samples || {})
-      .filter((sample) => isRated(sample.content) && isRated(sample.realism))
+      .filter((sample) => isSampleRated(sample))
       .map((sample) => ({
         variant_id: sample.variant_id,
         blind_label: sample.blind_label,
-        content: Number(sample.content),
+        content: realismOnly() ? 5 : Number(sample.content),
         realism: Number(sample.realism),
       }));
     if (samples.length === 0) {
@@ -443,6 +488,21 @@ async function init() {
 prevBtn.addEventListener("click", async () => {
   if (state.stemIndex > 0) {
     await loadStem(state.stemIndex - 1);
+  }
+});
+
+samplePrevBtn.addEventListener("click", () => {
+  if (state.samplePage > 0) {
+    state.samplePage -= 1;
+    renderStem();
+  }
+});
+
+sampleNextBtn.addEventListener("click", () => {
+  const totalPages = samplePageCount(state.stemDetail?.samples || []);
+  if (state.samplePage < totalPages - 1) {
+    state.samplePage += 1;
+    renderStem();
   }
 });
 

@@ -11,10 +11,19 @@ from shared.config import (
     OUTPUT_DIR,
     PDMX_FILEPATH,
     REALIFY_BATCH_SIZE,
+    REALIFY_CONTENT_FIDELITY_ENFORCE,
     RENDER_MODE_BASIC,
     RENDER_MODE_SLAKH,
     SOUNDFONT_PATH,
 )
+
+
+def add_audio_format_arg(parser: argparse.ArgumentParser):
+    parser.add_argument(
+        "--flac",
+        action="store_true",
+        help="Read/write FLAC stems instead of the default MP3.",
+    )
 
 
 def add_synthesis_args(parser: argparse.ArgumentParser):
@@ -65,14 +74,20 @@ def add_synthesis_args(parser: argparse.ArgumentParser):
         type=int,
         help="Ablation sample size (default: from shared/config).",
     )
-    parser.add_argument(
-        "--mp3",
-        action="store_true",
-        help="Write stems and mixtures as MP3 instead of FLAC (prototyping; smaller files).",
-    )
+    add_audio_format_arg(parser)
     parser.add_argument(
         "--no-silence-enforce",
         action="store_true",
         help="Disable post-SA3 silence enforcement on realified stems.",
+    )
+    parser.add_argument(
+        "--content-fidelity-enforce",
+        action="store_true",
+        help="Enable onset-based content fidelity gate with init_noise_level backoff.",
+    )
+    parser.add_argument(
+        "--no-content-fidelity-enforce",
+        action="store_true",
+        help="Disable content fidelity gate even if REALIFY_CONTENT_FIDELITY_ENFORCE is set.",
     )
     parser.add_argument("--sample-seed", default=ABLATION_SAMPLE_SEED, type=int)

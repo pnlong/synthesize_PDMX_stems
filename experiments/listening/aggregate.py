@@ -16,7 +16,11 @@ from experiments.paths import DEFAULT_PROBE_STEMS
 DEFAULT_CONTENT_THRESHOLD = 3.0
 DEFAULT_CONTENT_MEAN_THRESHOLD = 3.5
 DEFAULT_MEAN_RATING_THRESHOLD = 4.1
+DEFAULT_REALISM_THRESHOLD = 4.0
 DEFAULT_NOISE_CONTENT_THRESHOLD = 4.5
+DEFAULT_MIN_SWIPE_WINNERS = 3
+SWIPE_TIERS = ("strong_reject", "weak_reject", "weak_accept", "strong_accept")
+SWIPE_ACCEPT_TIERS = frozenset({"weak_accept", "strong_accept"})
 
 
 def load_responses(path: Path) -> dict:
@@ -219,8 +223,13 @@ def shortlist_variants(
     df: pd.DataFrame,
     *,
     mean_rating_threshold: float = DEFAULT_MEAN_RATING_THRESHOLD,
+    realism_threshold: float | None = None,
 ) -> dict[str, list[str]]:
-    """Return per-category variant shortlists with mean(content, realism) >= threshold."""
+    """Return per-category variant shortlists.
+
+    When ``realism_threshold`` is set, shortlist by mean realism only (patch phase 1).
+    Otherwise use mean(content, realism) / 2 >= ``mean_rating_threshold``.
+    """
     if df.empty:
         return {}
 
@@ -235,15 +244,27 @@ def shortlist_variants(
 
     shortlists: dict[str, list[str]] = {}
     for category, group in stats.groupby("category", dropna=False):
-        passing = group[group["mean_rating"] >= mean_rating_threshold].sort_values(
-            ["mean_rating", "mean_realism", "mean_content"],
-            ascending=[False, False, False],
-        )
-        if passing.empty:
-            best = group.sort_values(
+        if realism_threshold is not None:
+            passing = group[group["mean_realism"] >= realism_threshold].sort_values(
+                ["mean_realism", "variant_id"],
+                ascending=[False, True],
+            )
+        else:
+            passing = group[group["mean_rating"] >= mean_rating_threshold].sort_values(
                 ["mean_rating", "mean_realism", "mean_content"],
                 ascending=[False, False, False],
-            ).iloc[0]
+            )
+        if passing.empty:
+            if realism_threshold is not None:
+                best = group.sort_values(
+                    ["mean_realism", "variant_id"],
+                    ascending=[False, True],
+                ).iloc[0]
+            else:
+                best = group.sort_values(
+                    ["mean_rating", "mean_realism", "mean_content"],
+                    ascending=[False, False, False],
+                ).iloc[0]
             passing = group[group["variant_id"] == best["variant_id"]]
 
         shortlists[str(category)] = [str(v) for v in passing["variant_id"].tolist()]
@@ -255,6 +276,7 @@ def shortlist_dataframe(
     df: pd.DataFrame,
     *,
     mean_rating_threshold: float = DEFAULT_MEAN_RATING_THRESHOLD,
+    realism_threshold: float | None = None,
 ) -> pd.DataFrame:
     """Tabular shortlist with stats for reporting."""
     from experiments.listening.verification import variant_stats
@@ -265,8 +287,160 @@ def shortlist_dataframe(
 
     stats = stats.copy()
     stats["mean_rating"] = (stats["mean_content"] + stats["mean_realism"]) / 2
-    stats["shortlisted"] = stats["mean_rating"] >= mean_rating_threshold
+    if realism_threshold is not None:
+        stats["shortlisted"] = stats["mean_realism"] >= realism_threshold
+    else:
+        stats["shortlisted"] = stats["mean_rating"] >= mean_rating_threshold
     return stats.sort_values(["category", "mean_rating"], ascending=[True, False])
+
+
+def votes_dataframe(responses: dict) -> pd.DataFrame:
+    rows = []
+    for vote in responses.get("votes", []):
+        rows.append({
+            "card_id": vote.get("card_id"),
+            "category": vote.get("category"),
+            "stem_id": vote.get("stem_id"),
+            "clip_id": vote.get("clip_id"),
+            "variant_id": vote.get("variant_id"),
+            "tier": vote.get("tier"),
+        })
+    return pd.DataFrame(rows)
+
+
+def _variant_tier_vote_count(
+    group: pd.DataFrame,
+    variant_id: str,
+    *,
+    tiers: frozenset[str],
+) -> int:
+    return sum(
+        1
+        for _, row in group.iterrows()
+        if str(row["variant_id"]) == variant_id and str(row["tier"]) in tiers
+    )
+
+
+def _rank_variants_by_tier_votes(
+    group: pd.DataFrame,
+    variant_ids: list[str],
+    *,
+    tiers: frozenset[str],
+) -> list[str]:
+    return sorted(
+        variant_ids,
+        key=lambda variant_id: (
+            -_variant_tier_vote_count(group, variant_id, tiers=tiers),
+            variant_id,
+        ),
+    )
+
+
+def swipe_winners(
+    responses: dict,
+    *,
+    min_winners: int = DEFAULT_MIN_SWIPE_WINNERS,
+    max_winners: int | None = None,
+    strict: bool = True,
+    exclude_legacy_stems: bool = True,
+) -> dict[str, list[str]]:
+    """Select per-category variant shortlists from swipe votes.
+
+    When ``max_winners`` is set, cap the strong/weak accept pools after ranking.
+    Phase 1 and phase 2 both keep every variant with at least one strong accept
+    unless ``max_winners`` is passed explicitly.
+    """
+    from experiments.probe_stems import legacy_stem_ids
+
+    df = votes_dataframe(responses)
+    if df.empty:
+        return {}
+
+    if exclude_legacy_stems:
+        legacy = legacy_stem_ids()
+        if legacy and "stem_id" in df.columns:
+            df = df[~df["stem_id"].astype(str).isin(legacy)]
+        if df.empty:
+            return {}
+
+    winners: dict[str, list[str]] = {}
+    for category, group in df.groupby("category", dropna=False):
+        category = str(category)
+        variant_tiers: dict[str, set[str]] = {}
+        for _, row in group.iterrows():
+            variant_id = str(row["variant_id"])
+            tier = str(row["tier"])
+            if tier not in SWIPE_TIERS:
+                continue
+            variant_tiers.setdefault(variant_id, set()).add(tier)
+
+        strong_pool = sorted(
+            variant_id
+            for variant_id, tiers in variant_tiers.items()
+            if "strong_accept" in tiers
+        )
+        if strong_pool:
+            if max_winners == 1:
+                strong_pool = _rank_variants_by_tier_votes(
+                    group,
+                    strong_pool,
+                    tiers=frozenset({"strong_accept"}),
+                )[:1]
+            elif max_winners is not None:
+                strong_pool = _rank_variants_by_tier_votes(
+                    group,
+                    strong_pool,
+                    tiers=frozenset({"strong_accept"}),
+                )[:max_winners]
+            winners[category] = strong_pool
+            continue
+
+        weak_pool = [
+            variant_id
+            for variant_id, tiers in variant_tiers.items()
+            if "weak_accept" in tiers
+        ]
+        weak_pool = _rank_variants_by_tier_votes(
+            group,
+            weak_pool,
+            tiers=SWIPE_ACCEPT_TIERS,
+        )
+        if weak_pool:
+            cap = max(min_winners, 1)
+            if max_winners is not None:
+                cap = min(cap, max_winners)
+            winners[category] = weak_pool[:cap]
+            continue
+
+        weak_reject_pool = sorted(
+            variant_id
+            for variant_id, tiers in variant_tiers.items()
+            if "weak_reject" in tiers
+        )
+        strong_reject_pool = sorted(
+            variant_id
+            for variant_id, tiers in variant_tiers.items()
+            if "strong_reject" in tiers
+        )
+        if strict:
+            raise RuntimeError(
+                f"{category}: no strong/weak accepts; would require reject-tier fallback"
+            )
+        if weak_reject_pool:
+            cap = max(min_winners, 1)
+            if max_winners is not None:
+                cap = min(cap, max_winners)
+            winners[category] = weak_reject_pool[:cap]
+            continue
+        if strong_reject_pool:
+            cap = max(min_winners, 1)
+            if max_winners is not None:
+                cap = min(cap, max_winners)
+            winners[category] = strong_reject_pool[:cap]
+            continue
+        raise RuntimeError(f"{category}: no swipe votes")
+
+    return winners
 
 
 def preset_config_suggestions(

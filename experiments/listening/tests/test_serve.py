@@ -354,3 +354,91 @@ def test_serve_audio_falls_back_to_verification_catalog(tmp_path: Path, monkeypa
     assert handler._last_status == HTTPStatus.OK
     assert handler.wfile.getvalue() == b"fake-variant"
 
+
+def _write_patch_swipe_sweep(tmp_path: Path) -> SweepCatalog:
+    sweep_dir = tmp_path / "sweep"
+    source_dir = tmp_path / "basic"
+    song_id = "0/13/QmTest"
+    song_dir = source_dir / "data" / song_id
+    song_dir.mkdir(parents=True)
+    (song_dir / "stem_0.flac").write_bytes(b"fake")
+
+    clip_path = (
+        sweep_dir / "clips" / "variants" / "sf_a" / "data" / song_id / "stem_0_c0.mp3"
+    )
+    clip_path.parent.mkdir(parents=True)
+    clip_path.write_bytes(b"clip")
+
+    pd.DataFrame([{
+        "variant_id": "sf_a",
+        "stem_id": "piano_test",
+        "category": "piano",
+        "path": str(song_dir),
+        "track": 0,
+        "clip_id": "piano_test_c0",
+        "clip_index": 0,
+        "clip_start_seconds": 10.0,
+        "clip_seconds": 10.0,
+        "out_path": str(clip_path),
+    }]).to_csv(sweep_dir / "clip_manifest.csv", index=False)
+
+    probe_path = tmp_path / "probe_stems.yaml"
+    probe_path.write_text(yaml.dump({
+        "stems": [{
+            "id": "piano_test",
+            "category": "piano",
+            "song_id": song_id,
+            "track": 0,
+        }],
+    }))
+    return SweepCatalog("patch", sweep_dir, source_dir, probe_stems_path=probe_path)
+
+
+def test_api_swipe_meta_and_checkpoint(tmp_path: Path):
+    catalog = _write_patch_swipe_sweep(tmp_path)
+    handler = _handler(catalog)
+    handler.catalogs = {"patch": catalog}
+
+    handler.path = "/api/patch/swipe/meta?category=piano&seed=7&order=sequential"
+    handler.do_GET()
+    assert handler._last_status == HTTPStatus.OK
+    payload = json.loads(handler.wfile.getvalue())
+    assert payload["mode"] == "swipe"
+    assert payload["total_cards"] == 1
+    assert payload["cards"][0]["variant_id"] == "sf_a"
+
+    handler.path = "/api/patch/swipe/responses/session"
+    handler.wfile = BytesIO()
+    handler.do_GET()
+    assert handler._last_status == HTTPStatus.OK
+    assert json.loads(handler.wfile.getvalue())["votes"] == []
+
+    body = json.dumps({
+        "mode": "swipe",
+        "checkpoint": True,
+        "votes": [{
+            "category": "piano",
+            "stem_id": "piano_test",
+            "clip_id": "piano_test_c0",
+            "variant_id": "sf_a",
+            "tier": "strong_accept",
+        }],
+    }).encode("utf-8")
+    handler.path = "/api/patch/responses"
+    handler.headers = {"Content-Length": str(len(body))}
+    handler.rfile = BytesIO(body)
+    handler.wfile = BytesIO()
+    handler.do_POST()
+    assert handler._last_status == HTTPStatus.OK
+
+    session_path = catalog.swipe_session_responses_path()
+    assert session_path.is_file()
+    saved = json.loads(session_path.read_text())
+    assert saved["votes"][0]["tier"] == "strong_accept"
+
+    handler.path = "/swipe"
+    handler.wfile = BytesIO()
+    handler.do_GET()
+    assert handler._last_status == HTTPStatus.OK
+    assert b"Swipe" in handler.wfile.getvalue() or b"swipe" in handler.wfile.getvalue().lower()
+

@@ -68,7 +68,7 @@ uv run python -m experiments.patch_sweep.sweep \
 uv run python -m experiments.patch_sweep.sweep --limit-stems 1 --limit-variants 1
 
 # MP3 (smaller files)
-uv run python -m experiments.patch_sweep.sweep --mp3 -j 4
+uv run python -m experiments.patch_sweep.sweep -j 4
 ```
 
 Outputs go to `{OUTPUT_DIR}/dev/experiments/patch_sweep/` (symlinked at [`output/`](output/)).

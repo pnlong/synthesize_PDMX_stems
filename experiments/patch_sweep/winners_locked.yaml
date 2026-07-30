@@ -1,65 +1,234 @@
 categories:
+  brass:
+    soundfont_ids:
+    - airfont_320_neo
+    - airfont_340
+    - cadenza_lp
+    - creative_8mbgm
+    - gmextbank
+    - gus1live_v12
+    - merlin_silver_v4_10
+    - the_xioad_bank
+    - uhd3
+    - unison
+    soundfont_id: airfont_320_neo
+    soundfont: archive-2019-04/airfont_320_neo.sf2
+    fx_variant_ids:
+    - fx_dry
+    - fx_light
+    - fx_warm
+    fx_profile: dry
+    fx_profiles:
+    - dry
+    - light
+    - warm
   drums:
     soundfont_ids:
-    - arachno
-    - realfont
-    - sgm_v2
-    - airfont_380
-    - generaluser
-    soundfont_id: arachno
-    soundfont: Arachno_SoundFont_Version_1.0.sf2
+    - airfont_340
+    - airfont_380_final
+    - arachno_soundfont_version_1_0
+    - fatboy_v0_786
+    - generaluser_gs_v1_471
+    - jclive21
+    - magicsfver2
+    - merlin_symphony_v1_21
+    - mt32
+    - musica_theoria_v2_gm
+    - pc51d
+    - soundfont_somsak_2016_v2_8
+    - the_xioad_bank
+    - ultimate
+    - yamaha_tyros_4_just_t4_fixed
+    soundfont_id: airfont_340
+    soundfont: archive-2019-04/airfont_340.sf2
+    fx_variant_ids:
+    - fx_dry
+    - fx_light
+    - fx_warm
     fx_profile: dry
+    fx_profiles:
+    - dry
+    - light
+    - warm
+  guitar:
+    soundfont_ids:
+    - bennetng_anothergs_v2_1
+    - cadenza_lp
+    - dsoundfontv4
+    - merlin_audigy_v1_14
+    - merlin_vienna_v3_20
+    - ph_gm2
+    - sgm_v2_01_nicepianosguitarsbass_v1_2
+    - sonivox_gs250
+    soundfont_id: bennetng_anothergs_v2_1
+    soundfont: archive-2019-04/bennetng_AnotherGS_v2-1.sf2
+    fx_variant_ids:
+    - fx_dry
+    - fx_light
+    - fx_warm
+    fx_profile: dry
+    fx_profiles:
+    - dry
+    - light
+    - warm
   mallet:
     soundfont_ids:
-    - airfont_380
-    - fluidr3
-    - realfont
-    - generaluser
-    soundfont_id: airfont_380
-    soundfont: airfont_380_final.sf2
+    - airfont_380_final
+    - creative_8mbgm
+    - creative_emu10k1_8mbgmsfx
+    - jnsgm
+    soundfont_id: airfont_380_final
+    soundfont: archive-2019-04/airfont_380_final.sf2
+    fx_variant_ids:
+    - fx_dry
+    - fx_light
+    - fx_warm
     fx_profile: dry
+    fx_profiles:
+    - dry
+    - light
+    - warm
   organ:
     soundfont_ids:
-    - arachno
-    - realfont
-    - sgm_v2
-    soundfont_id: arachno
-    soundfont: Arachno_SoundFont_Version_1.0.sf2
+    - arachno_soundfont_version_1_0
+    - bennetng_anothergs_v2_1
+    - cadenza_lp
+    - creative_emu10k1_8mbgmsfx
+    - ct2mgm
+    - fatboy_v0_786
+    - magicsfver2
+    - merlin_audigy_v1_14
+    - merlin_creative_v4_15
+    - merlin_gmpro_v3_15
+    - merlin_special_v2_05
+    - merlin_symphony_v1_21
+    - musescore_general_v0_1_3
+    - ph_gm2
+    - reality_gm_gs
+    - tgk3
+    - the_xioad_bank
+    soundfont_id: arachno_soundfont_version_1_0
+    soundfont: archive-2019-04/Arachno_SoundFont_Version_1.0.sf2
+    fx_variant_ids:
+    - fx_dry
+    - fx_light
+    - fx_warm
     fx_profile: dry
+    fx_profiles:
+    - dry
+    - light
+    - warm
   piano:
     soundfont_ids:
-    - airfont_380
-    - generaluser
-    soundfont_id: airfont_380
-    soundfont: airfont_380_final.sf2
+    - airfont_380_final
+    - fatboy_v0_786
+    - merlin_symphony_v1_21
+    - sgm_v2_01
+    - the_xioad_bank
+    soundfont_id: airfont_380_final
+    soundfont: archive-2019-04/airfont_380_final.sf2
+    fx_variant_ids:
+    - fx_dry
+    - fx_light
+    - fx_warm
     fx_profile: dry
+    fx_profiles:
+    - dry
+    - light
+    - warm
   polyphonic:
     soundfont_ids:
-    - airfont_380
-    - sgm_v2
-    soundfont_id: airfont_380
-    soundfont: airfont_380_final.sf2
+    - airfont_320_neo
+    - gmextbank
+    - jurgen_gm_gs_bank
+    - sgm_v2_01
+    - sgm_v2_01_nicepianosguitarsbass_v1_2
+    - uhd3
+    - yamaha_tyros_4_just_t4_fixed
+    soundfont_id: airfont_320_neo
+    soundfont: archive-2019-04/airfont_320_neo.sf2
+    fx_variant_ids:
+    - fx_dry
+    - fx_light
+    - fx_warm
     fx_profile: dry
+    fx_profiles:
+    - dry
+    - light
+    - warm
   strings:
     soundfont_ids:
-    - sgm_v2
-    - fluidr3
-    soundfont_id: sgm_v2
-    soundfont: SGM-V2.01.sf2
+    - airfont_340
+    - airfont_380_final
+    - choriumreva
+    - creative_8mbgm
+    - creative_emu10k1_8mbgmsfx
+    - fluidr3_gm2_2
+    - generaluser_gs_softsynth_v1_44
+    - jclive21
+    - merlin_grand_v5_37
+    - merlin_orchestra_v1_40
+    - merlin_vienna_v3_20
+    - sgm_v2_01
+    - sgm_v2_01_nicepianosguitarsbass_v1_2
+    - the_fairy_tale_bank
+    - yamaha_tyros_4_just_t4_fixed
+    soundfont_id: airfont_340
+    soundfont: archive-2019-04/airfont_340.sf2
+    fx_variant_ids:
+    - fx_dry
+    - fx_light
+    - fx_warm
     fx_profile: dry
+    fx_profiles:
+    - dry
+    - light
+    - warm
   voice:
     soundfont_ids:
-    - generaluser
-    - airfont_380
-    - arachno
-    soundfont_id: generaluser
-    soundfont: GeneralUser GS v1.471.sf2
-    fx_profile: warm
+    - arachno_soundfont_version_1_0
+    - choriumreva
+    - dsoundfontv4
+    - fluidr3_gm2_2
+    - jurgen_gm_gs_bank
+    - merlin_orchestra_v1_40
+    - merlin_symphony_v1_21
+    - musescore_general_v0_1_3
+    - sgm_v2_01
+    - soundfont_somsak_2016_v2_8
+    soundfont_id: arachno_soundfont_version_1_0
+    soundfont: archive-2019-04/Arachno_SoundFont_Version_1.0.sf2
+    fx_variant_ids:
+    - fx_dry
+    - fx_light
+    - fx_warm
+    fx_profile: dry
+    fx_profiles:
+    - dry
+    - light
+    - warm
   wind:
     soundfont_ids:
-    - generaluser
-    - airfont_380
-    soundfont_id: generaluser
-    soundfont: GeneralUser GS v1.471.sf2
-    fx_profile: light
-locked_at: '2026-07-13T23:01:27.151697+00:00'
+    - choriumreva
+    - creative_8mbgm
+    - ct8mgm
+    - fluidr3_gm2_2
+    - generaluser_gs_softsynth_v1_44
+    - merlin_creative_v4_15
+    - merlin_gmpro_v3_15
+    - merlin_grand_v5_37
+    - merlin_orchestra_v1_40
+    - merlin_silver_v4_10
+    - merlin_vienna_v3_20
+    soundfont_id: choriumreva
+    soundfont: archive-2019-04/ChoriumRevA.SF2
+    fx_variant_ids:
+    - fx_dry
+    - fx_light
+    - fx_warm
+    fx_profile: dry
+    fx_profiles:
+    - dry
+    - light
+    - warm
+locked_at: '2026-07-30T08:38:17.872020+00:00'

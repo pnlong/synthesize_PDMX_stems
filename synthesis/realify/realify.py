@@ -8,6 +8,7 @@ import multiprocessing
 import os
 import queue
 import shutil
+import sys
 import threading
 import warnings
 from pathlib import Path
@@ -21,8 +22,13 @@ from shared.config import (
     DEFAULT_AUDIO_FORMAT,
     OUTPUT_DIR,
     REALIFY_BATCH_SIZE,
+    REALIFY_BACKEND,
     REALIFY_CFG_SCALE,
     REALIFY_CHUNKED_DECODE,
+    REALIFY_CONTENT_FIDELITY_ENFORCE,
+    REALIFY_CONTENT_FIDELITY_MAX_ATTEMPTS,
+    REALIFY_CONTENT_FIDELITY_MIN_NOISE,
+    REALIFY_CONTENT_FIDELITY_NOISE_STEP,
     REALIFY_INIT_NOISE_LEVEL,
     REALIFY_MIN_GPU_FREE_GB,
     REALIFY_SILENCE_ENFORCE,
@@ -57,12 +63,14 @@ from synthesis.realify.preset_config import (
 )
 from synthesis.realify.silence import apply_silence_enforcement
 
+logger = logging.getLogger(__name__)
+
 _REALIFY_MODEL = None
 _REALIFY_PRESETS: dict | None = None
 _REALIFY_BATCH_SIZE = REALIFY_BATCH_SIZE
 _REALIFY_WORKER_CONFIG: dict | None = None
 _REALIFY_PROGRESS_QUEUE = None
-_REALIFY_PROGRESS_SENTINEL = object()
+_REALIFY_PROGRESS_SENTINEL = "__realify_progress_done__"
 
 
 def _report_realify_progress(n: int) -> None:
@@ -89,7 +97,7 @@ def _run_pool_with_stem_progress(
                 item = progress_queue.get(timeout=0.2)
             except queue.Empty:
                 continue
-            if item is _REALIFY_PROGRESS_SENTINEL:
+            if item == _REALIFY_PROGRESS_SENTINEL:
                 break
             progress_bar.update(int(item))
 
@@ -365,8 +373,19 @@ def _patch_sa3_disable_flash_attention() -> None:
     transformer_mod.flex_attention_compiled = None
 
 
+def sa3_repo_path() -> Path:
+    """Path to the stable-audio-3 git submodule."""
+    return Path(__file__).resolve().parent / "stable-audio-3"
+
+
 def configure_sa3_env() -> None:
-    """Set process env before PyTorch import to keep SA3 output quiet."""
+    """Set process env and import path before loading SA3 (including spawn workers)."""
+    sa3_path = sa3_repo_path()
+    if sa3_path.is_dir():
+        path_str = str(sa3_path)
+        if path_str not in sys.path:
+            sys.path.insert(0, path_str)
+
     os.environ.setdefault("TORCH_LOGS", "-dynamo,-inductor,-dynamic")
     os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
 
@@ -441,6 +460,27 @@ def _normalize_generated_audio(audio) -> torch.Tensor:
     return ensure_stem_channels(audio)
 
 
+def load_realify_model(
+    model_name: str,
+    *,
+    backend: str = REALIFY_BACKEND,
+    device_index: int | None = None,
+):
+    """Load PyTorch SA3 or a persistent TensorRT session."""
+    if backend == "trt":
+        from synthesis.realify.trt_backend import TrtRealifyError, get_trt_session
+
+        try:
+            return get_trt_session(model_name=model_name, steps=REALIFY_STEPS)
+        except TrtRealifyError as exc:
+            raise RuntimeError(str(exc)) from exc
+    return load_model(model_name, device_index=device_index)
+
+
+def _is_trt_model(model) -> bool:
+    return type(model).__name__ == "TrtRealifySession"
+
+
 def _generate_realify_audio(
     *,
     preset: dict,
@@ -451,6 +491,22 @@ def _generate_realify_audio(
     seed: int | list[int],
     batch_size: int = 1,
 ) -> torch.Tensor:
+    if _is_trt_model(model):
+        if batch_size != 1:
+            raise ValueError("TensorRT backend does not support batch_size > 1")
+        if isinstance(prompt, list) or isinstance(duration_seconds, list):
+            raise ValueError("TensorRT backend does not support batched prompts/durations")
+        sr, waveform = init_audio
+        del sr
+        return model.generate(
+            waveform=waveform,
+            prompt=str(prompt),
+            duration_seconds=float(duration_seconds),
+            init_noise_level=float(preset.get("init_noise_level", REALIFY_INIT_NOISE_LEVEL)),
+            seed=int(seed),
+            cfg_scale=float(preset.get("cfg_scale", REALIFY_CFG_SCALE)),
+        )
+
     kwargs = build_generate_kwargs(
         preset=preset,
         model=model,
@@ -477,6 +533,91 @@ def _normalize_generated_batch(audio) -> list[torch.Tensor]:
     return [_normalize_generated_audio(audio)]
 
 
+def _generate_and_enforce(
+    *,
+    reference: torch.Tensor,
+    preset: dict,
+    model,
+    prompt: str,
+    init_audio,
+    duration_seconds: float,
+    seed: int,
+    silence_enforce: bool,
+) -> torch.Tensor:
+    audio = _generate_realify_audio(
+        preset=preset,
+        model=model,
+        prompt=prompt,
+        init_audio=init_audio,
+        duration_seconds=duration_seconds,
+        seed=seed,
+    )
+    return apply_silence_enforcement(
+        reference,
+        _normalize_generated_audio(audio),
+        enabled=silence_enforce,
+    )
+
+
+def _realify_with_content_fidelity_backoff(
+    *,
+    reference: torch.Tensor,
+    preset: dict,
+    model,
+    prompt: str,
+    init_audio,
+    duration_seconds: float,
+    seed: int,
+    silence_enforce: bool,
+    output_path: Path,
+) -> torch.Tensor:
+    from synthesis.realify.content_fidelity import score_content_fidelity
+
+    noise = float(preset.get("init_noise_level", REALIFY_INIT_NOISE_LEVEL))
+    step = REALIFY_CONTENT_FIDELITY_NOISE_STEP
+    min_noise = REALIFY_CONTENT_FIDELITY_MIN_NOISE
+    last_result = None
+
+    for attempt in range(1, REALIFY_CONTENT_FIDELITY_MAX_ATTEMPTS + 1):
+        trial_preset = {**preset, "init_noise_level": noise}
+        audio = _generate_and_enforce(
+            reference=reference,
+            preset=trial_preset,
+            model=model,
+            prompt=prompt,
+            init_audio=init_audio,
+            duration_seconds=duration_seconds,
+            seed=seed,
+            silence_enforce=silence_enforce,
+        )
+        last_result = score_content_fidelity(reference, audio)
+        logger.info(
+            "Content fidelity %s attempt %d/%d noise=%.2f score=%.3f "
+            "extra=%d missing=%d passed=%s",
+            output_path.name,
+            attempt,
+            REALIFY_CONTENT_FIDELITY_MAX_ATTEMPTS,
+            noise,
+            last_result.score,
+            last_result.extra_onsets,
+            last_result.missing_onsets,
+            last_result.passed,
+        )
+        if last_result.passed:
+            return audio
+
+        noise -= step
+        if noise < min_noise - 1e-9:
+            break
+
+    logger.info(
+        "Content fidelity fallback to reference for %s (last score=%.3f)",
+        output_path,
+        last_result.score if last_result is not None else float("nan"),
+    )
+    return reference
+
+
 def realify_stem(
     init_audio_path: Path,
     output_path: Path,
@@ -487,27 +628,44 @@ def realify_stem(
     seed: int,
     audio_format: str = DEFAULT_AUDIO_FORMAT,
     silence_enforce: bool = REALIFY_SILENCE_ENFORCE,
+    content_fidelity_enforce: bool = REALIFY_CONTENT_FIDELITY_ENFORCE,
 ):
     waveform = load_stem(init_audio_path)
     total_samples = waveform.shape[-1]
     chunk_samples = max_realify_chunk_samples(model)
     overlap_samples = realify_overlap_samples()
+    allow_fidelity_backoff = content_fidelity_enforce and not needs_chunking(total_samples, model)
+    if content_fidelity_enforce and needs_chunking(total_samples, model):
+        logger.warning(
+            "Content fidelity backoff disabled for chunked stem %s",
+            init_audio_path,
+        )
 
     if not needs_chunking(total_samples, model):
         init_audio = (SAMPLE_RATE, waveform)
-        audio = _generate_realify_audio(
-            preset=preset,
-            model=model,
-            prompt=prompt,
-            init_audio=init_audio,
-            duration_seconds=duration_seconds,
-            seed=seed,
-        )
-        audio = apply_silence_enforcement(
-            waveform,
-            _normalize_generated_audio(audio),
-            enabled=silence_enforce,
-        )
+        if allow_fidelity_backoff:
+            audio = _realify_with_content_fidelity_backoff(
+                reference=waveform,
+                preset=preset,
+                model=model,
+                prompt=prompt,
+                init_audio=init_audio,
+                duration_seconds=duration_seconds,
+                seed=seed,
+                silence_enforce=silence_enforce,
+                output_path=output_path,
+            )
+        else:
+            audio = _generate_and_enforce(
+                reference=waveform,
+                preset=preset,
+                model=model,
+                prompt=prompt,
+                init_audio=init_audio,
+                duration_seconds=duration_seconds,
+                seed=seed,
+                silence_enforce=silence_enforce,
+            )
         write_audio(audio, output_path, audio_format)
         return
 
@@ -518,25 +676,31 @@ def realify_stem(
         chunk_duration = (end - start) / SAMPLE_RATE
         chunk_seed = (seed + chunk_index) % (2**31)
         chunks.append(
-            _normalize_generated_audio(
-                _generate_realify_audio(
-                    preset=preset,
-                    model=model,
-                    prompt=prompt,
-                    init_audio=(SAMPLE_RATE, chunk_waveform),
-                    duration_seconds=chunk_duration,
-                    seed=chunk_seed,
-                )
+            _generate_and_enforce(
+                reference=chunk_waveform,
+                preset=preset,
+                model=model,
+                prompt=prompt,
+                init_audio=(SAMPLE_RATE, chunk_waveform),
+                duration_seconds=chunk_duration,
+                seed=chunk_seed,
+                silence_enforce=silence_enforce,
             )
         )
 
     stitched = stitch_chunk_outputs(chunks, spans, overlap_samples)
-    stitched = apply_silence_enforcement(
-        waveform,
-        stitched,
-        enabled=silence_enforce,
-    )
+    if content_fidelity_enforce:
+        from synthesis.realify.content_fidelity import score_content_fidelity
+
+        result = score_content_fidelity(waveform, stitched)
+        logger.info(
+            "Content fidelity (chunked, no retry) %s score=%.3f passed=%s",
+            output_path.name,
+            result.score,
+            result.passed,
+        )
     write_audio(stitched, output_path, audio_format)
+    return
 
 
 def realify_stems_batch(
@@ -546,6 +710,7 @@ def realify_stems_batch(
     presets: dict,
     audio_format: str,
     silence_enforce: bool = REALIFY_SILENCE_ENFORCE,
+    content_fidelity_enforce: bool = REALIFY_CONTENT_FIDELITY_ENFORCE,
 ) -> None:
     """Realify multiple stems in one SA3 forward pass."""
     if len(tasks) == 1:
@@ -561,8 +726,12 @@ def realify_stems_batch(
             seed=task["seed"],
             audio_format=audio_format,
             silence_enforce=silence_enforce,
+            content_fidelity_enforce=content_fidelity_enforce,
         )
         return
+
+    if content_fidelity_enforce:
+        raise RuntimeError("Content fidelity enforce requires batch size 1")
 
     rows = [pd.Series(task["row"]) for task in tasks]
     preset = task_preset(tasks[0], presets)
@@ -606,7 +775,13 @@ def process_realify_tasks(
     desc: str,
     show_progress: bool = True,
     silence_enforce: bool = REALIFY_SILENCE_ENFORCE,
+    content_fidelity_enforce: bool = REALIFY_CONTENT_FIDELITY_ENFORCE,
+    backend: str = REALIFY_BACKEND,
 ) -> None:
+    if _is_trt_model(model) and batch_size != 1:
+        batch_size = 1
+    if content_fidelity_enforce and batch_size != 1:
+        batch_size = 1
     batches = list(iter_realify_batches(tasks, model, presets, batch_size))
     progress = tqdm(total=len(tasks), desc=desc, unit="stem", disable=not show_progress)
     try:
@@ -617,6 +792,7 @@ def process_realify_tasks(
                 presets=presets,
                 audio_format=audio_format,
                 silence_enforce=silence_enforce,
+                content_fidelity_enforce=content_fidelity_enforce,
             )
             progress.update(len(batch))
             _report_realify_progress(len(batch))
@@ -736,6 +912,9 @@ def _init_gpu_realify_worker(
     presets_filepath: str,
     batch_size: int,
     silence_enforce: bool,
+    content_fidelity_enforce: bool,
+    audio_format: str,
+    backend: str,
     progress_queue=None,
 ):
     global _REALIFY_MODEL, _REALIFY_PRESETS, _REALIFY_BATCH_SIZE, _REALIFY_WORKER_CONFIG
@@ -748,6 +927,9 @@ def _init_gpu_realify_worker(
         "presets_filepath": presets_filepath,
         "batch_size": batch_size,
         "silence_enforce": silence_enforce,
+        "content_fidelity_enforce": content_fidelity_enforce,
+        "audio_format": audio_format,
+        "backend": backend,
     }
     _REALIFY_BATCH_SIZE = batch_size
     _REALIFY_MODEL = None
@@ -772,7 +954,11 @@ def _ensure_gpu_realify_worker(device_id: int) -> None:
     )
     _REALIFY_BATCH_SIZE = cfg["batch_size"]
     _REALIFY_PRESETS = load_presets(Path(cfg["presets_filepath"]))
-    _REALIFY_MODEL = load_model(cfg["model_name"], device_index=device_id)
+    _REALIFY_MODEL = load_realify_model(
+        cfg["model_name"],
+        backend=cfg.get("backend", REALIFY_BACKEND),
+        device_index=device_id,
+    )
     print(f"Realify worker: cuda:{device_id} ready", flush=True)
 
 
@@ -781,6 +967,9 @@ def _init_cpu_realify_worker(
     presets_filepath: str,
     batch_size: int,
     silence_enforce: bool,
+    content_fidelity_enforce: bool,
+    audio_format: str,
+    backend: str,
     progress_queue=None,
 ):
     global _REALIFY_MODEL, _REALIFY_PRESETS, _REALIFY_BATCH_SIZE, _REALIFY_WORKER_CONFIG
@@ -793,10 +982,13 @@ def _init_cpu_realify_worker(
         "presets_filepath": presets_filepath,
         "batch_size": batch_size,
         "silence_enforce": silence_enforce,
+        "content_fidelity_enforce": content_fidelity_enforce,
+        "audio_format": audio_format,
+        "backend": backend,
     }
     _REALIFY_BATCH_SIZE = batch_size
     _REALIFY_PRESETS = load_presets(Path(presets_filepath))
-    _REALIFY_MODEL = load_model(model_name, device_index=None)
+    _REALIFY_MODEL = load_realify_model(model_name, backend=backend)
 
 
 def _realify_gpu_worker_shard(args: tuple[int, list[dict]]) -> int:
@@ -809,11 +1001,12 @@ def _realify_gpu_worker_shard(args: tuple[int, list[dict]]) -> int:
             shard,
             model=_REALIFY_MODEL,
             presets=_REALIFY_PRESETS,
-            audio_format=shard[0]["audio_format"],
+            audio_format=_REALIFY_WORKER_CONFIG["audio_format"],
             batch_size=_REALIFY_BATCH_SIZE,
             desc="Realifying stems",
             show_progress=False,
             silence_enforce=_REALIFY_WORKER_CONFIG["silence_enforce"],
+            content_fidelity_enforce=_REALIFY_WORKER_CONFIG["content_fidelity_enforce"],
         )
         return len(shard)
     finally:
@@ -827,11 +1020,12 @@ def _realify_worker_shard(shard: list[dict]) -> int:
         shard,
         model=_REALIFY_MODEL,
         presets=_REALIFY_PRESETS,
-        audio_format=shard[0]["audio_format"],
+        audio_format=_REALIFY_WORKER_CONFIG["audio_format"],
         batch_size=_REALIFY_BATCH_SIZE,
         desc="Realifying stems",
         show_progress=False,
         silence_enforce=_REALIFY_WORKER_CONFIG["silence_enforce"],
+        content_fidelity_enforce=_REALIFY_WORKER_CONFIG["content_fidelity_enforce"],
     )
     return len(shard)
 
@@ -844,7 +1038,13 @@ def _run_realify_gpu(
     batch_size: int,
     audio_format: str,
     silence_enforce: bool = REALIFY_SILENCE_ENFORCE,
+    content_fidelity_enforce: bool = REALIFY_CONTENT_FIDELITY_ENFORCE,
+    backend: str = REALIFY_BACKEND,
 ) -> None:
+    if content_fidelity_enforce:
+        batch_size = 1
+    if backend == "trt" and batch_size != 1:
+        batch_size = 1
     gpu_indices = select_realify_gpu_indices()
     if not gpu_indices:
         raise RuntimeError(
@@ -868,7 +1068,11 @@ def _run_realify_gpu(
             f"Realify: loading SA3 {model} on GPU {device_index} "
             f"({name}, {free_gb:.1f}/{total_gb:.1f} GiB free)"
         )
-        sa3_model = load_model(model, device_index=device_index)
+        sa3_model = load_realify_model(
+            model,
+            backend=backend,
+            device_index=device_index,
+        )
         presets = load_presets(presets_filepath)
         process_realify_tasks(
             tasks,
@@ -878,6 +1082,8 @@ def _run_realify_gpu(
             batch_size=batch_size,
             desc="Realifying stems (GPU)",
             silence_enforce=silence_enforce,
+            content_fidelity_enforce=content_fidelity_enforce,
+            backend=backend,
         )
         return
 
@@ -910,7 +1116,16 @@ def _run_realify_gpu(
     pool = ctx.Pool(
         processes=n_workers,
         initializer=_init_gpu_realify_worker,
-        initargs=(model, str(presets_filepath), batch_size, silence_enforce, progress_queue),
+        initargs=(
+            model,
+            str(presets_filepath),
+            batch_size,
+            silence_enforce,
+            content_fidelity_enforce,
+            audio_format,
+            backend,
+            progress_queue,
+        ),
     )
     global _REALIFY_PROGRESS_QUEUE
     _REALIFY_PROGRESS_QUEUE = progress_queue
@@ -937,12 +1152,24 @@ def _run_realify_cpu(
     batch_size: int,
     audio_format: str,
     silence_enforce: bool = REALIFY_SILENCE_ENFORCE,
+    content_fidelity_enforce: bool = REALIFY_CONTENT_FIDELITY_ENFORCE,
+    backend: str = REALIFY_BACKEND,
 ) -> None:
+    if backend == "trt":
+        raise RuntimeError("TensorRT backend requires a CUDA GPU.")
+    if content_fidelity_enforce:
+        batch_size = 1
     n_workers = min(max(jobs, 1), len(tasks))
 
     if n_workers == 1:
         _init_cpu_realify_worker(
-            model, str(presets_filepath), batch_size, silence_enforce,
+            model,
+            str(presets_filepath),
+            batch_size,
+            silence_enforce,
+            content_fidelity_enforce,
+            audio_format,
+            backend,
         )
         process_realify_tasks(
             tasks,
@@ -952,6 +1179,7 @@ def _run_realify_cpu(
             batch_size=batch_size,
             desc="Realifying stems (CPU)",
             silence_enforce=silence_enforce,
+            backend=backend,
         )
         return
 
@@ -962,7 +1190,16 @@ def _run_realify_cpu(
     pool = ctx.Pool(
         processes=n_workers,
         initializer=_init_cpu_realify_worker,
-        initargs=(model, str(presets_filepath), batch_size, silence_enforce, progress_queue),
+        initargs=(
+            model,
+            str(presets_filepath),
+            batch_size,
+            silence_enforce,
+            content_fidelity_enforce,
+            audio_format,
+            backend,
+            progress_queue,
+        ),
     )
     global _REALIFY_PROGRESS_QUEUE
     _REALIFY_PROGRESS_QUEUE = progress_queue
@@ -992,6 +1229,8 @@ def run_realify(
     sample_seed: int = ABLATION_SAMPLE_SEED,
     reset: bool = False,
     silence_enforce: bool = REALIFY_SILENCE_ENFORCE,
+    content_fidelity_enforce: bool = REALIFY_CONTENT_FIDELITY_ENFORCE,
+    backend: str = REALIFY_BACKEND,
 ):
     """Realify stems on visible GPU(s) or CPU (small-music only)."""
     configure_sa3_env()
@@ -1004,6 +1243,8 @@ def run_realify(
 
     if batch_size < 1:
         raise ValueError(f"batch_size must be >= 1, got {batch_size}")
+    if content_fidelity_enforce:
+        batch_size = 1
 
     if output_dir != source_dir:
         copy_metadata_tables(source_dir, output_dir)
@@ -1021,7 +1262,7 @@ def run_realify(
         sample_seed=sample_seed,
         presets=presets,
     )
-    use_gpu = realify_uses_gpu(model) if tasks else False
+    use_gpu = (backend == "trt" or realify_uses_gpu(model)) if tasks else False
     log_realify_plan(
         source_dir=source_dir,
         output_dir=output_dir,
@@ -1045,6 +1286,8 @@ def run_realify(
             batch_size=batch_size,
             audio_format=audio_format,
             silence_enforce=silence_enforce,
+            content_fidelity_enforce=content_fidelity_enforce,
+            backend=backend,
         )
     else:
         _run_realify_cpu(
@@ -1055,6 +1298,8 @@ def run_realify(
             batch_size=batch_size,
             audio_format=audio_format,
             silence_enforce=silence_enforce,
+            content_fidelity_enforce=content_fidelity_enforce,
+            backend=backend,
         )
 
     write_mixtures_for_dataset(
@@ -1164,14 +1409,30 @@ def parse_args(args=None, namespace=None):
         help="Delete the realify output directory and re-realify all stems.",
     )
     parser.add_argument(
-        "--mp3",
+        "--flac",
         action="store_true",
-        help="Read/write MP3 stems and mixtures instead of FLAC (must match synthesis format).",
+        help="Read/write FLAC stems and mixtures instead of the default MP3.",
     )
     parser.add_argument(
         "--no-silence-enforce",
         action="store_true",
         help="Disable post-SA3 silence enforcement (reference vs realified energy gating).",
+    )
+    parser.add_argument(
+        "--content-fidelity-enforce",
+        action="store_true",
+        help="Enable onset-based content fidelity gate with init_noise_level backoff.",
+    )
+    parser.add_argument(
+        "--no-content-fidelity-enforce",
+        action="store_true",
+        help="Disable content fidelity gate even if REALIFY_CONTENT_FIDELITY_ENFORCE is set.",
+    )
+    parser.add_argument(
+        "--backend",
+        default=REALIFY_BACKEND,
+        choices=["pytorch", "trt"],
+        help="SA3 inference backend (trt requires TensorRT engines installed).",
     )
     return parser.parse_args(args=args, namespace=namespace)
 
@@ -1182,6 +1443,12 @@ def main():
     output_dir = args.output_dir or source_dir
     from synthesis.audio import synthesis_audio_format
 
+    content_fidelity_enforce = REALIFY_CONTENT_FIDELITY_ENFORCE
+    if args.content_fidelity_enforce:
+        content_fidelity_enforce = True
+    if args.no_content_fidelity_enforce:
+        content_fidelity_enforce = False
+
     run_realify(
         source_dir,
         output_dir,
@@ -1189,9 +1456,11 @@ def main():
         limit=args.limit,
         jobs=args.jobs,
         batch_size=args.realify_batch_size,
-        audio_format=synthesis_audio_format(args.mp3),
+        audio_format=synthesis_audio_format(args.flac),
         reset=args.reset,
         silence_enforce=not args.no_silence_enforce,
+        content_fidelity_enforce=content_fidelity_enforce,
+        backend=args.backend,
     )
 
 

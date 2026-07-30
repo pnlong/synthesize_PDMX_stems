@@ -26,6 +26,8 @@ PROBE_CATEGORIES = (
     "voice",
     "mallet",
     "organ",
+    "guitar",
+    "brass",
     "polyphonic",
 )
 
@@ -34,10 +36,21 @@ PROBE_CATEGORY_GM_CLASSES: dict[str, frozenset[str]] = {
     "piano": frozenset({"piano"}),
     "drums": frozenset({"drums"}),
     "strings": frozenset({"strings"}),
-    "wind": frozenset({"pipe", "reed", "brass"}),
+    "wind": frozenset({"pipe", "reed"}),
     "voice": frozenset({"ensemble"}),
     "mallet": frozenset({"chromatic_percussion"}),
     "organ": frozenset({"organ"}),
+    "guitar": frozenset({"guitar"}),
+    "brass": frozenset({"brass"}),
+    "polyphonic": frozenset({
+        "synth_lead",
+        "synth_pad",
+        "synth_effects",
+        "ethnic",
+        "percussive",
+        "sound_effects",
+        "bass",
+    }),
 }
 
 
@@ -65,8 +78,22 @@ def load_probe_stems(path: Path = DEFAULT_PROBE_STEMS) -> list[dict]:
     return list(cfg.get("stems") or [])
 
 
-def category_counts(stems: list[dict]) -> Counter:
-    return Counter(stem.get("category") for stem in stems)
+def is_legacy_stem(stem: dict) -> bool:
+    return bool(stem.get("legacy"))
+
+
+def active_probe_stems(stems: list[dict]) -> list[dict]:
+    return [stem for stem in stems if not is_legacy_stem(stem)]
+
+
+def legacy_stem_ids(stems: list[dict] | None = None) -> frozenset[str]:
+    stems = load_probe_stems() if stems is None else stems
+    return frozenset(str(stem["id"]) for stem in stems if stem.get("id") and is_legacy_stem(stem))
+
+
+def category_counts(stems: list[dict], *, include_legacy: bool = False) -> Counter:
+    selected = stems if include_legacy else active_probe_stems(stems)
+    return Counter(stem.get("category") for stem in selected)
 
 
 @lru_cache(maxsize=4)
@@ -123,9 +150,6 @@ def read_track_midi_meta(mid_path: Path, track: int) -> TrackMidiMeta:
 
 
 def stem_matches_category(meta: TrackMidiMeta, category: str) -> bool:
-    if category == "polyphonic":
-        return meta.has_program_change and not meta.is_drum
-
     allowed = PROBE_CATEGORY_GM_CLASSES.get(category)
     if allowed is None:
         return False
@@ -148,6 +172,9 @@ def validate_probe_stem_midi_programs(
             problems.append(f"{stem_id or '?'}: missing id/category/song_id/track")
             continue
 
+        if is_legacy_stem(stem):
+            continue
+
         try:
             mid_path = resolve_mid_path(str(song_id), pdmx_filepath)
             meta = read_track_midi_meta(mid_path, int(track))
@@ -159,11 +186,8 @@ def validate_probe_stem_midi_programs(
             continue
 
         name = (meta.track_name or "").strip() or "?"
-        if category == "polyphonic":
-            detail = "polyphonic stems need an explicit program_change"
-        else:
-            allowed = ", ".join(sorted(PROBE_CATEGORY_GM_CLASSES.get(str(category), ())))
-            detail = f"expected GM class in [{allowed}], got {meta.gm_class}"
+        allowed = ", ".join(sorted(PROBE_CATEGORY_GM_CLASSES.get(str(category), ())))
+        detail = f"expected GM class in [{allowed}], got {meta.gm_class}"
         problems.append(
             f"{stem_id} ({category}): program={meta.effective_program}, "
             f"track_name={name!r}, {detail}"
@@ -201,20 +225,31 @@ def validate_probe_stems(
         elif count > target_per_category:
             problems.append(f"{category}: {count} > {target_per_category}")
 
-    if problems:
-        raise ValueError(
-            "probe stems must have exactly "
-            f"{target_per_category} samples per category; "
-            + "; ".join(problems)
-        )
-
-    ids = [stem.get("id") for stem in stems]
+    ids = [stem.get("id") for stem in stems if stem.get("id")]
     if len(ids) != len(set(ids)):
         raise ValueError("probe stem ids must be unique")
 
-    keys = [(stem.get("song_id"), stem.get("track")) for stem in stems]
+    keys = [
+        (stem.get("song_id"), stem.get("track"))
+        for stem in stems
+        if not is_legacy_stem(stem)
+    ]
+    legacy_keys = [
+        (stem.get("song_id"), stem.get("track"))
+        for stem in stems
+        if is_legacy_stem(stem)
+    ]
     if len(keys) != len(set(keys)):
         raise ValueError("probe stems must use unique (song_id, track) pairs")
+    if legacy_keys and set(legacy_keys) & set(keys):
+        raise ValueError("legacy probe stems must not reuse active (song_id, track) pairs")
+
+    if problems:
+        raise ValueError(
+            "probe stems must have exactly "
+            f"{target_per_category} active samples per category; "
+            + "; ".join(problems)
+        )
 
     if validate_midi_programs and Path(pdmx_filepath).is_file():
         validate_probe_stem_midi_programs(stems, pdmx_filepath=pdmx_filepath)

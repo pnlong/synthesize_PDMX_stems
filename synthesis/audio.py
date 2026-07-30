@@ -12,15 +12,17 @@ import torch
 
 from shared.config import (
     DEFAULT_AUDIO_FORMAT,
+    FLAC_AUDIO_FORMAT,
     FLAC_SUBTYPE,
     GAIN,
     MAX_N_SAMPLES_IN_STEM,
     MIXTURE_PEAK_LIMIT,
-    PROTOTYPE_AUDIO_FORMAT,
     SAMPLE_RATE,
     STEM_CHANNELS,
     TARGET_LOUDNESS_LUFS,
 )
+
+SUPPORTED_AUDIO_FORMATS = frozenset({DEFAULT_AUDIO_FORMAT, FLAC_AUDIO_FORMAT})
 
 # fluidsynth raw output: stereo int16 = 4 bytes per frame
 _MAX_RAW_PCM_BYTES = MAX_N_SAMPLES_IN_STEM * 4
@@ -212,8 +214,8 @@ def build_mixture(
     return torch.from_numpy(audio.astype(np.float32))
 
 
-def synthesis_audio_format(use_mp3: bool) -> str:
-    return PROTOTYPE_AUDIO_FORMAT if use_mp3 else DEFAULT_AUDIO_FORMAT
+def synthesis_audio_format(use_flac: bool = False) -> str:
+    return FLAC_AUDIO_FORMAT if use_flac else DEFAULT_AUDIO_FORMAT
 
 
 def stem_filename(track: int, audio_format: str = DEFAULT_AUDIO_FORMAT) -> str:
@@ -285,7 +287,7 @@ def write_mp3(waveform: torch.Tensor, path: Path) -> Path:
 
     path.parent.mkdir(parents=True, exist_ok=True)
     tensor = ensure_stem_channels(waveform)
-    torchaudio.save(str(path), tensor, SAMPLE_RATE, format=PROTOTYPE_AUDIO_FORMAT)
+    torchaudio.save(str(path), tensor, SAMPLE_RATE, format=DEFAULT_AUDIO_FORMAT)
     return path
 
 
@@ -302,9 +304,12 @@ def write_audio(
     path: Path,
     audio_format: str = DEFAULT_AUDIO_FORMAT,
 ) -> Path:
-    if audio_format == PROTOTYPE_AUDIO_FORMAT:
-        return write_mp3(waveform, path)
+    ext = path.suffix.lstrip(".").lower()
+    if ext in SUPPORTED_AUDIO_FORMATS:
+        audio_format = ext
     if audio_format == DEFAULT_AUDIO_FORMAT:
+        return write_mp3(waveform, path)
+    if audio_format == FLAC_AUDIO_FORMAT:
         return write_flac(waveform, path)
     raise ValueError(f"Unsupported audio format: {audio_format}")
 
@@ -327,11 +332,11 @@ def save_mixture(
 
 
 def save_stem_flac(waveform: torch.Tensor, song_dir: Path, track: int) -> Path:
-    return save_stem(waveform, song_dir, track, DEFAULT_AUDIO_FORMAT)
+    return save_stem(waveform, song_dir, track, FLAC_AUDIO_FORMAT)
 
 
 def save_mixture_flac(waveform: torch.Tensor, song_dir: Path) -> Path:
-    return save_mixture(waveform, song_dir, DEFAULT_AUDIO_FORMAT)
+    return save_mixture(waveform, song_dir, FLAC_AUDIO_FORMAT)
 
 
 def write_mixture_from_waveforms(
@@ -356,11 +361,11 @@ def write_mixture_from_song_dir(
 
 
 def stem_flac_path(song_dir: Path, track: int) -> Path:
-    return stem_path(song_dir, track, DEFAULT_AUDIO_FORMAT)
+    return stem_path(song_dir, track, FLAC_AUDIO_FORMAT)
 
 
 def mixture_flac_path(song_dir: Path) -> Path:
-    return mixture_path(song_dir, DEFAULT_AUDIO_FORMAT)
+    return mixture_path(song_dir, FLAC_AUDIO_FORMAT)
 
 
 def song_is_complete(

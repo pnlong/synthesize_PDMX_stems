@@ -12,7 +12,6 @@ from shared.config import (
     DATA_DIR_NAME,
     DEFAULT_AUDIO_FORMAT,
     OUTPUT_DIR,
-    PROTOTYPE_AUDIO_FORMAT,
     STEMS_FILE_NAME,
 )
 from shared.repo_symlinks import REPO_ABLATIONS_SYMLINK
@@ -57,10 +56,11 @@ def song_id_from_path(song_path: str | Path) -> str:
 
 
 def detect_audio_format(song_dir: Path) -> str | None:
-    if (song_dir / mixture_filename(PROTOTYPE_AUDIO_FORMAT)).exists():
-        return PROTOTYPE_AUDIO_FORMAT
-    if (song_dir / mixture_filename(DEFAULT_AUDIO_FORMAT)).exists():
-        return DEFAULT_AUDIO_FORMAT
+    from shared.config import FLAC_AUDIO_FORMAT
+
+    for fmt in (DEFAULT_AUDIO_FORMAT, FLAC_AUDIO_FORMAT):
+        if (song_dir / mixture_filename(fmt)).exists():
+            return fmt
     return None
 
 

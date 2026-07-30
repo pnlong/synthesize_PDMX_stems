@@ -13,6 +13,7 @@ from experiments.preset_sweep.config import (
     PHASE1,
     PHASE1B,
     PHASE2,
+    PHASE2B,
     PHASE3,
     PHASES,
     REQUIRED_LOCK_PHASES,
@@ -30,6 +31,7 @@ def _empty_winners_doc() -> dict:
             PHASE1: {"completed": False, "winners": {}},
             PHASE1B: {"completed": False, "winners": {}},
             PHASE2: {"completed": False, "winners": {}},
+            PHASE2B: {"completed": False, "winners": {}},
             PHASE3: {"completed": False, "winners": {}},
         }
     }

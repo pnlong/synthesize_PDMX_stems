@@ -7,6 +7,7 @@ import yaml
 from experiments.listening.final_verify import (
     composed_config,
     final_phase_winners,
+    patch_phase1_sweep_dir,
     readiness_errors,
     verification_phase,
 )
@@ -194,3 +195,67 @@ def test_composed_config_patch_soundfont(tmp_path: Path, monkeypatch):
         "soundfont_id": "sgm_v2",
         "fx_profile": "dry",
     }
+
+
+def test_patch_phase1_sweep_dir_prefers_archive_when_winners_are_archive_ids(
+    tmp_path: Path,
+    monkeypatch,
+):
+    import pandas as pd
+
+    winners_path = tmp_path / "winners.yaml"
+    winners_path.write_text(yaml.dump({
+        "phases": {
+            "phase1_soundfonts": {
+                "completed": True,
+                "winners": {"piano": ["airfont_380_final", "sgm_v2"]},
+            },
+            "phase2_fx": {
+                "completed": True,
+                "winners": {"piano": "fx_dry"},
+            },
+        },
+    }))
+    sweep_root = tmp_path / "output"
+    legacy_dir = sweep_root / "phase1_soundfonts"
+    archive_dir = sweep_root / "phase1_archive_soundfonts"
+    legacy_dir.mkdir(parents=True)
+    archive_dir.mkdir(parents=True)
+
+    pd.DataFrame([{
+        "variant_id": "sgm_v2",
+        "stem_id": "piano_a",
+        "category": "piano",
+        "path": "/song",
+        "track": 0,
+        "out_path": "/out",
+    }]).to_csv(legacy_dir / "manifest.csv", index=False)
+    pd.DataFrame([
+        {
+            "variant_id": "airfont_380_final",
+            "stem_id": "piano_a",
+            "category": "piano",
+            "path": "/song",
+            "track": 0,
+            "out_path": "/out",
+        },
+        {
+            "variant_id": "sgm_v2",
+            "stem_id": "piano_a",
+            "category": "piano",
+            "path": "/song",
+            "track": 0,
+            "out_path": "/out2",
+        },
+    ]).to_csv(archive_dir / "manifest.csv", index=False)
+
+    monkeypatch.setattr(
+        "experiments.listening.final_verify.winners_path_for",
+        lambda sweep_type, path=None: winners_path,
+    )
+    monkeypatch.setattr(
+        "experiments.listening.final_verify.patch_default_output_dir",
+        lambda output_root=None: sweep_root,
+    )
+
+    assert patch_phase1_sweep_dir(winners_path) == archive_dir

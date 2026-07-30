@@ -910,10 +910,12 @@ async function populateResponsesSelect() {
 
 function configureSetupCopy() {
   if (SWEEP_TYPE === "patch") {
-    titleEl.textContent = "Patch soundfont shortlist review";
+    titleEl.textContent = "Patch soundfont shortlist review (legacy)";
     setupHintEl.innerHTML =
-      "Review each category's <strong>phase 1 soundfont shortlist</strong>. Listen dry (no FX), uncheck anything that slipped through, then <code>lock --verification</code>.";
-    responsesLabelEl.textContent = "Phase 1 blind test responses";
+      "Prefer the fast review: <a href=\"/verify-swipe?type=patch\">verify swipe</a> "
+      + "(← reject · → keep). This tabbed UI loads shortlists from "
+      + "<code>winners.yaml</code> — no old responses file required.";
+    responsesLabelEl.textContent = "Optional phase 1 responses (stats only)";
     responsesFieldEl.classList.remove("hidden");
     startBtn.classList.remove("hidden");
   } else {
@@ -927,9 +929,11 @@ function configureSetupCopy() {
 
 async function startVerification() {
   const responsesName =
-    SWEEP_TYPE === "preset" ? presetVerifySource() : responsesSelectEl.value;
-  if (!responsesName) {
-    alert("Select a blind test responses file first.");
+    SWEEP_TYPE === "preset"
+      ? presetVerifySource()
+      : (responsesSelectEl.value || "winners.yaml");
+  if (SWEEP_TYPE === "patch" && !responsesName) {
+    alert("Select a responses file or use verify swipe.");
     return;
   }
 

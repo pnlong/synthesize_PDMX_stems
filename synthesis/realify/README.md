@@ -11,6 +11,7 @@ Stable Audio 3 (SA3) audio-to-audio “realification” of synthesized stems.
 | `realify.py` | CLI and `run_realify()`: apply SA3 to each stem using captions + presets |
 | `silence.py` | Post-SA3 silence enforcement (reference vs realified energy gating) |
 | [`SILENCE.md`](SILENCE.md) | Paper-ready description of silence enforcement algorithm |
+| [`CONTENT_FIDELITY.md`](CONTENT_FIDELITY.md) | Onset-based content fidelity gate and calibration |
 | `chunking.py` | Overlap-and-stitch chunking for stems longer than the model buffer |
 | `presets/` | Per-category SA3 presets (`categories.yaml`) and routing rules |
 | `captions/` | Generate text prompts from PDMX metadata for SA3 conditioning |
@@ -52,6 +53,46 @@ python -m synthesis.realify.captions.generate --dataset_dir .../dev/ablations/ba
 After SA3 generation, each stem passes through [`silence.py`](silence.py) by default: overlapping windows compare reference (A1) and realified energy; hallucinated content in reference-silent regions is zeroed, with an active margin for decay tails and boundary crossfades. See [`SILENCE.md`](SILENCE.md) for the full algorithm and paper-ready writeup.
 
 Disable for A/B tests: `--no-silence-enforce`
+
+## Content fidelity gate (optional)
+
+When enabled, realify scores **onset alignment** between reference and realified audio in active regions, backs off `init_noise_level` on failure, and falls back to the unrealified reference if the minimum noise floor is reached. Default: **off** until calibrated. See [`CONTENT_FIDELITY.md`](CONTENT_FIDELITY.md).
+
+```bash
+python -m synthesis.realify.realify --content-fidelity-enforce ...
+uv run python -m experiments.preset_sweep.score_content_fidelity --sweep-dir <phase_dir>
+```
+
+| Constant | Default | Purpose |
+|----------|---------|---------|
+| `REALIFY_CONTENT_FIDELITY_ENFORCE` | `False` | Master switch |
+| `REALIFY_CONTENT_FIDELITY_THRESHOLD` | `0.85` | Minimum onset F1 (tune via calibration script) |
+| `REALIFY_CONTENT_FIDELITY_NOISE_STEP` | `0.10` | Noise backoff step |
+| `REALIFY_CONTENT_FIDELITY_MIN_NOISE` | `0.25` | Floor before reference passthrough |
+
+## Quick validation (no listening test)
+
+```bash
+uv run python -m synthesis.realify.validate_realify \
+  --clips-dir experiments/preset_sweep/output/phase1b_noise_audit/clips \
+  --output-dir /tmp/validate_realify \
+  --init-noise-level 0.55 \
+  --limit 5
+```
+
+Scores content fidelity (onset F1) and silence hallucinations per backoff attempt. Writes paired `{stem_id}_reference.*` and `{stem_id}_validated.*` files for A/B listening. See also `score_content_fidelity.py` for batch scoring sweep outputs.
+
+## Sweep throughput
+
+Preset sweeps order tasks variant-first; use `--realify-batch-size 4` on sweep/realify for batched GPU forwards.
+
+## TensorRT backend (optional)
+
+```bash
+uv run python -m experiments.preset_sweep.sweep --phase phase1b_noise_audit --backend trt
+```
+
+Requires TensorRT engines: [`stable-audio-3/optimized/tensorRT/README.md`](stable-audio-3/optimized/tensorRT/README.md). Batching is PyTorch-only; TRT uses eager audio-to-audio.
 
 ## Realify settings
 

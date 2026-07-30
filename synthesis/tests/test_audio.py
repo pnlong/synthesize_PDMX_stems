@@ -7,9 +7,10 @@ import soundfile as sf
 import torch
 
 from shared.config import (
+    DEFAULT_AUDIO_FORMAT,
+    FLAC_AUDIO_FORMAT,
     FLAC_SUBTYPE,
     MAX_N_SAMPLES_IN_STEM,
-    PROTOTYPE_AUDIO_FORMAT,
     SAMPLE_RATE,
 )
 from synthesis.audio import (
@@ -26,6 +27,7 @@ from synthesis.audio import (
     write_flac,
     write_mixture_from_song_dir,
     write_mp3,
+    write_audio,
 )
 
 
@@ -184,11 +186,11 @@ def test_write_mixture_from_song_dir(tmp_path: Path):
     song_dir = tmp_path / "song"
     song_dir.mkdir()
     sr = 44100
-    sf.write(str(song_dir / "stem_0.flac"), np.full(sr, 0.5, dtype=np.float32), sr, format="FLAC")
-    sf.write(str(song_dir / "stem_1.flac"), np.full(sr, 0.5, dtype=np.float32), sr, format="FLAC")
+    sf.write(str(song_dir / "stem_0.mp3"), np.full(sr, 0.5, dtype=np.float32), sr, format="MP3")
+    sf.write(str(song_dir / "stem_1.mp3"), np.full(sr, 0.5, dtype=np.float32), sr, format="MP3")
     out = write_mixture_from_song_dir(song_dir, [0, 1])
     assert out is not None
-    assert out.name == "mixture.flac"
+    assert out.name == "mixture.mp3"
     assert out.exists()
 
 
@@ -196,7 +198,7 @@ def test_song_is_complete_requires_mixture(tmp_path: Path):
     song_dir = tmp_path / "song"
     song_dir.mkdir()
     sr = 44100
-    sf.write(str(song_dir / "stem_0.flac"), np.zeros(sr, dtype=np.float32), sr, format="FLAC")
+    sf.write(str(song_dir / "stem_0.mp3"), np.zeros(sr, dtype=np.float32), sr, format="MP3")
     assert not song_is_complete(song_dir, 1)
     write_mixture_from_song_dir(song_dir, [0])
     assert song_is_complete(song_dir, 1)
@@ -246,11 +248,25 @@ def test_write_mp3(tmp_path: Path, monkeypatch):
     assert captured["shape"] == (1, 100)
 
 
+def test_write_audio_uses_path_extension_over_format_arg(tmp_path: Path, monkeypatch):
+    import synthesis.audio as audio_mod
+
+    captured = {}
+
+    def fake_write(path, audio, sr, format, subtype):
+        captured.update(format=format, path=path)
+
+    monkeypatch.setattr(audio_mod.sf, "write", fake_write)
+    write_audio(torch.ones(1, 100), tmp_path / "stem_0.flac", audio_format=FLAC_AUDIO_FORMAT)
+    assert captured["format"] == "FLAC"
+    assert str(captured["path"]).endswith(".flac")
+
+
 def test_save_stem_mp3_uses_mp3_extension(tmp_path: Path, monkeypatch):
     import synthesis.audio as audio_mod
 
     monkeypatch.setattr("torchaudio.save", lambda *args, **kwargs: None)
-    out = save_stem(torch.ones(1, 100), tmp_path, 0, PROTOTYPE_AUDIO_FORMAT)
+    out = save_stem(torch.ones(1, 100), tmp_path, 0, DEFAULT_AUDIO_FORMAT)
     assert out.name == "stem_0.mp3"
 
 
