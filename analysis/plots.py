@@ -105,39 +105,30 @@ def _select_gm_ids_for_plot(
     return head_index
 
 
-def _annotate_pct_inside_bars(
-    ax,
-    bars,
+def _count_labels_with_pct(
     values,
     total: int,
     *,
     min_pct: float = 1.0,
-    fontsize: int = 7,
-) -> None:
-    """Write ``12%`` inside bars (near the tip) when share of ``total`` exceeds ``min_pct``."""
-    if total <= 0:
-        return
-    xmax = max(ax.get_xlim()[1], max(values, default=0), 1)
-    inset = xmax * 0.012
-    for bar, val in zip(bars, values):
-        pct = 100.0 * float(val) / float(total)
-        if pct <= min_pct or val <= 0:
-            continue
-        y = bar.get_y() + bar.get_height() / 2.0
-        x = float(bar.get_width()) - inset
-        if x <= 0:
-            continue
-        ax.text(
-            x,
-            y,
-            f"{round(pct)}%",
-            va="center",
-            ha="right",
-            fontsize=fontsize,
-            color="white",
-            fontweight="bold",
-            clip_on=True,
-        )
+) -> list[str]:
+    """Outside bar labels: ``12345`` or ``12345 (12%)`` when share exceeds ``min_pct``."""
+    labels: list[str] = []
+    for val in values:
+        count = int(val)
+        if total > 0 and count > 0:
+            pct = 100.0 * float(count) / float(total)
+            if pct > min_pct:
+                labels.append(f"{count} ({round(pct)}%)")
+                continue
+        labels.append(f"{count}")
+    return labels
+
+
+def _style_gm_count_axis(ax) -> None:
+    """Vertical gridlines behind bars for easier count reading."""
+    ax.set_axisbelow(True)
+    ax.xaxis.grid(True, linestyle="--", linewidth=0.7, alpha=0.45, color="0.5")
+    ax.yaxis.grid(False)
 
 
 def plot_gm_program_bar(
@@ -173,11 +164,16 @@ def plot_gm_program_bar(
     ]
 
     fig_height = max(6, 0.28 * len(plot_counts))
-    fig, ax = plt.subplots(figsize=(12, fig_height))
+    fig, ax = plt.subplots(figsize=(20, fig_height))
     bars = ax.barh(labels, values, color="C0", alpha=0.9)
-    ax.bar_label(bars, fmt="%d", padding=3, fontsize=8)
-    ax.set_xlim(0, max(values, default=0) * 1.18 + 1)
-    _annotate_pct_inside_bars(ax, bars, values, total, fontsize=8)
+    ax.bar_label(
+        bars,
+        labels=_count_labels_with_pct(values, total),
+        padding=3,
+        fontsize=8,
+    )
+    ax.set_xlim(0, max(values, default=0) * 1.22 + 1)
+    _style_gm_count_axis(ax)
     ax.set_xlabel("Stem count (non-empty MIDI tracks)")
     ax.set_ylabel("GM program id")
     ax.set_title(title)
@@ -213,7 +209,7 @@ def plot_gm_program_compare(
     right_ids = set(_select_gm_ids_for_plot(right_counts, top_n=top_n, drum_id=DRUM_GM_ID))
     shared_ids = left_ids | right_ids
     if not shared_ids:
-        fig, ax = plt.subplots(figsize=(12, 4))
+        fig, ax = plt.subplots(figsize=(20, 4))
         ax.set_title(title)
         fig.savefig(output_path, dpi=150)
         plt.close(fig)
@@ -230,15 +226,25 @@ def plot_gm_program_compare(
     fig, (ax_l, ax_r) = plt.subplots(
         1,
         2,
-        figsize=(14, fig_height),
+        figsize=(22, fig_height),
         sharey=True,
         constrained_layout=True,
     )
 
     bars_l = ax_l.barh(y, left_vals, color="C0", alpha=0.9)
     bars_r = ax_r.barh(y, right_vals, color="C0", alpha=0.9)
-    ax_l.bar_label(bars_l, fmt="%d", padding=3, fontsize=7)
-    ax_r.bar_label(bars_r, fmt="%d", padding=3, fontsize=7)
+    ax_l.bar_label(
+        bars_l,
+        labels=_count_labels_with_pct(left_vals, left_total),
+        padding=3,
+        fontsize=7,
+    )
+    ax_r.bar_label(
+        bars_r,
+        labels=_count_labels_with_pct(right_vals, right_total),
+        padding=3,
+        fontsize=7,
+    )
 
     ax_l.set_yticks(list(y))
     ax_l.set_yticklabels(labels)
@@ -248,11 +254,11 @@ def plot_gm_program_compare(
     ax_r.set_title("Corrected (GM register)")
     ax_l.set_ylabel("GM program id")
 
-    # Independent x-scales (only y is shared).
-    ax_l.set_xlim(0, max(left_vals, default=0) * 1.18 + 1)
-    ax_r.set_xlim(0, max(right_vals, default=0) * 1.18 + 1)
-    _annotate_pct_inside_bars(ax_l, bars_l, left_vals, left_total)
-    _annotate_pct_inside_bars(ax_r, bars_r, right_vals, right_total)
+    # Independent x-scales (only y is shared); room for ``count (pct%)`` labels.
+    ax_l.set_xlim(0, max(left_vals, default=0) * 1.28 + 1)
+    ax_r.set_xlim(0, max(right_vals, default=0) * 1.28 + 1)
+    _style_gm_count_axis(ax_l)
+    _style_gm_count_axis(ax_r)
 
     fig.suptitle(title)
     fig.savefig(output_path, dpi=150)
