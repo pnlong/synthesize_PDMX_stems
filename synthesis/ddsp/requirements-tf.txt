@@ -1,0 +1,31 @@
+# Isolated TensorFlow environment for neural DDSP backends (MIDI-DDSP + DDSP-Piano).
+# Prefer: bash synthesis/ddsp/bootstrap_venv.sh
+#
+# Do NOT install into the root spdmx uv .venv (conflicts with PyTorch CUDA).
+# Linux x86_64 only — midi-ddsp pip does not support Apple Silicon.
+#
+# Staged install (see bootstrap_venv.sh) is required because midi-ddsp/ddsp pin
+# ancient note-seq→numba→llvmlite==0.32.1 which cannot build on Python 3.10.
+# We install modern llvmlite/numba wheels first, then ddsp/midi-ddsp with --no-deps.
+
+setuptools>=65,<81
+wheel
+numpy<2
+llvmlite>=0.40
+numba>=0.57
+tensorflow>=2.11,<2.16
+tensorflow-probability==0.23.0
+soundfile
+gin-config
+protobuf
+absl-py
+pretty_midi
+librosa>=0.10
+matplotlib
+hmmlearn
+tensorflow-datasets
+music21
+# Then (see bootstrap_venv.sh):
+#   uv pip install --python .venv-ddsp nvidia-*-cu12 nvidia-cudnn-cu12==8.9.7.29
+#   uv pip install --python .venv-ddsp --no-deps ddsp==3.7.0 note-seq==0.0.3 crepe midi-ddsp
+# Worker env (synthesis.ddsp.env.ddsp_worker_env) puts nvidia/*/lib on LD_LIBRARY_PATH.

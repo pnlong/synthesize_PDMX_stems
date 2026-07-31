@@ -278,6 +278,96 @@ Preset notebook: `synthesis/realify/tests/explore_presets.ipynb`
 
 ---
 
+## Track C — Neural DDSP (ablation B3 `slakh_ddsp`)
+
+MIDI-DDSP + DDSP-Piano run in a **separate TensorFlow venv** so they do not fight
+PyTorch CUDA in `.venv`. **Linux x86_64 only** — `midi-ddsp` does not install on
+Apple Silicon.
+
+### Step C1. Create the TF/DDSP venv
+
+```bash
+cd ~/spdmx
+bash synthesis/ddsp/bootstrap_venv.sh
+# Or manually:
+#   uv venv .venv-ddsp --python 3.10
+#   uv pip install --python .venv-ddsp -r synthesis/ddsp/requirements-tf.txt
+#   uv pip install --python .venv-ddsp --no-deps midi-ddsp
+```
+
+Install `midi-ddsp` with `--no-deps` after the requirements file so it does not pull
+an ancient `note-seq`→`librosa`→`numba`→`llvmlite` chain that fails to build on
+Python 3.10.
+
+Optional override: `export SPDMX_DDSP_VENV=/path/to/venv` or
+`export SPDMX_DDSP_PYTHON=/path/to/python`.
+
+**GPU (default):** `bootstrap_venv.sh` installs CUDA 12 / cuDNN 8 pip wheels into
+`.venv-ddsp`. The worker prepends those libs to `LD_LIBRARY_PATH` and uses GPU `0`
+unless you override. Useful knobs:
+
+| Variable | Meaning |
+|---|---|
+| `SPDMX_DDSP_CUDA_VISIBLE_DEVICES` | GPU id(s) for the TF worker (default `0`) |
+| `SPDMX_DDSP_FORCE_CPU=1` | Hide GPUs (`CUDA_VISIBLE_DEVICES=-1`) |
+
+TF 2.15 needs CUDA **12.x** + cuDNN **8**; a host driver advertising CUDA 13 is fine
+as long as the pip CUDA-12 libs are on `LD_LIBRARY_PATH` (handled automatically).
+
+### Step C2. MIDI-DDSP weights
+
+```bash
+# Preferred (entrypoint from the midi-ddsp package):
+.venv-ddsp/bin/midi_ddsp_download_model_weights
+
+# Or manual zip → extract under {OUTPUT_DIR}/models/midi_ddsp (or set MIDI_DDSP_WEIGHTS_DIR):
+# https://github.com/magenta/midi-ddsp/raw/models/midi_ddsp_model_weights_urmp_9_10.zip
+```
+
+Default weight dir: `{OUTPUT_DIR}/models/midi_ddsp` (see `synthesis/ddsp/config.py`).
+
+### Step C3. Clone DDSP-Piano
+
+```bash
+git clone https://github.com/lrenault/ddsp-piano.git synthesis/ddsp/third_party/ddsp-piano
+# Bundled default checkpoint: ddsp_piano/model_weights/dafx22
+# Gin: ddsp_piano/configs/dafx22.gin
+```
+
+Install any extra deps the upstream README requires into `.venv-ddsp` (gin-config is
+already in `requirements-tf.txt`).
+
+### Step C4. Spot-listen piano (quality gate)
+
+```bash
+SPDMX_DDSP_PYTHON=$PWD/.venv-ddsp/bin/python \
+  uv run python -m synthesis.ddsp.spot_listen_piano --out /tmp/ddsp_piano_spot.wav
+```
+
+Listen before large B3 batches. Provenance notes: [`THIRD_PARTY.md`](THIRD_PARTY.md).
+
+### Step C5. Run B3 / optional B4
+
+```bash
+# B3 — neural DDSP + slakh soundfont fallback (no SA3)
+# Force -j 1: TF models are large; the synthesizer also flock-serializes workers.
+SPDMX_DDSP_PYTHON=$PWD/.venv-ddsp/bin/python \
+  uv run python -m synthesis.synthesize --render-mode slakh_ddsp -j 1
+
+# B4 — optional SA3 after B3 (requires completed B3 stems)
+SPDMX_DDSP_PYTHON=$PWD/.venv-ddsp/bin/python \
+  uv run python -m synthesis.synthesize --render-mode slakh_ddsp --realify -j 1
+```
+
+Coverage stats (program-only, then optional monophony pass):
+
+```bash
+uv run python -m analysis.ddsp_coverage --subset rated_deduplicated
+uv run python -m analysis.ddsp_coverage --subset rated_deduplicated --check-monophony -n 200
+```
+
+---
+
 ## Quick reference — copy/paste (full setup)
 
 ```bash

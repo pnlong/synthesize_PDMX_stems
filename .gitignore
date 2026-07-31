@@ -1,5 +1,7 @@
 /soundfonts
 __pycache__/
+.venv/
+.pytest_cache/
 *.egg-info/
 TODO.md
 
@@ -12,3 +14,12 @@ experiments/patch_sweep/output
 
 # webMUSHRA (clone locally; see experiments/ablation_listening/README.md)
 third_party/webMUSHRA/
+
+# Isolated TensorFlow venv for MIDI-DDSP + DDSP-Piano (SETUP Track C)
+.venv-ddsp/
+
+# Upstream DDSP-Piano checkout (clone locally; see synthesis/ddsp/third_party/README.md)
+synthesis/ddsp/third_party/ddsp-piano/
+
+# Local copy of MIDI-DDSP URMP weights (after midi_ddsp_download_model_weights)
+models/midi_ddsp/

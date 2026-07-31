@@ -10,10 +10,12 @@ Development artifacts live under `{OUTPUT_DIR}/dev/`. The shipped dataset is `{O
 
 ```
 {OUTPUT_DIR}/dev/ablations/
-├── basic/              # A1
-├── basic_realify/      # A2
-├── slakh/              # B1
-└── slakh_realify/      # B2
+├── basic/                  # A1
+├── basic_realify/          # A2
+├── slakh/                  # B1
+├── slakh_realify/          # B2
+├── slakh_ddsp/             # B3 (MIDI-DDSP + DDSP-Piano + slakh fallback)
+└── slakh_ddsp_realify/     # B4 (optional SA3 on B3 stems)
 ```
 
 **Full-scale stems** (`synthesize --full`; normally called by `build_spdmx.py`):
@@ -121,6 +123,12 @@ python -m synthesis.synthesize --render-mode basic --realify
 # B2
 python -m synthesis.synthesize --render-mode slakh --realify
 
+# B3 — neural DDSP (MIDI-DDSP + DDSP-Piano) on slakh base; see SETUP Track C
+python -m synthesis.synthesize --render-mode slakh_ddsp
+
+# B4 — optional SA3 after B3
+python -m synthesis.synthesize --render-mode slakh_ddsp --realify
+
 # Full PDMX after listening test
 python -m synthesis.synthesize --render-mode basic --full
 python -m synthesis.synthesize --render-mode basic --full --realify
@@ -130,6 +138,13 @@ Song-length analysis (no synthesis required):
 
 ```bash
 python -m analysis.analyze_song_lengths
+```
+
+Neural-DDSP coverage (for the paper / sampling design):
+
+```bash
+python -m analysis.ddsp_coverage --subset rated_deduplicated
+python -m analysis.ddsp_coverage --subset rated_deduplicated --check-monophony -n 500
 ```
 
 ### Assembled dataset (`build_spdmx.py`, stub)
@@ -164,8 +179,10 @@ synthesis/
 | A2 | `basic`, `--realify` | `dev/ablations/basic_realify/` |
 | B1 | `slakh` | `dev/ablations/slakh/` |
 | B2 | `slakh`, `--realify` | `dev/ablations/slakh_realify/` |
+| B3 | `slakh_ddsp` | `dev/ablations/slakh_ddsp/` |
+| B4 | `slakh_ddsp`, `--realify` | `dev/ablations/slakh_ddsp_realify/` |
 
-Same `ABLATION_SAMPLE_SEED` ensures basic and slakh render the same songs.
+Same `ABLATION_SAMPLE_SEED` ensures basic / slakh / slakh_ddsp render the same songs.
 
 ### Slakh mode (`--render-mode slakh`)
 
@@ -177,9 +194,32 @@ Slakh-style rendering adds **per-track patch variety** on top of basic Fluidsynt
 
 See [`experiments/TUNING.md`](../experiments/TUNING.md) for the phased tuning workflow (soundfonts → FX → pools).
 
+### Neural DDSP mode (`--render-mode slakh_ddsp`, B3)
+
+Hybrid per-stem backends on the **slakh** soundfont base:
+
+| Stem | Backend |
+|------|---------|
+| GM piano (0–7) / piano track names | **DDSP-Piano** (MAESTRO; polyphony OK) |
+| 13 URMP instruments, **monophonic** | **MIDI-DDSP** |
+| Polyphonic URMP-eligible stems | slakh soundfont fallback |
+| Drums, guitar, bass guitar, vocals, synths, other | slakh soundfont fallback |
+
+- Default **no SA3** on neural stems (B3). Optional B4 runs the existing realify pass on completed B3 stems.
+- Neural models run in an isolated TF venv (`.venv-ddsp`); see SETUP Track C. Linux x86_64 only.
+- **GPU by default** (CUDA 12 / cuDNN 8 pip wheels + `LD_LIBRARY_PATH`); override with `SPDMX_DDSP_CUDA_VISIBLE_DEVICES` or `SPDMX_DDSP_FORCE_CPU=1`. Use `-j 1` (flock-serialized).
+- Routing decisions are written to `ddsp_routing.csv` beside the ablation tables.
+- Provenance: [`THIRD_PARTY.md`](../THIRD_PARTY.md). Vocals deliberately stay on soundfont(+SA3); lyric SVS is out of scope.
+
+**Listening protocol (recommended):**
+
+1. **Isolated stems** — same notes under B1 vs B2 vs B3 for piano and one MIDI-DDSP instrument (cleanest signal).
+2. **Full-mix** — prefer pieces with high neural coverage (piano + strings/winds), not random draws dominated by drums/guitar.
+3. Report corpus coverage via `python -m analysis.ddsp_coverage`.
+
 ## Listening test
 
-Subjective comparison across A1–B2 once all four dirs exist. See prior hypotheses in git history / project notes.
+Subjective comparison across A1–B4 once dirs exist. See prior hypotheses in git history / project notes.
 
 Browse and compare generated audio locally:
 
@@ -195,9 +235,11 @@ See [`listening/README.md`](listening/README.md).
 |---------|--------|
 | Mono + BS.1770 stems | Done |
 | `--render-mode` + `--realify` on synthesize | Done |
+| `--render-mode slakh_ddsp` (B3 neural DDSP) | Done (isolated TF venv; SETUP Track C) |
 | `--full` for all valid PDMX | Done |
 | `build_spdmx.py` | Stub |
 | Patch pools (Slakh) | Stub |
 | `mixture.flac` per song | Done |
 | Listening test | Viewer available (`python -m synthesis.listening.serve`) |
 | Song-length analysis (PDMX metadata + plots) | Done |
+| Neural-DDSP coverage (`analysis.ddsp_coverage`) | Done |

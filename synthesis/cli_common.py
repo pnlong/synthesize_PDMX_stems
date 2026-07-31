@@ -13,7 +13,7 @@ from shared.config import (
     REALIFY_BATCH_SIZE,
     REALIFY_CONTENT_FIDELITY_ENFORCE,
     RENDER_MODE_BASIC,
-    RENDER_MODE_SLAKH,
+    RENDER_MODES,
     SOUNDFONT_PATH,
 )
 
@@ -46,7 +46,11 @@ def add_synthesis_args(parser: argparse.ArgumentParser):
     parser.add_argument(
         "--render-mode",
         default=RENDER_MODE_BASIC,
-        choices=[RENDER_MODE_BASIC, RENDER_MODE_SLAKH],
+        choices=list(RENDER_MODES),
+        help=(
+            "basic = single soundfont; slakh = locked multi-SF recipes; "
+            "slakh_ddsp = B3 neural DDSP (MIDI-DDSP + DDSP-Piano) with slakh fallback."
+        ),
     )
     parser.add_argument(
         "--full",

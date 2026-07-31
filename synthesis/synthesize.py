@@ -20,12 +20,11 @@ from shared.config import (
     DEFAULT_AUDIO_FORMAT,
     MAX_N_NOTES_IN_STEM,
     NA_STRING,
-    OUTPUT_DIR,
     REALIFY_BATCH_SIZE,
     REALIFY_CONTENT_FIDELITY_ENFORCE,
     REALIFY_SILENCE_ENFORCE,
-    RENDER_MODE_BASIC,
     RENDER_MODE_SLAKH,
+    RENDER_MODE_SLAKH_DDSP,
     SONGS_TABLE_COLUMNS,
     SOUNDFONT_DIR,
     STEMS_FILE_NAME,
@@ -53,6 +52,12 @@ from synthesis.paths import (
     full_stems_realify_dir,
 )
 from shared.repo_symlinks import link_ablations_in_repo
+from synthesis.ddsp.config import DDSP_ROUTING_COLUMNS, DDSP_ROUTING_FILE_NAME
+
+
+def uses_slakh_recipes(render_mode: str) -> bool:
+    """True when per-category locked soundfont/FX recipes apply (B1 and B3 fallbacks)."""
+    return render_mode in (RENDER_MODE_SLAKH, RENDER_MODE_SLAKH_DDSP)
 
 
 def parse_args(args=None, namespace=None):
@@ -75,8 +80,8 @@ def synthesize_song_at_index(
     dataset: pd.DataFrame,
     completed_paths: set[str],
     args,
-) -> tuple[dict | None, list[dict]]:
-    """Synthesize one song. Returns (song_row, stem_rows) for main-process CSV writes."""
+) -> tuple[dict | None, list[dict], list[dict]]:
+    """Synthesize one song. Returns (song_row, stem_rows, ddsp_routing_rows)."""
     path_output = dataset.at[i, "path_output"]
     song_dir = Path(path_output)
     audio_format = synthesis_audio_format(args.flac)
@@ -86,12 +91,13 @@ def synthesize_song_at_index(
 
     if path_output in completed_paths and song_is_complete(song_dir, n_tracks, audio_format) and not args.reset:
         del midi
-        return None, []
+        return None, [], []
     stems_complete = all(
         stem_is_valid(stem_path(song_dir, j, audio_format)) for j in range(n_tracks)
     )
     need_to_synthesize = args.reset or not stems_complete
     stem_rows: list[dict] = []
+    routing_rows: list[dict] = []
 
     if need_to_synthesize:
         temp_dir = tempfile.TemporaryDirectory()
@@ -130,7 +136,7 @@ def synthesize_song_at_index(
         if need_to_synthesize:
             track_midi.tracks.append(track_midi_track)
             slakh_cfg: dict = {}
-            if args.render_mode == RENDER_MODE_SLAKH:
+            if uses_slakh_recipes(args.render_mode):
                 from synthesis.patches import (
                     apply_patch_to_midi_track,
                     select_patch,
@@ -152,10 +158,29 @@ def synthesize_song_at_index(
                     ),
                 )
             track_midi.save(track_paths[j])
+            route_meta: dict = {}
+            if args.render_mode == RENDER_MODE_SLAKH_DDSP:
+                from synthesis.ddsp.routing import route_stem
+
+                route = route_stem(
+                    program=program,
+                    is_drum=is_drum,
+                    track_name=track_name,
+                    track=track_midi_track,
+                    ticks_per_beat=midi.ticks_per_beat,
+                    check_monophony=True,
+                )
+                route_meta = {
+                    "ddsp_backend": route.backend,
+                    "ddsp_instrument_key": route.instrument_key,
+                    "ddsp_reason": route.reason,
+                    "n_notes": n_notes,
+                }
             track_render_meta.append({
                 "soundfont_filepath": args.soundfont_filepath,
                 "fx_profile": None,
                 **slakh_cfg,
+                **route_meta,
             })
 
         stem_rows.append(dict(zip(STEMS_TABLE_COLUMNS, (
@@ -170,47 +195,74 @@ def synthesize_song_at_index(
         waveforms = []
         for j, track_path in enumerate(track_paths):
             meta = track_render_meta[j]
-            soundfont_filepath = meta.get("soundfont_filepath") or args.soundfont_filepath
-            fx_profile = meta.get("fx_profile")
-            if args.render_mode == RENDER_MODE_SLAKH:
-                from experiments.patch_sweep.config import soundfont_file_for_id
-                from experiments.patch_sweep.winners import pick_fx_profile, pick_soundfont_id
+            backend = meta.get("ddsp_backend")
+            if args.render_mode == RENDER_MODE_SLAKH_DDSP and backend in (
+                "midi_ddsp",
+                "ddsp_piano",
+            ):
+                from synthesis.ddsp.routing import StemRoute
+                from synthesis.ddsp.synthesize import synthesize_stem_neural
 
-                soundfont_ids = meta.get("soundfont_ids") or []
-                if not soundfont_ids and meta.get("soundfont_id"):
-                    soundfont_ids = [meta["soundfont_id"]]
-                category = meta.get("category") or "default"
-                if soundfont_ids:
-                    picked = pick_soundfont_id(
-                        list(soundfont_ids),
-                        category=category,
-                        song_path=path_output,
-                        sample_seed=args.sample_seed,
-                    )
-                    soundfont_filepath = str(
-                        Path(SOUNDFONT_DIR) / soundfont_file_for_id(picked)
-                    )
+                route = StemRoute(
+                    backend=backend,
+                    instrument_key=meta.get("ddsp_instrument_key"),
+                    reason=meta.get("ddsp_reason") or "",
+                )
+                waveform = synthesize_stem_neural(track_path, route)
+            else:
+                soundfont_filepath = meta.get("soundfont_filepath") or args.soundfont_filepath
+                fx_profile = meta.get("fx_profile")
+                if uses_slakh_recipes(args.render_mode):
+                    from experiments.patch_sweep.config import soundfont_file_for_id
+                    from experiments.patch_sweep.winners import pick_fx_profile, pick_soundfont_id
+
+                    soundfont_ids = meta.get("soundfont_ids") or []
+                    if not soundfont_ids and meta.get("soundfont_id"):
+                        soundfont_ids = [meta["soundfont_id"]]
+                    category = meta.get("category") or "default"
+                    if soundfont_ids:
+                        picked = pick_soundfont_id(
+                            list(soundfont_ids),
+                            category=category,
+                            song_path=path_output,
+                            sample_seed=args.sample_seed,
+                        )
+                        soundfont_filepath = str(
+                            Path(SOUNDFONT_DIR) / soundfont_file_for_id(picked)
+                        )
+                    elif meta.get("soundfont"):
+                        soundfont_filepath = str(Path(SOUNDFONT_DIR) / meta["soundfont"])
+
+                    fx_profiles = meta.get("fx_profiles") or []
+                    if not fx_profiles and meta.get("fx_profile"):
+                        fx_profiles = [meta["fx_profile"]]
+                    if fx_profiles:
+                        fx_profile = pick_fx_profile(
+                            list(fx_profiles),
+                            category=category,
+                            song_path=path_output,
+                            sample_seed=args.sample_seed,
+                        )
                 elif meta.get("soundfont"):
                     soundfont_filepath = str(Path(SOUNDFONT_DIR) / meta["soundfont"])
-
-                fx_profiles = meta.get("fx_profiles") or []
-                if not fx_profiles and meta.get("fx_profile"):
-                    fx_profiles = [meta["fx_profile"]]
-                if fx_profiles:
-                    fx_profile = pick_fx_profile(
-                        list(fx_profiles),
-                        category=category,
-                        song_path=path_output,
-                        sample_seed=args.sample_seed,
-                    )
-            elif meta.get("soundfont"):
-                soundfont_filepath = str(Path(SOUNDFONT_DIR) / meta["soundfont"])
-            waveform = get_waveform_tensor(
-                track_path,
-                soundfont_filepath,
-                fx_profile=fx_profile,
-            )
+                waveform = get_waveform_tensor(
+                    track_path,
+                    soundfont_filepath,
+                    fx_profile=fx_profile,
+                )
             waveforms.append(waveform)
+            if args.render_mode == RENDER_MODE_SLAKH_DDSP:
+                routing_rows.append({
+                    "path": path_output,
+                    "track": j,
+                    "program": stem_rows[j]["program"],
+                    "is_drum": stem_rows[j]["is_drum"],
+                    "name": stem_rows[j]["name"],
+                    "backend": meta.get("ddsp_backend"),
+                    "instrument_key": meta.get("ddsp_instrument_key"),
+                    "reason": meta.get("ddsp_reason"),
+                    "n_notes": meta.get("n_notes"),
+                })
             remove(track_path)
 
         temp_dir.cleanup()
@@ -226,7 +278,7 @@ def synthesize_song_at_index(
     song_info = dataset.loc[i].to_dict()
     song_info["path"] = path_output
     del song_info["path_output"], song_info["mid"]
-    return song_info, stem_rows
+    return song_info, stem_rows, routing_rows
 
 
 _WORKER_CTX: dict = {}
@@ -241,7 +293,7 @@ def _init_synthesis_worker(dataset, completed_paths, args):
     }
 
 
-def _synthesis_worker(i: int) -> tuple[dict | None, list[dict]]:
+def _synthesis_worker(i: int) -> tuple[dict | None, list[dict], list[dict]]:
     return synthesize_song_at_index(
         i,
         _WORKER_CTX["dataset"],
@@ -306,6 +358,22 @@ def run_synthesis(args, output_dir: str):
         pd.DataFrame(columns=STEMS_TABLE_COLUMNS).to_csv(
             stems_output_filepath, sep=",", na_rep=NA_STRING, header=True, index=False, mode="w",
         )
+    routing_output_filepath = f"{output_dir}/{DDSP_ROUTING_FILE_NAME}"
+    if args.render_mode == RENDER_MODE_SLAKH_DDSP and (
+        not exists(routing_output_filepath) or args.reset
+    ):
+        pd.DataFrame(columns=DDSP_ROUTING_COLUMNS).to_csv(
+            routing_output_filepath, sep=",", na_rep=NA_STRING, header=True, index=False, mode="w",
+        )
+
+    # Neural DDSP needs Torch in workers for resample. Fork-after-CUDA causes
+    # SIGKILL (exit -9); use spawn so each worker initializes cleanly.
+    jobs = 1 if args.render_mode == RENDER_MODE_SLAKH_DDSP else args.jobs
+    if args.render_mode == RENDER_MODE_SLAKH_DDSP and args.jobs > 1:
+        print(
+            f"Note: slakh_ddsp uses spawn + -j 1 (was {args.jobs}) to avoid "
+            "CUDA-after-fork kills (exit -9)."
+        )
 
     work_indices = []
     for i in dataset.index:
@@ -321,12 +389,17 @@ def run_synthesis(args, output_dir: str):
         if not song_is_complete(Path(path_output), n_tracks, audio_format):
             work_indices.append(i)
 
-    with multiprocessing.Pool(
-        processes=args.jobs,
+    pool_ctx = (
+        multiprocessing.get_context("spawn")
+        if args.render_mode == RENDER_MODE_SLAKH_DDSP
+        else multiprocessing
+    )
+    with pool_ctx.Pool(
+        processes=jobs,
         initializer=_init_synthesis_worker,
         initargs=(dataset, completed_paths, args),
     ) as pool:
-        for song_info, stem_rows in tqdm(
+        for song_info, stem_rows, routing_rows in tqdm(
             pool.imap(_synthesis_worker, work_indices, chunksize=CHUNK_SIZE),
             desc="Synthesizing songs",
             total=len(work_indices),
@@ -339,6 +412,12 @@ def run_synthesis(args, output_dir: str):
                     stems_output_filepath,
                     STEMS_TABLE_COLUMNS,
                     stem_rows,
+                )
+            if routing_rows and args.render_mode == RENDER_MODE_SLAKH_DDSP:
+                append_rows_deduped(
+                    routing_output_filepath,
+                    DDSP_ROUTING_COLUMNS,
+                    routing_rows,
                 )
             append_rows_deduped(
                 output_filepath,

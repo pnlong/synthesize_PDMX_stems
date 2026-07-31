@@ -20,16 +20,29 @@ from synthesis.paths import ablations_root
 from synthesis.realify.captions.generate import generate_captions_from_tables
 from synthesis.realify.realify import resolve_output_song_dir
 
-CONDITION_ORDER = ("basic", "basic_realify", "slakh", "slakh_realify")
+CONDITION_ORDER = (
+    "basic",
+    "basic_realify",
+    "slakh",
+    "slakh_realify",
+    "slakh_ddsp",
+    "slakh_ddsp_realify",
+)
 
 CONDITION_LABELS: dict[str, str] = {
     "basic": "A1",
     "basic_realify": "A2",
     "slakh": "B1",
     "slakh_realify": "B2",
+    "slakh_ddsp": "B3",
+    "slakh_ddsp_realify": "B4",
 }
 
-REALIFY_CONDITIONS = frozenset({"basic_realify", "slakh_realify"})
+REALIFY_CONDITIONS = frozenset({
+    "basic_realify",
+    "slakh_realify",
+    "slakh_ddsp_realify",
+})
 
 
 @dataclass(frozen=True)
