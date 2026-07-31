@@ -103,6 +103,11 @@ def test_conditions_and_list_songs(tmp_path: Path):
     assert songs[0]["id"] == "7/19/QmTestSong"
     assert songs[0]["title"] == "Test Title"
     assert songs[0]["n_tracks"] == 2
+    assert "categories" in songs[0]
+    assert songs[0]["categories"]  # program 0 -> piano
+
+    categories = catalog.categories()
+    assert any(c["id"] == "piano" for c in categories)
 
 
 def test_get_song_resolves_cross_condition_paths(tmp_path: Path):
@@ -122,6 +127,7 @@ def test_get_song_resolves_cross_condition_paths(tmp_path: Path):
     )
     assert detail["mixture"]["slakh"]["available"] is False
     assert len(detail["stems"]) == 2
+    assert detail["stems"][0]["category"] == "piano"
     assert detail["stems"][0]["caption"] is not None
     assert "Preserve the exact melody" in detail["stems"][0]["caption"]
 

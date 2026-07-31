@@ -16,9 +16,13 @@ from shared.config import (
 )
 from shared.repo_symlinks import REPO_ABLATIONS_SYMLINK
 from synthesis.audio import mixture_filename, stem_filename
+from synthesis.patches import LISTENING_CATEGORY_GM_CLASSES, resolve_probe_category
 from synthesis.paths import ablations_root
 from synthesis.realify.captions.generate import generate_captions_from_tables
 from synthesis.realify.realify import resolve_output_song_dir
+
+# Stable order for sidebar filters (probe / slakh listening categories).
+LISTENING_CATEGORY_ORDER: tuple[str, ...] = tuple(LISTENING_CATEGORY_GM_CLASSES.keys())
 
 CONDITION_ORDER = (
     "basic",
@@ -111,6 +115,17 @@ def _audio_cell(
     }
 
 
+def stem_listening_category(stem_row: pd.Series) -> str:
+    """Map a stems.csv row to a probe listening category (piano/guitar/drums/…)."""
+    program = stem_row.get("program", 0)
+    program_int = int(program) if pd.notna(program) else 0
+    return resolve_probe_category(
+        program=program_int,
+        is_drum=bool(stem_row.get("is_drum", False)),
+        track_name=_na_to_none(stem_row.get("name")),
+    )
+
+
 class AblationCatalog:
     def __init__(self, ablations_dir: Path, caption_seed: int = ABLATION_SAMPLE_SEED):
         self.ablations_dir = ablations_dir.resolve()
@@ -119,6 +134,7 @@ class AblationCatalog:
         self._songs_df = self._load_songs()
         self._stems_df = self._load_stems()
         self._captions_df = self._build_captions()
+        self._categories_by_path = self._index_song_categories()
 
     def _pick_reference_condition(self) -> str:
         for condition in CONDITION_ORDER:
@@ -147,6 +163,20 @@ class AblationCatalog:
             seed=self.caption_seed,
         )
 
+    def _index_song_categories(self) -> dict[str, list[str]]:
+        """Map song path -> unique listening categories present in its stems."""
+        if self._stems_df.empty:
+            return {}
+        by_path: dict[str, set[str]] = {}
+        for _, stem_row in self._stems_df.iterrows():
+            path = str(stem_row["path"])
+            by_path.setdefault(path, set()).add(stem_listening_category(stem_row))
+        order = {name: i for i, name in enumerate(LISTENING_CATEGORY_ORDER)}
+        return {
+            path: sorted(cats, key=lambda c: order.get(c, len(order)))
+            for path, cats in by_path.items()
+        }
+
     def conditions(self) -> list[dict]:
         result = []
         for condition in CONDITION_ORDER:
@@ -160,6 +190,17 @@ class AblationCatalog:
                 ).__dict__
             )
         return result
+
+    def categories(self) -> list[dict]:
+        """Listening categories available for sidebar filtering."""
+        present: set[str] = set()
+        for cats in self._categories_by_path.values():
+            present.update(cats)
+        return [
+            {"id": name, "label": name}
+            for name in LISTENING_CATEGORY_ORDER
+            if name in present
+        ]
 
     def list_songs(self) -> list[dict]:
         songs = []
@@ -175,6 +216,7 @@ class AblationCatalog:
                 "n_tracks": int(row.get("n_tracks", 0)),
                 "genres": _na_to_none(row.get("genres")),
                 "duration_seconds": _safe_float(duration),
+                "categories": list(self._categories_by_path.get(str(song_path), [])),
             })
         return songs
 
@@ -224,6 +266,7 @@ class AblationCatalog:
                 "name": _na_to_none(stem_row.get("name")) or f"Track {track}",
                 "program": int(stem_row["program"]) if pd.notna(stem_row.get("program")) else None,
                 "is_drum": bool(stem_row.get("is_drum", False)),
+                "category": stem_listening_category(stem_row),
                 "caption": caption,
                 "conditions": conditions,
             })

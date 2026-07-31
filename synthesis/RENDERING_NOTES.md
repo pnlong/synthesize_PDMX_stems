@@ -25,10 +25,11 @@ Development artifacts live under `{OUTPUT_DIR}/dev/`. The shipped dataset is `{O
 {OUTPUT_DIR}/dev/stems_realify/   # realified (optional)
 ```
 
-**Analysis** (song lengths, etc.):
+**Analysis** (song lengths, GM register, etc.):
 
 ```
 {OUTPUT_DIR}/dev/analysis/song_lengths/
+{OUTPUT_DIR}/dev/analysis/instruments/all_valid/   # register.csv (step 0)
 ```
 
 Output symlinked in-repo at [`analysis/output/`](../analysis/output/) → `{OUTPUT_DIR}/dev/analysis/` (gitignored).
@@ -42,6 +43,21 @@ Create both after clone: `uv run python -m shared.setup_symlinks`
 ```
 {OUTPUT_DIR}/SPDMX/
 ```
+
+## GM register (step 0)
+
+Before any ablation or `--full` run, build the per-track GM correction table:
+
+```bash
+uv run python -m analysis.analyze_gm_register --subset all_valid -j 8
+```
+
+- **Aliases:** [`analysis/gm_register_aliases.yaml`](../analysis/gm_register_aliases.yaml) (SATB→choir, harpsichord, sax vs alto, …)
+- **Output:** `{OUTPUT_DIR}/dev/analysis/instruments/all_valid/register.csv` (+ corrections CSV, summary JSON, top-corrections CSV)
+- **Re-run** after editing the alias YAML; then re-synthesize affected ablations with `--reset` if needed
+- **Synthesize** loads that path by default (`--register` / `--no-register` to override)
+
+Then run A1/B1/… as usual.
 
 ## Per-song layout
 
@@ -86,6 +102,9 @@ Pass 1 writes raw stems under `dev/ablations/{basic,slakh}/` or `dev/stems/`. Pa
 Use `CUDA_VISIBLE_DEVICES` to select GPU(s). `medium` requires a visible GPU. `small-music` uses GPU when available, otherwise CPU multiprocessing with `-j`.
 
 ```bash
+# Prerequisite — GM register (once; re-run after alias YAML edits)
+python -m analysis.analyze_gm_register --subset all_valid -j 8
+
 # Pass 1 — CPU multiprocessing (required first)
 python -m synthesis.synthesize --render-mode basic -j 8
 
@@ -108,9 +127,12 @@ python -m synthesis.realify.realify \
 
 ## Commands
 
-All synthesis flows go through `synthesis.synthesize`:
+All synthesis flows go through `synthesis.synthesize` (expects GM `register.csv` unless `--no-register`):
 
 ```bash
+# Step 0
+python -m analysis.analyze_gm_register --subset all_valid -j 8
+
 # A1 (default: random sample from rated_deduplicated)
 python -m synthesis.synthesize --render-mode basic
 

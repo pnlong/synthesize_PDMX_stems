@@ -42,7 +42,7 @@ from synthesis.audio import (
     write_mixture_from_song_dir,
     write_mixture_from_waveforms,
 )
-from synthesis.cli_common import add_synthesis_args
+from synthesis.cli_common import add_synthesis_args, default_gm_register_path
 from synthesis.dataset import prepare_ablation_dataset, prepare_full_dataset
 from shared.csv_tables import append_rows_deduped, sanitize_track_name
 from synthesis.paths import (
@@ -53,6 +53,7 @@ from synthesis.paths import (
 )
 from shared.repo_symlinks import link_ablations_in_repo
 from synthesis.ddsp.config import DDSP_ROUTING_COLUMNS, DDSP_ROUTING_FILE_NAME
+from synthesis.patches import PatchAssignment, apply_patch_to_midi_track
 
 
 def uses_slakh_recipes(render_mode: str) -> bool:
@@ -133,12 +134,31 @@ def synthesize_song_at_index(
             if need_to_synthesize and n_notes <= MAX_N_NOTES_IN_STEM:
                 track_midi_track.append(message)
 
+        # Apply GM register correction (track-name → program) before render routing.
+        register_lookup = getattr(args, "gm_register_lookup", None)
+        if register_lookup is not None:
+            from analysis.gm_register import lookup_corrected_program
+
+            mid_key = dataset.at[i, "mid"]
+            corrected = lookup_corrected_program(
+                register_lookup,
+                mid=mid_key,
+                track=j,
+                default=program,
+            )
+            if corrected != program:
+                program = corrected
+                if need_to_synthesize:
+                    apply_patch_to_midi_track(
+                        track_midi_track,
+                        PatchAssignment(program=program, is_drum=is_drum),
+                    )
+
         if need_to_synthesize:
             track_midi.tracks.append(track_midi_track)
             slakh_cfg: dict = {}
             if uses_slakh_recipes(args.render_mode):
                 from synthesis.patches import (
-                    apply_patch_to_midi_track,
                     select_patch,
                     slakh_render_for_track,
                 )
@@ -322,6 +342,23 @@ def run_synthesis(args, output_dir: str):
         args.soundfont_filepath = f"{expanduser('~')}/.muspy/musescore-general/MuseScore_General.sf3"
     if not exists(args.soundfont_filepath):
         raise RuntimeError("Soundfont not found.")
+
+    # GM register: required step-0 corrections unless --no-register.
+    args.gm_register_lookup = None
+    if not getattr(args, "no_register", False):
+        from analysis.gm_register import load_register_lookup
+
+        register_path = getattr(args, "register", None) or default_gm_register_path(args.output_dir)
+        if not exists(register_path):
+            raise RuntimeError(
+                f"GM register not found at {register_path}\n"
+                "Run register correction before any ablation:\n"
+                "  uv run python -m analysis.analyze_gm_register --subset all_valid -j 8\n"
+                "Or pass --no-register to synthesize with raw MIDI programs."
+            )
+        pdmx_root = dirname(args.dataset_filepath)
+        args.gm_register_lookup = load_register_lookup(register_path, pdmx_root=pdmx_root)
+        print(f"Loaded GM register ({len(args.gm_register_lookup)} keys) from {register_path}")
 
     dataset = pd.read_csv(args.dataset_filepath, sep=",", header=0, index_col=False)
     dataset = dataset[dataset["subset:all_valid"]].reset_index(drop=True)

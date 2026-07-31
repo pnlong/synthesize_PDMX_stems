@@ -1,4 +1,4 @@
-"""Analyze General MIDI program usage from PDMX ``tracks`` metadata."""
+"""Analyze General MIDI program usage from PDMX MIDI files (incl. drums)."""
 
 from __future__ import annotations
 
@@ -7,28 +7,36 @@ import json
 import multiprocessing
 from pathlib import Path
 
+import pandas as pd
 from tqdm import tqdm
 
 from analysis.gm_programs import (
     build_gm_report,
-    load_pdmx_tracks,
-    parse_tracks_cell,
+    extract_gm_stems_from_mid,
     print_gm_report,
     stems_dataframe,
-    tracks_cell_to_stem_records,
+    stems_from_register,
 )
 from analysis.pdmx_subset import subset_output_dir
-from analysis.plots import plot_gm_program_bar
+from analysis.plots import plot_gm_program_bar, plot_gm_program_compare
+from analysis.track_names import load_pdmx_mid_paths, mid_path_for_row
 from shared.config import CHUNK_SIZE, OUTPUT_DIR, PDMX_FILEPATH
 from shared.repo_symlinks import link_analysis_in_repo
+from synthesis.cli_common import default_gm_register_path
 from synthesis.paths import instruments_dir
+
+CORRECTED_SOURCE = (
+    "GM register program_corrected (track-name corrections; "
+    "excludes skipped_unnamed empty-name rows)"
+)
 
 
 def parse_args(args=None, namespace=None):
     parser = argparse.ArgumentParser(
         description=(
-            "Summarize General MIDI program ids from PDMX.csv ``tracks`` "
-            "(hyphen-separated GM programs per song)."
+            "Summarize General MIDI program ids from PDMX MIDI files "
+            "(melodic program_change + channel-10 drum kits), or from a "
+            "corrected GM register CSV."
         ),
     )
     parser.add_argument("-df", "--dataset_filepath", default=PDMX_FILEPATH, type=str)
@@ -44,7 +52,7 @@ def parse_args(args=None, namespace=None):
         "--jobs",
         default=max(1, multiprocessing.cpu_count() // 2),
         type=int,
-        help="Worker processes for parsing ``tracks`` cells.",
+        help="Worker processes for MIDI parsing.",
     )
     parser.add_argument(
         "-n",
@@ -59,25 +67,40 @@ def parse_args(args=None, namespace=None):
         type=int,
         help="Number of GM ids to show in the bar chart (rest grouped as Other).",
     )
+    parser.add_argument(
+        "--from-register",
+        nargs="?",
+        const="",
+        default=None,
+        type=str,
+        help=(
+            "Build inventory from register program_corrected instead of raw MIDI. "
+            "Optional path (default: instruments/.../register.csv for --subset). "
+            "Writes gm_program_*_corrected.* outputs."
+        ),
+    )
     return parser.parse_args(args=args, namespace=namespace)
 
 
-def _worker(tracks_values: list) -> tuple[list[dict], int]:
-    records: list[dict] = []
-    n_failed = 0
-    for tracks in tracks_values:
-        programs = parse_tracks_cell(tracks)
-        if programs is None:
-            n_failed += 1
-            continue
-        records.extend(tracks_cell_to_stem_records(tracks))
-    return records, n_failed
+_WORKER_PRESETS: dict | None = None
 
 
-def _chunked(values: list, chunk_size: int) -> list[list]:
-    if chunk_size <= 0:
-        chunk_size = 1
-    return [values[i:i + chunk_size] for i in range(0, len(values), chunk_size)]
+def _init_worker() -> None:
+    global _WORKER_PRESETS
+    from synthesis.realify.preset_config import load_presets
+
+    _WORKER_PRESETS = load_presets()
+
+
+def _worker(args: tuple[str, str]) -> tuple[list[dict], bool]:
+    mid_rel, pdmx_root = args
+    mid_path = mid_path_for_row(mid_rel, pdmx_root)
+    if not mid_path.is_file():
+        return [], True
+    rows = extract_gm_stems_from_mid(mid_path, presets=_WORKER_PRESETS)
+    if rows is None:
+        return [], True
+    return rows, False
 
 
 def analyze_gm_programs(
@@ -87,36 +110,35 @@ def analyze_gm_programs(
     jobs: int = 1,
     limit: int | None = None,
 ) -> tuple[dict, object]:
-    tracks = load_pdmx_tracks(dataset_filepath, subset=subset)
+    mid_paths, pdmx_root = load_pdmx_mid_paths(dataset_filepath, subset=subset)
     if limit is not None:
-        tracks = tracks.head(limit)
+        mid_paths = mid_paths.head(limit)
 
-    track_values = tracks.tolist()
-    n_songs = len(track_values)
-    chunk_size = max(1, len(track_values) // max(jobs * 4, 1))
-    chunks = _chunked(track_values, chunk_size)
+    n_songs = len(mid_paths)
+    worker_args = [(mid_rel, str(pdmx_root)) for mid_rel in mid_paths]
 
     stem_records: list[dict] = []
     n_songs_failed = 0
 
-    if jobs <= 1 or len(chunks) <= 1:
-        iterator = chunks
-        if len(chunks) > 1:
-            iterator = tqdm(chunks, desc="Parsing tracks", unit="chunk")
-        for chunk in iterator:
-            rows, failed = _worker(chunk)
+    if jobs <= 1:
+        _init_worker()
+        iterator = worker_args
+        if n_songs > 1:
+            iterator = tqdm(worker_args, total=n_songs, desc="Parsing MIDI", unit="song")
+        for mid_rel, root in iterator:
+            rows, failed = _worker((mid_rel, root))
             stem_records.extend(rows)
-            n_songs_failed += failed
+            n_songs_failed += int(failed)
     else:
-        with multiprocessing.Pool(processes=jobs) as pool:
+        with multiprocessing.Pool(processes=jobs, initializer=_init_worker) as pool:
             for rows, failed in tqdm(
-                pool.imap(_worker, chunks, chunksize=CHUNK_SIZE),
-                total=len(chunks),
-                desc="Parsing tracks",
-                unit="chunk",
+                pool.imap(_worker, worker_args, chunksize=CHUNK_SIZE),
+                total=n_songs,
+                desc="Parsing MIDI",
+                unit="song",
             ):
                 stem_records.extend(rows)
-                n_songs_failed += failed
+                n_songs_failed += int(failed)
 
     stems = stems_dataframe(stem_records)
     report = build_gm_report(
@@ -128,34 +150,125 @@ def analyze_gm_programs(
     return report, stems
 
 
+def analyze_gm_programs_from_register(
+    register: pd.DataFrame,
+    *,
+    subset: str = "all_valid",
+) -> tuple[dict, pd.DataFrame]:
+    """Inventory from register ``program_corrected`` (excludes skipped_unnamed)."""
+    from analysis.gm_register import STATUS_SKIPPED_UNNAMED
+
+    filtered = register
+    if "status" in register.columns:
+        filtered = register[register["status"] != STATUS_SKIPPED_UNNAMED]
+    stems = stems_from_register(filtered)
+    n_songs = int(register["mid"].nunique()) if len(register) and "mid" in register.columns else 0
+    report = build_gm_report(
+        stems,
+        subset=subset,
+        n_songs=n_songs,
+        n_songs_failed=0,
+        source=CORRECTED_SOURCE,
+    )
+    return report, stems
+
+
+def write_gm_program_outputs(
+    report: dict,
+    stems: pd.DataFrame,
+    output_dir: Path,
+    *,
+    top_n: int = 40,
+    corrected: bool = False,
+    stems_original: pd.DataFrame | None = None,
+) -> list[Path]:
+    """Write report JSON, stems CSV, and bar chart(s). Returns written paths."""
+    output_dir.mkdir(parents=True, exist_ok=True)
+    suffix = "_corrected" if corrected else ""
+    chart_path = output_dir / f"gm_program_counts{suffix}.png"
+    report_path = output_dir / f"gm_program_report{suffix}.json"
+    stems_path = output_dir / f"gm_program_stems{suffix}.csv"
+
+    title = (
+        "sPDMX corrected GM program usage (from register)"
+        if corrected
+        else "PDMX General MIDI program usage (drums = channel 10)"
+    )
+    plot_gm_program_bar(stems, chart_path, top_n=top_n, title=title)
+
+    with open(report_path, "w") as f:
+        json.dump(report, f, indent=2)
+    stems.to_csv(stems_path, index=False)
+
+    written = [report_path, chart_path, stems_path]
+
+    if corrected and stems_original is not None and len(stems_original):
+        compare_path = output_dir / "gm_program_counts_compare.png"
+        plot_gm_program_compare(
+            stems_original,
+            stems,
+            compare_path,
+            top_n=top_n,
+            title="GM program usage: original vs corrected",
+        )
+        written.append(compare_path)
+
+    return written
+
+
+def _load_original_stems(output_dir: Path) -> pd.DataFrame | None:
+    path = output_dir / "gm_program_stems.csv"
+    if not path.is_file():
+        return None
+    return pd.read_csv(path)
+
+
 def main():
     args = parse_args()
     output_dir = subset_output_dir(args.output_dir, args.subset)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    report, stems = analyze_gm_programs(
-        args.dataset_filepath,
-        subset=args.subset,
-        jobs=args.jobs,
-        limit=args.limit,
-    )
-
-    chart_path = output_dir / "gm_program_counts.png"
-    plot_gm_program_bar(stems, chart_path, top_n=args.top_n)
-
-    report_path = output_dir / "gm_program_report.json"
-    with open(report_path, "w") as f:
-        json.dump(report, f, indent=2)
-
-    stems_path = output_dir / "gm_program_stems.csv"
-    stems.to_csv(stems_path, index=False)
+    if args.from_register is not None:
+        register_path = args.from_register or str(output_dir / "register.csv")
+        if args.from_register == "" and not Path(register_path).is_file():
+            register_path = default_gm_register_path(OUTPUT_DIR)
+        register_path = Path(register_path)
+        if not register_path.is_file():
+            raise SystemExit(
+                f"GM register not found: {register_path}\n"
+                "Run: uv run python -m analysis.analyze_gm_register --subset all_valid -j 8"
+            )
+        register = pd.read_csv(register_path)
+        report, stems = analyze_gm_programs_from_register(register, subset=args.subset)
+        written = write_gm_program_outputs(
+            report,
+            stems,
+            output_dir,
+            top_n=args.top_n,
+            corrected=True,
+            stems_original=_load_original_stems(output_dir),
+        )
+    else:
+        report, stems = analyze_gm_programs(
+            args.dataset_filepath,
+            subset=args.subset,
+            jobs=args.jobs,
+            limit=args.limit,
+        )
+        written = write_gm_program_outputs(
+            report,
+            stems,
+            output_dir,
+            top_n=args.top_n,
+            corrected=False,
+        )
 
     link, target = link_analysis_in_repo(OUTPUT_DIR)
 
     print_gm_report(report)
-    print(f"\nWrote {report_path}")
-    print(f"Wrote {chart_path}")
-    print(f"Wrote {stems_path}")
+    print()
+    for path in written:
+        print(f"Wrote {path}")
     print(f"Symlinked {link} -> {target}")
 
 

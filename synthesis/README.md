@@ -6,6 +6,17 @@ Environment setup: **[`SETUP.md`](../SETUP.md)** at repo root.
 
 See also [`RENDERING_NOTES.md`](RENDERING_NOTES.md) for ablation design, Slakh alignment, and output layout.
 
+## Before you synthesize
+
+Run **GM register correction** first (track-name ↔ GM id fixes). Synthesize loads
+`{OUTPUT_DIR}/dev/analysis/instruments/all_valid/register.csv` by default and errors if it is missing.
+
+```bash
+uv run python -m analysis.analyze_gm_register --subset all_valid -j 8
+```
+
+Flags: `--register PATH` to point at another CSV; `--no-register` to use raw MIDI programs.
+
 ## Entry points
 
 | Script | Purpose |

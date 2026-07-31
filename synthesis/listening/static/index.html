@@ -11,7 +11,14 @@
     <aside class="sidebar">
       <header class="sidebar-header">
         <h1>Ablation Viewer</h1>
-        <input id="search" type="search" placeholder="Search title, artist…" autocomplete="off">
+        <input id="search" type="search" placeholder="Search by id…" autocomplete="off">
+        <div class="category-filter">
+          <div class="category-filter-header">
+            <span class="category-filter-label">Categories</span>
+            <button id="category-select-all" type="button" class="category-filter-action">Select all</button>
+          </div>
+          <div id="category-filters" class="category-filters"></div>
+        </div>
       </header>
       <ul id="song-list" class="song-list"></ul>
     </aside>

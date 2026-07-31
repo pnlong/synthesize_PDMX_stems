@@ -224,10 +224,31 @@ def select_patch(
 
 
 def apply_patch_to_midi_track(track, assignment: PatchAssignment):
-    """Rewrite program changes on a mido track to match the assignment."""
+    """Rewrite program changes on a mido track to match the assignment.
+
+    If the track has no ``program_change``, insert one at the start so FluidSynth
+    hears the assigned program (needed for GM-register corrections).
+    """
+    import mido
+
+    found = False
+    channel = 9 if assignment.is_drum else 0
     for message in track:
         if message.type == "program_change":
             message.program = assignment.program
+            found = True
+        elif hasattr(message, "channel"):
+            channel = message.channel
+    if not found:
+        track.insert(
+            0,
+            mido.Message(
+                "program_change",
+                program=int(assignment.program),
+                channel=channel,
+                time=0,
+            ),
+        )
 
 
 def _normalize_name(name: str | None) -> str:

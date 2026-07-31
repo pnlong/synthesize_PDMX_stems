@@ -16,6 +16,12 @@ from shared.config import (
     RENDER_MODES,
     SOUNDFONT_PATH,
 )
+from synthesis.paths import instruments_dir
+
+
+def default_gm_register_path(output_dir: str = OUTPUT_DIR) -> str:
+    """Default register written by ``analysis.analyze_gm_register --subset all_valid``."""
+    return f"{instruments_dir(output_dir)}/all_valid/register.csv"
 
 
 def add_audio_format_arg(parser: argparse.ArgumentParser):
@@ -95,3 +101,18 @@ def add_synthesis_args(parser: argparse.ArgumentParser):
         help="Disable content fidelity gate even if REALIFY_CONTENT_FIDELITY_ENFORCE is set.",
     )
     parser.add_argument("--sample-seed", default=ABLATION_SAMPLE_SEED, type=int)
+    parser.add_argument(
+        "--register",
+        default=None,
+        type=str,
+        help=(
+            "GM register CSV from analysis.analyze_gm_register "
+            f"(default: {default_gm_register_path()}). "
+            "Corrects per-track program ids before rendering."
+        ),
+    )
+    parser.add_argument(
+        "--no-register",
+        action="store_true",
+        help="Do not apply GM register corrections (use MIDI program_change as-is).",
+    )

@@ -47,6 +47,26 @@ def test_serves_static_assets(tmp_path, monkeypatch):
     assert handler._last_status == HTTPStatus.OK
 
 
+def test_serves_categories_api(tmp_path):
+    from synthesis.listening.catalog import AblationCatalog
+    from synthesis.listening.tests.test_catalog import _write_ablation_tree
+
+    _write_ablation_tree(tmp_path)
+    catalog = AblationCatalog(tmp_path)
+    handler = _handler(catalog)
+    handler.path = "/api/categories"
+    captured = {}
+
+    def _send_json(payload):
+        captured["payload"] = payload
+        handler._last_status = HTTPStatus.OK
+
+    handler._send_json = _send_json
+    handler.do_GET()
+    assert handler._last_status == HTTPStatus.OK
+    assert any(c["id"] == "piano" for c in captured["payload"])
+
+
 def test_parse_audio_request_with_sharded_song_id():
     path = "/audio/basic/13/35/QmVoyUuajQJjJ5qUDGVm5sibbWrx1YqN9kNFH295NnRiqM/mixture.mp3"
     assert parse_audio_request(path) == (

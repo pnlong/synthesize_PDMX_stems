@@ -1,5 +1,7 @@
 const state = {
   conditions: [],
+  categories: [],
+  selectedCategories: new Set(),
   songs: [],
   filteredSongs: [],
   selectedId: null,
@@ -8,6 +10,8 @@ const state = {
 
 const songListEl = document.getElementById("song-list");
 const searchEl = document.getElementById("search");
+const categoryFiltersEl = document.getElementById("category-filters");
+const categorySelectAllBtn = document.getElementById("category-select-all");
 const emptyStateEl = document.getElementById("empty-state");
 const songDetailEl = document.getElementById("song-detail");
 const songTitleEl = document.getElementById("song-title");
@@ -36,28 +40,84 @@ function formatDuration(seconds) {
   return `${mins}:${String(secs).padStart(2, "0")}`;
 }
 
-function displayTitle(song) {
-  return song.title || song.song_name || song.id;
+/** Blind label: PDMX basename hash (e.g. ``QmPfj…``), not title/artist. */
+function displayId(song) {
+  const id = song.id || "";
+  const slash = id.lastIndexOf("/");
+  return slash >= 0 ? id.slice(slash + 1) : id;
+}
+
+function trackCountLabel(song) {
+  const n = song.n_tracks ?? 0;
+  return `${n} track${n === 1 ? "" : "s"}`;
 }
 
 function songSearchText(song) {
-  return [song.title, song.song_name, song.artist_name, song.genres, song.id]
-    .filter(Boolean)
-    .join(" ")
-    .toLowerCase();
+  return [song.id, displayId(song)].filter(Boolean).join(" ").toLowerCase();
+}
+
+function allCategoriesSelected() {
+  return (
+    state.categories.length > 0 &&
+    state.categories.every((cat) => state.selectedCategories.has(cat.id))
+  );
+}
+
+function updateSelectAllButton() {
+  categorySelectAllBtn.textContent = allCategoriesSelected()
+    ? "Clear all"
+    : "Select all";
+}
+
+function songMatchesCategories(song) {
+  if (state.categories.length === 0 || allCategoriesSelected()) {
+    return true;
+  }
+  if (state.selectedCategories.size === 0) {
+    return false;
+  }
+  const cats = song.categories || [];
+  return cats.some((cat) => state.selectedCategories.has(cat));
 }
 
 function applyFilter() {
   const query = searchEl.value.trim().toLowerCase();
-  if (!query) {
-    state.filteredSongs = [...state.songs];
-  } else {
-    state.filteredSongs = state.songs.filter((song) =>
-      songSearchText(song).includes(query)
-    );
-  }
+  state.filteredSongs = state.songs.filter((song) => {
+    if (!songMatchesCategories(song)) {
+      return false;
+    }
+    if (!query) {
+      return true;
+    }
+    return songSearchText(song).includes(query);
+  });
   renderSongList();
   updateNavButtons();
+}
+
+function renderCategoryFilters() {
+  categoryFiltersEl.innerHTML = "";
+  for (const category of state.categories) {
+    const label = document.createElement("label");
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.value = category.id;
+    input.checked = state.selectedCategories.has(category.id);
+    input.addEventListener("change", () => {
+      if (input.checked) {
+        state.selectedCategories.add(category.id);
+      } else {
+        state.selectedCategories.delete(category.id);
+      }
+      updateSelectAllButton();
+      applyFilter();
+    });
+    const text = document.createElement("span");
+    text.textContent = category.label;
+    label.append(input, text);
+    categoryFiltersEl.append(label);
+  }
+  updateSelectAllButton();
 }
 
 function renderSongList() {
@@ -71,13 +131,16 @@ function renderSongList() {
 
     const title = document.createElement("span");
     title.className = "song-item-title";
-    title.textContent = displayTitle(song);
+    title.textContent = displayId(song);
 
-    const artist = document.createElement("span");
-    artist.className = "song-item-artist";
-    artist.textContent = song.artist_name || song.genres || `${song.n_tracks} tracks`;
+    const subtitle = document.createElement("span");
+    subtitle.className = "song-item-subtitle";
+    const cats = (song.categories || []).join(", ");
+    subtitle.textContent = cats
+      ? `${trackCountLabel(song)} · ${cats}`
+      : trackCountLabel(song);
 
-    button.append(title, artist);
+    button.append(title, subtitle);
     button.addEventListener("click", () => selectSong(song.id));
     li.append(button);
     songListEl.append(li);
@@ -130,16 +193,20 @@ function renderConditionGrid(cells, caption) {
   return grid;
 }
 
-function renderSongDetail(detail) {
-  songTitleEl.textContent = displayTitle(detail);
+function escapeHtml(text) {
+  return String(text)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;");
+}
 
-  const metaParts = [];
-  if (detail.artist_name) metaParts.push(detail.artist_name);
-  if (detail.genres) metaParts.push(detail.genres);
-  metaParts.push(`${detail.n_tracks} track${detail.n_tracks === 1 ? "" : "s"}`);
+function renderSongDetail(detail) {
+  songTitleEl.textContent = displayId(detail);
+
+  const metaParts = [trackCountLabel(detail)];
   const duration = formatDuration(detail.duration_seconds);
   if (duration) metaParts.push(duration);
-  if (detail.subtitle) metaParts.push(detail.subtitle);
   songMetaEl.textContent = metaParts.join(" · ");
 
   songPathEl.textContent = detail.id || "";
@@ -162,7 +229,8 @@ function renderSongDetail(detail) {
     header.className = "stem-row-header";
     const programText =
       stem.program != null ? ` · MIDI program ${stem.program}` : "";
-    header.innerHTML = `${stem.name} <span>(track ${stem.track}${programText})</span>`;
+    const categoryText = stem.category ? escapeHtml(stem.category) : "unknown";
+    header.innerHTML = `${escapeHtml(stem.name)} <span>(${categoryText} · track ${stem.track}${programText})</span>`;
     row.append(header);
 
     row.append(renderConditionGrid(stem.conditions, stem.caption));
@@ -181,6 +249,7 @@ async function selectSong(songId) {
   renderSongList();
   emptyStateEl.classList.add("hidden");
   songDetailEl.classList.remove("hidden");
+  document.querySelector(".main")?.scrollTo(0, 0);
 
   try {
     state.songDetail = await fetchJson(`/api/songs/${encodeURIComponent(songId)}`);
@@ -206,19 +275,30 @@ function navigate(delta) {
 }
 
 async function init() {
-  [state.conditions, state.songs] = await Promise.all([
+  [state.conditions, state.categories, state.songs] = await Promise.all([
     fetchJson("/api/conditions"),
+    fetchJson("/api/categories"),
     fetchJson("/api/songs"),
   ]);
-  state.filteredSongs = [...state.songs];
-  renderSongList();
+  state.selectedCategories = new Set(state.categories.map((cat) => cat.id));
+  renderCategoryFilters();
+  applyFilter();
 
-  if (state.songs.length > 0) {
-    await selectSong(state.songs[0].id);
+  if (state.filteredSongs.length > 0) {
+    await selectSong(state.filteredSongs[0].id);
   }
 }
 
 searchEl.addEventListener("input", applyFilter);
+categorySelectAllBtn.addEventListener("click", () => {
+  if (allCategoriesSelected()) {
+    state.selectedCategories.clear();
+  } else {
+    state.selectedCategories = new Set(state.categories.map((cat) => cat.id));
+  }
+  renderCategoryFilters();
+  applyFilter();
+});
 prevBtn.addEventListener("click", () => navigate(-1));
 nextBtn.addEventListener("click", () => navigate(1));
 

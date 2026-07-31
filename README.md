@@ -4,10 +4,11 @@ Turn the [PDMX](https://zenodo.org/records/13763756) symbolic music dataset into
 
 ## Pipeline
 
-1. **Synthesis** — `python -m synthesis.synthesize` with `--render-mode {basic,slakh}`
-2. **Realify** (optional) — same command with `--realify`
-3. **Full dataset** — `python -m synthesis.build_spdmx` (planned; calls `synthesize --full` internally)
-4. **Analysis** — duration stats and SA3 model recommendation
+1. **GM register** — `python -m analysis.analyze_gm_register` (correct track-name ↔ GM id mismatches; **required before any ablation**)
+2. **Synthesis** — `python -m synthesis.synthesize` with `--render-mode {basic,slakh,slakh_ddsp}`
+3. **Realify** (optional) — same command with `--realify`
+4. **Full dataset** — `python -m synthesis.build_spdmx` (planned; calls `synthesize --full` internally)
+5. **Analysis** — duration stats and SA3 model recommendation
 
 ## Install
 
@@ -34,7 +35,11 @@ Development artifacts (ablations, analysis, interim full stems) live under `{OUT
 Default behavior: random sample from `subset:rated_deduplicated` (N=100, seed=42).
 
 ```bash
-# A1 / B1 — raw stems
+# Step 0 — correct GM ids from track names (once; re-run after alias YAML edits)
+uv run python -m analysis.analyze_gm_register --subset all_valid -j 8
+# → {OUTPUT_DIR}/dev/analysis/instruments/all_valid/register.csv
+
+# A1 / B1 — raw stems (loads register by default)
 uv run python -m synthesis.synthesize --render-mode basic
 uv run python -m synthesis.synthesize --render-mode slakh
 
@@ -86,6 +91,16 @@ Will populate `{OUTPUT_DIR}/SPDMX/` with PDMX metadata plus synthesized stems in
 ```
 
 ### Analysis
+
+**GM register (prerequisite for synthesis):** corrects mismatched GM program ids from MIDI track names:
+
+```bash
+uv run python -m analysis.analyze_gm_register --subset all_valid -j 8
+# Re-print stats without re-parsing MIDI:
+uv run python -m analysis.analyze_gm_register --from-csv .../register.csv
+```
+
+Writes to `{OUTPUT_DIR}/dev/analysis/instruments/all_valid/`: `register.csv`, `register_corrections.csv`, `register_summary.json`, `register_report.txt`, `register_top_corrections.csv`.
 
 Song-length analysis uses PDMX metadata (`song_length.seconds`) — no synthesis required:
 

@@ -59,6 +59,9 @@ class ListeningHandler(BaseHTTPRequestHandler):
         if path == "/api/conditions":
             self._send_json(self.catalog.conditions())
             return
+        if path == "/api/categories":
+            self._send_json(self.catalog.categories())
+            return
         if path == "/api/songs":
             self._send_json(self.catalog.list_songs())
             return

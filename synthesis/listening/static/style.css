@@ -13,26 +13,35 @@
   box-sizing: border-box;
 }
 
+html,
+body {
+  height: 100%;
+  overflow: hidden;
+}
+
 body {
   margin: 0;
   font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
   background: var(--bg);
   color: var(--text);
-  min-height: 100vh;
 }
 
 .app {
   display: flex;
-  min-height: 100vh;
+  height: 100%;
+  max-height: 100vh;
+  overflow: hidden;
 }
 
 .sidebar {
   width: var(--sidebar-width);
   flex-shrink: 0;
+  height: 100%;
   background: var(--panel);
   border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
 .sidebar-header {
@@ -54,6 +63,62 @@ body {
   background: var(--bg);
   color: var(--text);
   font-size: 0.9rem;
+}
+
+.category-filter {
+  margin-top: 0.75rem;
+}
+
+.category-filter-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.4rem;
+}
+
+.category-filter-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.category-filter-action {
+  border: none;
+  background: transparent;
+  color: var(--accent);
+  font-size: 0.75rem;
+  cursor: pointer;
+  padding: 0;
+}
+
+.category-filter-action:hover {
+  text-decoration: underline;
+}
+
+.category-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.65rem;
+  max-height: 7.5rem;
+  overflow-y: auto;
+}
+
+.category-filters label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.78rem;
+  color: var(--text);
+  cursor: pointer;
+  user-select: none;
+}
+
+.category-filters input {
+  margin: 0;
+  accent-color: var(--accent);
 }
 
 .song-list {
@@ -86,11 +151,13 @@ body {
 
 .song-list .song-item-title {
   display: block;
-  font-size: 0.9rem;
+  font-size: 0.85rem;
   font-weight: 500;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  word-break: break-all;
 }
 
-.song-list .song-item-artist {
+.song-list .song-item-subtitle {
   display: block;
   font-size: 0.8rem;
   color: var(--muted);
@@ -100,6 +167,7 @@ body {
 .main {
   flex: 1;
   min-width: 0;
+  height: 100%;
   overflow-y: auto;
   padding: 1.5rem 2rem;
 }
@@ -129,7 +197,9 @@ body {
 
 .song-header h2 {
   margin: 0 0 0.35rem;
-  font-size: 1.4rem;
+  font-size: 1.25rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  word-break: break-all;
 }
 
 .song-meta {
@@ -222,7 +292,12 @@ body {
 
   .sidebar {
     width: 100%;
+    height: 40vh;
     max-height: 40vh;
+  }
+
+  .main {
+    height: 60vh;
   }
 
   .mixture-grid {

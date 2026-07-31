@@ -1,16 +1,21 @@
-"""Extract and aggregate General MIDI program usage from PDMX metadata."""
+"""Extract and aggregate General MIDI program usage from PDMX MIDI files."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
+import mido
 import pandas as pd
 
 from analysis.pdmx_subset import filter_pdmx_subset
+from shared.csv_tables import sanitize_track_name
 from synthesis.patches import _gm_class
 from synthesis.realify.preset_config import load_presets, resolve_category
 
 TRACKS_DELIMITER = "-"
+
+# Sentinel gm_id for channel-10 drum kits (not a melodic GM program).
+DRUM_GM_ID = 128
 
 # Standard General MIDI melodic program names (0–127).
 GM_PROGRAM_NAMES: tuple[str, ...] = (
@@ -152,6 +157,8 @@ def gm_program_name(program: int) -> str:
 
 
 def gm_id_label(gm_id_value: int) -> str:
+    if int(gm_id_value) == DRUM_GM_ID:
+        return f"{DRUM_GM_ID}: Drums (channel 10)"
     if 0 <= gm_id_value < len(GM_PROGRAM_NAMES):
         return f"{gm_id_value}: {GM_PROGRAM_NAMES[gm_id_value]}"
     return f"{gm_id_value}: Unknown"
@@ -170,23 +177,65 @@ def parse_tracks_cell(tracks) -> list[int] | None:
         return None
 
 
-def program_to_stem_record(program: int, presets: dict) -> dict:
-    meta_row = pd.Series({"program": program, "is_drum": False, "name": None})
+def program_to_stem_record(program: int, presets: dict, *, is_drum: bool = False) -> dict:
+    meta_row = pd.Series({"program": program, "is_drum": is_drum, "name": None})
+    gm_id = DRUM_GM_ID if is_drum else int(program)
     return {
-        "gm_id": int(program),
+        "gm_id": gm_id,
         "program": int(program),
-        "gm_class": _gm_class(program, is_drum=False),
+        "is_drum": bool(is_drum),
+        "gm_class": _gm_class(program, is_drum),
         "category": resolve_category(meta_row, presets),
     }
 
 
 def tracks_cell_to_stem_records(tracks, presets: dict | None = None) -> list[dict]:
+    """Legacy helper: melodic programs only (no channel-10 drum detection)."""
     programs = parse_tracks_cell(tracks)
     if programs is None:
         return []
     if presets is None:
         presets = load_presets()
-    return [program_to_stem_record(program, presets) for program in programs]
+    return [program_to_stem_record(program, presets, is_drum=False) for program in programs]
+
+
+def extract_gm_stems_from_mid(mid_path: str | Path, presets: dict | None = None) -> list[dict] | None:
+    """Parse a MIDI file; one record per non-empty track (drums = channel 10)."""
+    try:
+        midi = mido.MidiFile(filename=str(mid_path), charset="utf8")
+    except Exception:
+        return None
+
+    if presets is None:
+        presets = load_presets()
+
+    rows: list[dict] = []
+    for track in midi.tracks:
+        program = 0
+        is_drum = False
+        track_name: str | None = None
+        n_notes = 0
+        determined_whether_track_is_drum = False
+
+        for message in track:
+            if message.type == "note_on" and message.velocity > 0:
+                n_notes += 1
+            elif message.type == "program_change":
+                program = message.program
+            elif message.type == "track_name":
+                track_name = sanitize_track_name(message.name)
+            if not determined_whether_track_is_drum and hasattr(message, "channel"):
+                is_drum = message.channel == 9
+                determined_whether_track_is_drum = True
+
+        if n_notes == 0:
+            continue
+
+        record = program_to_stem_record(program, presets, is_drum=is_drum)
+        record["name"] = track_name if track_name else None
+        rows.append(record)
+
+    return rows
 
 
 def load_pdmx_tracks(
@@ -210,9 +259,41 @@ def load_pdmx_tracks(
 
 
 def stems_dataframe(stem_records: list[dict]) -> pd.DataFrame:
+    columns = ["gm_id", "program", "is_drum", "gm_class", "category", "name"]
     if not stem_records:
-        return pd.DataFrame(columns=["gm_id", "program", "gm_class", "category"])
+        return pd.DataFrame(columns=columns)
     return pd.DataFrame(stem_records)
+
+
+def stems_from_register(
+    register: pd.DataFrame,
+    presets: dict | None = None,
+) -> pd.DataFrame:
+    """Build GM stem records from a register table using ``program_corrected``."""
+    if presets is None:
+        presets = load_presets()
+    if register is None or len(register) == 0:
+        return stems_dataframe([])
+
+    records: list[dict] = []
+    for _, row in register.iterrows():
+        is_drum = bool(row.get("is_drum", False))
+        program = int(row["program_corrected"])
+        name = row.get("name")
+        name = None if pd.isna(name) else name
+        meta_row = pd.Series({"program": program, "is_drum": is_drum, "name": name})
+        gm_id = DRUM_GM_ID if is_drum else int(program)
+        records.append(
+            {
+                "gm_id": gm_id,
+                "program": int(program),
+                "is_drum": bool(is_drum),
+                "gm_class": _gm_class(program, is_drum),
+                "category": resolve_category(meta_row, presets),
+                "name": name,
+            }
+        )
+    return stems_dataframe(records)
 
 
 def build_gm_report(
@@ -221,17 +302,22 @@ def build_gm_report(
     subset: str,
     n_songs: int,
     n_songs_failed: int,
+    source: str = "MIDI files (program_change + channel-10 drums)",
 ) -> dict:
     n_stems = len(stems)
     gm_counts = stems["gm_id"].value_counts().sort_index()
     program_rows = []
     for gm_id_value, count in gm_counts.items():
-        program = int(gm_id_value)
+        gm_id_int = int(gm_id_value)
+        if gm_id_int == DRUM_GM_ID:
+            name = "Drums (channel 10)"
+        else:
+            name = gm_program_name(gm_id_int)
         program_rows.append({
-            "gm_id": program,
-            "program": program,
-            "name": gm_program_name(program),
-            "label": gm_id_label(program),
+            "gm_id": gm_id_int,
+            "program": gm_id_int if gm_id_int != DRUM_GM_ID else None,
+            "name": name,
+            "label": gm_id_label(gm_id_int),
             "count": int(count),
             "pct": round(100 * count / n_stems, 4) if n_stems else 0.0,
         })
@@ -245,16 +331,26 @@ def build_gm_report(
         for key, value in stems["category"].value_counts().items()
     }
 
+    if n_stems and "is_drum" in stems.columns:
+        n_drums = int(stems["is_drum"].sum())
+        melodic = stems[~stems["is_drum"].astype(bool)]
+        program_0_count = int((melodic["program"] == 0).sum())
+    else:
+        n_drums = int((stems["gm_id"] == DRUM_GM_ID).sum()) if n_stems else 0
+        program_0_count = int((stems["program"] == 0).sum()) if n_stems else 0
+
     return {
         "subset": subset,
-        "source": "PDMX.csv tracks column (hyphen-separated GM program ids)",
+        "source": source,
         "n_songs": n_songs,
         "n_songs_failed": n_songs_failed,
         "n_stems": n_stems,
         "avg_stems_per_song": round(n_stems / n_songs, 4) if n_songs else 0.0,
         "n_unique_gm_ids": int(gm_counts.shape[0]),
-        "program_0_count": int((stems["program"] == 0).sum()) if n_stems else 0,
-        "program_0_pct_of_stems": round(100 * (stems["program"] == 0).mean(), 4) if n_stems else 0.0,
+        "n_drum_stems": n_drums,
+        "drum_pct_of_stems": round(100 * n_drums / n_stems, 4) if n_stems else 0.0,
+        "program_0_count": program_0_count,
+        "program_0_pct_of_stems": round(100 * program_0_count / n_stems, 4) if n_stems else 0.0,
         "gm_programs": program_rows,
         "gm_classes": gm_class_counts,
         "listening_categories": category_counts,
@@ -264,18 +360,22 @@ def build_gm_report(
 def print_gm_report(report: dict) -> None:
     print(f"Subset: {report['subset']}")
     print(f"Source: {report['source']}")
-    print(f"Songs: {report['n_songs']:,} (empty/invalid tracks: {report['n_songs_failed']:,})")
+    print(f"Songs: {report['n_songs']:,} (missing/unreadable MIDI: {report['n_songs_failed']:,})")
     print(
-        f"Tracks (GM program slots): {report['n_stems']:,} "
+        f"Tracks (non-empty MIDI tracks): {report['n_stems']:,} "
         f"({report['avg_stems_per_song']:.2f} per song)"
     )
-    print(f"Unique GM ids present: {report['n_unique_gm_ids']}")
+    print(f"Unique GM ids present (incl. drums sentinel {DRUM_GM_ID}): {report['n_unique_gm_ids']}")
     print(
-        f"Program 0 (Acoustic Grand Piano): {report['program_0_count']:,} "
+        f"Drums (channel 10): {report['n_drum_stems']:,} "
+        f"({report['drum_pct_of_stems']:.1f}% of all tracks)"
+    )
+    print(
+        f"Program 0 (Acoustic Grand Piano, non-drum): {report['program_0_count']:,} "
         f"({report['program_0_pct_of_stems']:.1f}% of all tracks)"
     )
 
-    print("\n--- GM program ids (sorted by count) ---")
+    print("\n--- GM program ids (sorted by count; drums = channel 10) ---")
     programs = sorted(report["gm_programs"], key=lambda row: (-row["count"], row["gm_id"]))
     for row in programs:
         print(f"  {row['label']:42s} {row['count']:7,d}  ({row['pct']:5.2f}%)")
@@ -289,7 +389,7 @@ def print_gm_report(report: dict) -> None:
         print(f"  {name:22s} {count:7,d}  ({pct:5.1f}%)")
 
     if report["listening_categories"]:
-        print("\n--- Listening categories (program-only routing; mostly default) ---")
+        print("\n--- Listening categories (preset routing) ---")
         for name, count in sorted(
             report["listening_categories"].items(),
             key=lambda item: (-item[1], item[0]),

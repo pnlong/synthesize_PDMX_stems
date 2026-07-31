@@ -1,0 +1,562 @@
+# Curated track-name → GM program corrections for the sPDMX register.
+# Matcher sorts needles by length descending (longest wins).
+# Matching folds accents (ténor → tenor, flûte → flute).
+# Bare "bass" / "basse" / "synth" are intentionally absent — too ambiguous.
+# Short needles (<5 chars) use word boundaries (chor ⊄ harpsichord).
+
+generic_skip:
+  - melody
+  - harmony
+  - accompaniment
+  - accomp
+  - track
+  - staff
+  - part
+  - right hand
+  - left hand
+  - rh
+  - lh
+  - untitled
+  - unnamed
+  - midi
+  - instrument
+  - channel
+  - continuo
+  - accomp.
+  - musicxml part
+
+# Coarse labels → canonical program only when current program is outside that GM class.
+# No bare "synth" / "pad" — those wrongly map Warm/Pad/Bass Synthesizer → Lead 1 (square).
+family_defaults:
+  - needle: pianoforte
+    program: 0
+    gm_class: piano
+  - needle: klavier
+    program: 0
+    gm_class: piano
+  - needle: piano
+    program: 0
+    gm_class: piano
+  - needle: organo
+    program: 16
+    gm_class: organ
+  - needle: organ
+    program: 16
+    gm_class: organ
+  - needle: orgel
+    program: 16
+    gm_class: organ
+  - needle: orgue
+    program: 16
+    gm_class: organ
+  - needle: guitarra
+    program: 24
+    gm_class: guitar
+  - needle: chitarra
+    program: 24
+    gm_class: guitar
+  - needle: guitare
+    program: 24
+    gm_class: guitar
+  - needle: gitarre
+    program: 24
+    gm_class: guitar
+  - needle: guitar
+    program: 24
+    gm_class: guitar
+  - needle: gitar
+    program: 24
+    gm_class: guitar
+  - needle: strings
+    program: 48
+    gm_class: ensemble
+  - needle: string
+    program: 48
+    gm_class: ensemble
+  - needle: brass
+    program: 61
+    gm_class: brass
+  - needle: woodwind
+    program: 73
+    gm_class: pipe
+  - needle: wind
+    program: 73
+    gm_class: pipe
+
+aliases:
+  # --- Sax / sassofono before bare SATB (longer needles) ---
+  - needle: soprano sax
+    program: 64
+  - needle: alto sax
+    program: 65
+  - needle: tenor sax
+    program: 66
+  - needle: bari sax
+    program: 67
+  - needle: baritone sax
+    program: 67
+  - needle: sassofono tenore
+    program: 66
+  - needle: sassofono contralto
+    program: 65
+  - needle: sassofono
+    program: 65
+  - needle: saxofon
+    program: 65
+  - needle: saxophone
+    program: 65
+  - needle: sax
+    program: 65
+
+  # --- Bass disambiguators (no bare "bass" / "basse") ---
+  - needle: bass singer
+    program: 52
+  - needle: bass vocal
+    program: 52
+  - needle: bass voice
+    program: 52
+  - needle: electric bass
+    program: 33
+  - needle: bass guitar
+    program: 33
+  - needle: bass gitarre
+    program: 33
+  - needle: fretless bass
+    program: 35
+  - needle: slap bass
+    program: 36
+  - needle: synth bass
+    program: 38
+  - needle: acoustic bass
+    program: 32
+  - needle: upright bass
+    program: 32
+  - needle: double bass
+    program: 43
+  - needle: contrabass
+    program: 43
+  - needle: contra bass
+    program: 43
+  - needle: contrebasse
+    program: 43
+  - needle: contrabajo
+    program: 43
+  - needle: contrabbasso
+    program: 43
+
+  # --- Vocals / SATB / choir (EN + IT/DE/FR/ES/LA) ---
+  - needle: soprano
+    program: 52
+  - needle: sopran
+    program: 52
+  - needle: superius
+    program: 52
+  - needle: mezzo
+    program: 52
+  - needle: contralto
+    program: 52
+  - needle: alto
+    program: 52
+  - needle: altus
+    program: 52
+  - needle: alt
+    program: 52
+  - needle: tenore
+    program: 52
+  - needle: tenor
+    program: 52
+  - needle: baritone
+    program: 52
+  - needle: bariton
+    program: 52
+  - needle: baryton
+    program: 52
+  - needle: bassus
+    program: 52
+  - needle: basso
+    program: 52
+  - needle: cantus
+    program: 52
+  - needle: canto
+    program: 52
+  - needle: treble
+    program: 52
+  - needle: choir
+    program: 52
+  - needle: chorus
+    program: 52
+  - needle: choral
+    program: 52
+  - needle: choeur
+    program: 52
+  - needle: coro
+    program: 52
+  - needle: chor
+    program: 52
+  - needle: vocal
+    program: 52
+  - needle: vocals
+    program: 52
+  - needle: voice
+    program: 52
+  - needle: voce
+    program: 52
+  - needle: voz
+    program: 52
+  - needle: stimme
+    program: 52
+  - needle: singstimme
+    program: 52
+  - needle: voice oohs
+    program: 53
+  - needle: synth voice
+    program: 54
+  - needle: aahs
+    program: 52
+  - needle: oohs
+    program: 53
+
+  # --- Keyboard color ---
+  - needle: harpsichord
+    program: 6
+  - needle: clavicembalo
+    program: 6
+  - needle: cembalo
+    program: 6
+  - needle: clavecin
+    program: 6
+  - needle: clavicordio
+    program: 6
+  - needle: clavinet
+    program: 7
+  - needle: clavi
+    program: 7
+  - needle: clav
+    program: 7
+  - needle: celesta
+    program: 8
+  - needle: celeste
+    program: 8
+  - needle: honky
+    program: 3
+  - needle: honky-tonk
+    program: 3
+  - needle: electric grand
+    program: 2
+  - needle: bright piano
+    program: 1
+  - needle: bright acoustic
+    program: 1
+  - needle: electric piano
+    program: 4
+  - needle: e-piano
+    program: 4
+  - needle: epiano
+    program: 4
+  - needle: e piano
+    program: 4
+  - needle: rhodes
+    program: 4
+  - needle: wurli
+    program: 5
+  - needle: wurlitzer
+    program: 5
+  # CJK / Cyrillic piano labels (family agree if already piano)
+  - needle: "ピアノ"
+    program: 0
+  - needle: "鋼琴"
+    program: 0
+  - needle: "钢琴"
+    program: 0
+  - needle: "фортепиано"
+    program: 0
+  - needle: "пианино"
+    program: 0
+
+  # --- Chromatic percussion / mallets ---
+  - needle: glockenspiel
+    program: 9
+  - needle: music box
+    program: 10
+  - needle: vibraphone
+    program: 11
+  - needle: vibes
+    program: 11
+  - needle: marimba
+    program: 12
+  - needle: xylophone
+    program: 13
+  - needle: tubular bells
+    program: 14
+  - needle: dulcimer
+    program: 15
+
+  # --- Organ / accordion ---
+  - needle: drawbar organ
+    program: 16
+  - needle: percussive organ
+    program: 17
+  - needle: rock organ
+    program: 18
+  - needle: church organ
+    program: 19
+  - needle: reed organ
+    program: 20
+  - needle: accordion
+    program: 21
+  - needle: harmonica
+    program: 22
+  - needle: tango accordion
+    program: 23
+
+  # --- Guitar (multilingual specifics) ---
+  - needle: nylon
+    program: 24
+  - needle: nylon guitar
+    program: 24
+  - needle: classical guitar
+    program: 24
+  - needle: chitarra classica
+    program: 24
+  - needle: guitare classique
+    program: 24
+  - needle: guitarra clasica
+    program: 24
+  - needle: klassische gitarre
+    program: 24
+  - needle: steel string
+    program: 25
+  - needle: steel guitar
+    program: 25
+  - needle: acoustic guitar
+    program: 25
+  - needle: chitarra acustica
+    program: 25
+  - needle: jazz guitar
+    program: 26
+  - needle: clean guitar
+    program: 27
+  - needle: muted guitar
+    program: 28
+  - needle: overdriven guitar
+    program: 29
+  - needle: overdrive guitar
+    program: 29
+  - needle: distortion guitar
+    program: 30
+  - needle: distorted guitar
+    program: 30
+  - needle: chitarra elettrica
+    program: 27
+  - needle: guitare electrique
+    program: 27
+  - needle: guitarra electrica
+    program: 27
+  - needle: elektrische gitarre
+    program: 27
+  - needle: guitar harmonics
+    program: 31
+  - needle: luit
+    program: 24
+
+  # --- Strings / bowed (longer forms first) ---
+  - needle: violoncello
+    program: 42
+  - needle: violonchelo
+    program: 42
+  - needle: violoncelle
+    program: 42
+  - needle: cello
+    program: 42
+  - needle: viola da gamba
+    program: 42
+  - needle: viola
+    program: 41
+  - needle: violine
+    program: 40
+  - needle: violino
+    program: 40
+  - needle: violin
+    program: 40
+  - needle: violon
+    program: 40
+  - needle: violín
+    program: 40
+  - needle: viool
+    program: 40
+  - needle: geige
+    program: 40
+  - needle: fiddle
+    program: 110
+  - needle: tremolo strings
+    program: 44
+  - needle: pizzicato
+    program: 45
+  - needle: orchestral harp
+    program: 46
+  - needle: harfe
+    program: 46
+  - needle: harpe
+    program: 46
+  - needle: harpa
+    program: 46
+  - needle: arpa
+    program: 46
+  - needle: harp
+    program: 46
+  - needle: timpani
+    program: 47
+  - needle: string ensemble
+    program: 48
+  - needle: synth strings
+    program: 50
+
+  # --- Brass ---
+  - needle: muted trumpet
+    program: 59
+  - needle: trompete
+    program: 56
+  - needle: trompette
+    program: 56
+  - needle: trompeta
+    program: 56
+  - needle: tromba
+    program: 56
+  - needle: trumpet
+    program: 56
+  - needle: cornet
+    program: 56
+  - needle: posaune
+    program: 57
+  - needle: trombone
+    program: 57
+  - needle: tuba
+    program: 58
+  - needle: sousaphone
+    program: 58
+  - needle: euphonium
+    program: 58
+  - needle: mellophone
+    program: 60
+  - needle: french horn
+    program: 60
+  - needle: corno
+    program: 60
+  - needle: horn
+    program: 60
+  - needle: flugelhorn
+    program: 56
+  - needle: brass section
+    program: 61
+  - needle: synth brass
+    program: 62
+
+  # --- Reed / pipe ---
+  - needle: bassoon
+    program: 70
+  - needle: fagott
+    program: 70
+  - needle: fagotto
+    program: 70
+  - needle: english horn
+    program: 69
+  - needle: cor anglais
+    program: 69
+  - needle: hautbois
+    program: 68
+  - needle: oboe
+    program: 68
+  - needle: klarinette
+    program: 71
+  - needle: clarinetto
+    program: 71
+  - needle: clarinette
+    program: 71
+  - needle: clarinet
+    program: 71
+  - needle: piccolo
+    program: 72
+  - needle: flauto
+    program: 73
+  - needle: flote
+    program: 73
+  - needle: flute
+    program: 73
+  - needle: flauta
+    program: 73
+  - needle: blockflote
+    program: 74
+  - needle: flauto dolce
+    program: 74
+  - needle: flute a bec
+    program: 74
+  - needle: recorder
+    program: 74
+  - needle: pan flute
+    program: 75
+  - needle: panflute
+    program: 75
+  - needle: shakuhachi
+    program: 77
+  - needle: whistle
+    program: 78
+  - needle: ocarina
+    program: 79
+
+  # --- Specific synth colors only (no bare "synth") ---
+  - needle: square synthesizer
+    program: 80
+  - needle: square synthesiser
+    program: 80
+  - needle: square wave
+    program: 80
+  - needle: saw synthesizer
+    program: 81
+  - needle: saw synthesiser
+    program: 81
+  - needle: sawtooth
+    program: 81
+  - needle: warm synthesizer
+    program: 89
+  - needle: warm synthesiser
+    program: 89
+  - needle: pad synthesizer
+    program: 90
+  - needle: pad synthesiser
+    program: 90
+  - needle: new age synthesizer
+    program: 88
+  - needle: atmosphere synthesizer
+    program: 99
+  - needle: atmosphere synthesiser
+    program: 99
+
+  # --- Ethnic / fretted ---
+  - needle: sitar
+    program: 104
+  - needle: banjo
+    program: 105
+  - needle: shamisen
+    program: 106
+  - needle: koto
+    program: 107
+  - needle: kalimba
+    program: 108
+  - needle: bagpipe
+    program: 109
+  - needle: bagpipes
+    program: 109
+  - needle: shanai
+    program: 111
+
+  # --- Percussive melodic ---
+  - needle: steel drums
+    program: 114
+  - needle: steel drum
+    program: 114
+  - needle: taiko
+    program: 116
+  - needle: melodic tom
+    program: 117
+  - needle: synth drum
+    program: 118

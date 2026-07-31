@@ -96,6 +96,15 @@ def test_apply_patch_to_midi_track():
     assert track[0].program == 42
 
 
+def test_apply_patch_inserts_program_change_when_missing():
+    track = mido.MidiTrack()
+    track.append(mido.Message("note_on", note=60, velocity=80, channel=0, time=0))
+    assignment = PatchAssignment(program=6, is_drum=False)
+    apply_patch_to_midi_track(track, assignment)
+    assert track[0].type == "program_change"
+    assert track[0].program == 6
+
+
 def test_patch_seed_stable_within_song_and_group():
     group = patch_group_key(44, False)
     assert patch_seed(42, "/song/path", group) == patch_seed(42, "/song/path", group)
