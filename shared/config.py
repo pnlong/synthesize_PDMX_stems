@@ -49,7 +49,7 @@ ABLATION_SUBSET_COLUMN = "subset:rated_deduplicated"
 # Safety cap for category-stratified ablation fill (not a fixed random N).
 ABLATION_SAMPLE_SIZE = 400
 ABLATION_SAMPLE_SEED = 43
-ABLATION_MIN_STEMS_PER_CATEGORY = 20
+ABLATION_MIN_STEMS_PER_CATEGORY = 50
 LISTENING_SAMPLE_FILE_NAME = "listening_sample.yaml"
 
 STEMS_TABLE_COLUMNS = [

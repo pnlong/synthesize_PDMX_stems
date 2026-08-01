@@ -212,7 +212,7 @@ synthesis/
 | CB1 | `ddsp_slakh` | `dev/ablations/ddsp_slakh/` |
 | CB2 | `ddsp_slakh`, `--realify` | `dev/ablations/ddsp_slakh_realify/` |
 
-Shared stratified sample (`listening_sample.yaml`, seed 43, ≥20 stems/category) ensures all eight conditions render the same songs.
+Shared stratified sample (`listening_sample.yaml`, seed 43, ≥50 stems/category) ensures all eight conditions render the same songs.
 
 **Donor reuse (NFS-safe copies):** CA/CB soundfont-fallback stems are `copy2`'d from A/B (raw) and A2/B2 (realify). Neural stems are newly rendered / SA3'd. Provenance is in `ddsp_routing.csv`:
 
