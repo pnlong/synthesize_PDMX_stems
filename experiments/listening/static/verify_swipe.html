@@ -13,21 +13,25 @@
       <div>
         <h1 id="title">Patch shortlist verify</h1>
         <p id="progress" class="progress-text"></p>
+        <div id="category-stats" class="category-stats hidden"></div>
         <p id="save-status" class="save-status hidden"></p>
       </div>
       <div class="topbar-actions">
         <a href="/" class="link-btn">Home</a>
-        <button id="finish-btn" type="button" disabled>Finish</button>
+        <button id="finish-btn" type="button" disabled>Finish pass</button>
       </div>
     </header>
 
     <div id="loading" class="loading">Loading shortlist cards…</div>
 
     <div id="complete" class="complete hidden">
-      <h2>Verification complete</h2>
+      <h2>Pass complete</h2>
       <p id="complete-message">Saved on the server.</p>
       <p id="complete-path" class="meta"></p>
-      <p class="hint">Pass this file to <code>patch_sweep.lock --verification</code>.</p>
+      <p class="complete-actions">
+        <button id="next-pass-btn" type="button" class="primary-btn hidden">Start next pass</button>
+      </p>
+      <p class="hint">Pass this file to <code>patch_sweep.lock --verification</code>, or start another pass to keep filtering.</p>
     </div>
 
     <main id="swipe-panel" class="swipe-panel hidden">
@@ -38,6 +42,7 @@
 
       <div class="keyboard-legend">
         <span><kbd>←</kbd> reject — drop from shortlist</span>
+        <span><kbd>S</kbd> skip — revisit at end of category</span>
         <span><kbd>→</kbd> keep in shortlist</span>
         <span><kbd>Space</kbd> pause / play</span>
         <span><kbd>Backspace</kbd> undo</span>
@@ -47,6 +52,10 @@
         <button type="button" class="swipe-pad-btn swipe-tier-strong_reject" data-tier="strong_reject">
           <span class="swipe-pad-arrow" aria-hidden="true">←</span>
           <span class="swipe-pad-label">Reject</span>
+        </button>
+        <button type="button" class="swipe-pad-btn swipe-tier-skip" id="skip-btn">
+          <span class="swipe-pad-arrow" aria-hidden="true">↓</span>
+          <span class="swipe-pad-label">Skip</span>
         </button>
         <button type="button" class="swipe-pad-btn swipe-tier-strong_accept" data-tier="strong_accept">
           <span class="swipe-pad-arrow" aria-hidden="true">→</span>

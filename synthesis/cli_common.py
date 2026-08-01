@@ -6,6 +6,7 @@ import argparse
 import multiprocessing
 
 from shared.config import (
+    ABLATION_MIN_STEMS_PER_CATEGORY,
     ABLATION_SAMPLE_SEED,
     ABLATION_SAMPLE_SIZE,
     OUTPUT_DIR,
@@ -55,13 +56,14 @@ def add_synthesis_args(parser: argparse.ArgumentParser):
         choices=list(RENDER_MODES),
         help=(
             "basic = single soundfont; slakh = locked multi-SF recipes; "
-            "slakh_ddsp = B3 neural DDSP (MIDI-DDSP + DDSP-Piano) with slakh fallback."
+            "ddsp_basic / ddsp_slakh = neural DDSP with basic/slakh soundfont fallback "
+            "(copies donor stems; skips Fluidsynth for fallbacks)."
         ),
     )
     parser.add_argument(
         "--full",
         action="store_true",
-        help="Synthesize all valid PDMX songs (default: random ablation sample from rated_deduplicated).",
+        help="Synthesize all valid PDMX songs (default: stratified ablation sample from rated_deduplicated).",
     )
     parser.add_argument("--realify", action="store_true")
     parser.add_argument("-m", "--model", default="medium", choices=["small-music", "medium"])
@@ -82,7 +84,25 @@ def add_synthesis_args(parser: argparse.ArgumentParser):
         "--sample-size",
         default=ABLATION_SAMPLE_SIZE,
         type=int,
-        help="Ablation sample size (default: from shared/config).",
+        help="Max songs for stratified ablation fill (default: from shared/config).",
+    )
+    parser.add_argument(
+        "--min-stems-per-category",
+        default=ABLATION_MIN_STEMS_PER_CATEGORY,
+        type=int,
+        help="Stratified ablation: keep songs until each listening category has this many stems.",
+    )
+    parser.add_argument(
+        "--no-mixture",
+        action="store_true",
+        help="Skip writing mixture files; song completeness is stems-only.",
+    )
+    parser.add_argument(
+        "--allow-fallback-render",
+        action="store_true",
+        help=(
+            "DDSP modes: if a donor soundfont stem is missing, render Fluidsynth instead of erroring."
+        ),
     )
     add_audio_format_arg(parser)
     parser.add_argument(

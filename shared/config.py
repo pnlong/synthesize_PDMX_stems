@@ -46,8 +46,11 @@ PATCH_SWEEP_DIR_NAME = "patch_sweep"
 SPDMX_DATASET_DIR_NAME = "SPDMX"
 
 ABLATION_SUBSET_COLUMN = "subset:rated_deduplicated"
-ABLATION_SAMPLE_SIZE = 100
-ABLATION_SAMPLE_SEED = 42
+# Safety cap for category-stratified ablation fill (not a fixed random N).
+ABLATION_SAMPLE_SIZE = 400
+ABLATION_SAMPLE_SEED = 43
+ABLATION_MIN_STEMS_PER_CATEGORY = 20
+LISTENING_SAMPLE_FILE_NAME = "listening_sample.yaml"
 
 STEMS_TABLE_COLUMNS = [
     "path", "track", "program", "is_drum", "name", "has_lyrics",
@@ -94,9 +97,22 @@ TARGET_LOUDNESS_LUFS = -23.0
 
 RENDER_MODE_BASIC = "basic"
 RENDER_MODE_SLAKH = "slakh"
-# Hybrid: MIDI-DDSP (mono URMP instruments) + DDSP-Piano (piano) + slakh soundfont fallback.
-RENDER_MODE_SLAKH_DDSP = "slakh_ddsp"
-RENDER_MODES = (RENDER_MODE_BASIC, RENDER_MODE_SLAKH, RENDER_MODE_SLAKH_DDSP)
+# Hybrid: MIDI-DDSP (mono URMP instruments) + DDSP-Piano (piano) + soundfont fallback.
+RENDER_MODE_DDSP_BASIC = "ddsp_basic"
+RENDER_MODE_DDSP_SLAKH = "ddsp_slakh"
+# Deprecated alias kept for one release of import compatibility.
+RENDER_MODE_SLAKH_DDSP = RENDER_MODE_DDSP_SLAKH
+RENDER_MODES = (
+    RENDER_MODE_BASIC,
+    RENDER_MODE_SLAKH,
+    RENDER_MODE_DDSP_BASIC,
+    RENDER_MODE_DDSP_SLAKH,
+)
+# DDSP soundfont-fallback donors (raw / realify).
+FALLBACK_DONOR = {
+    RENDER_MODE_DDSP_BASIC: RENDER_MODE_BASIC,
+    RENDER_MODE_DDSP_SLAKH: RENDER_MODE_SLAKH,
+}
 
 MAX_N_NOTES_IN_STEM = 50_000
 MAX_STEM_DURATION = 30 * 60

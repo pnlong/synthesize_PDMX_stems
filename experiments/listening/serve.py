@@ -199,20 +199,50 @@ class SweepListeningHandler(BaseHTTPRequestHandler):
                 self._send_error(HTTPStatus.BAD_REQUEST, str(exc))
                 return
 
+            pass_number = int(payload.get("pass") or 1)
+            source_verification = payload.get("source_verification") or None
             if checkpoint:
-                out_path = patch_verify_swipe_session_path(catalog)
+                out_path = patch_verify_swipe_session_path(
+                    catalog,
+                    pass_number=pass_number,
+                    source_verification=source_verification,
+                )
                 out_path.write_text(json.dumps(json_safe(payload), indent=2))
                 self._send_json({"saved": str(out_path), "checkpoint": True})
                 return
 
+            from experiments.listening.verification import (
+                resolve_verification_path,
+                shortlists_from_verification_doc,
+            )
             from experiments.patch_sweep.config import PHASE1 as PATCH_PHASE1
             from experiments.patch_sweep.winners import phase_winners
 
-            shortlists = phase_winners(PATCH_PHASE1, winners_path_for(sweep_type))
+            shortlists = payload.get("shortlists")
+            if isinstance(shortlists, dict) and shortlists:
+                shortlists = {
+                    str(category): [str(v) for v in values if v]
+                    for category, values in shortlists.items()
+                    if values
+                }
+            elif source_verification:
+                prior_path = resolve_verification_path(catalog, str(source_verification))
+                if prior_path is None:
+                    self._send_error(
+                        HTTPStatus.BAD_REQUEST,
+                        f"Prior verification not found: {source_verification}",
+                    )
+                    return
+                with open(prior_path) as f:
+                    shortlists = shortlists_from_verification_doc(json.load(f))
+            else:
+                shortlists = phase_winners(PATCH_PHASE1, winners_path_for(sweep_type))
             payload = verification_from_patch_swipe_votes(
                 payload.get("votes") or [],
                 shortlists,
                 source_responses=PATCH_VERIFY_SOURCE,
+                pass_number=pass_number,
+                source_verification=source_verification,
             )
             errors = validate_verification(payload)
             if errors:
@@ -224,7 +254,12 @@ class SweepListeningHandler(BaseHTTPRequestHandler):
                 / f"verification_final_winners_yaml_{timestamp}.json"
             )
             out_path.write_text(json.dumps(json_safe(payload), indent=2))
-            self._send_json({"saved": str(out_path), "checkpoint": False})
+            self._send_json({
+                "saved": str(out_path),
+                "checkpoint": False,
+                "pass": pass_number,
+                "name": out_path.name,
+            })
             return
 
         source_responses = payload.get("source_responses")
@@ -399,12 +434,37 @@ class SweepListeningHandler(BaseHTTPRequestHandler):
             if sweep_type != "patch":
                 self._send_error(HTTPStatus.BAD_REQUEST, "Verify swipe is patch-only")
                 return
+            from experiments.listening.verification import (
+                resolve_verification_path,
+                shortlists_from_verification_doc,
+            )
             from experiments.patch_sweep.config import PHASE1 as PATCH_PHASE1
             from experiments.patch_sweep.winners import phase_winners
 
             order = query.get("order", ["sequential"])[0]
             seed = int(query.get("seed", ["42"])[0])
-            shortlists = phase_winners(PATCH_PHASE1, winners_path)
+            pass_number = int(query.get("pass", ["1"])[0])
+            source_verification = query.get("from", [""])[0] or None
+            if source_verification:
+                prior_path = resolve_verification_path(
+                    verify_catalog, source_verification
+                )
+                if prior_path is None:
+                    self._send_error(
+                        HTTPStatus.NOT_FOUND,
+                        f"Prior verification not found: {source_verification}",
+                    )
+                    return
+                with open(prior_path) as f:
+                    shortlists = shortlists_from_verification_doc(json.load(f))
+                if not shortlists:
+                    self._send_error(
+                        HTTPStatus.BAD_REQUEST,
+                        "Prior verification has no approved soundfonts to filter further",
+                    )
+                    return
+            else:
+                shortlists = phase_winners(PATCH_PHASE1, winners_path)
             try:
                 meta = build_patch_verify_swipe_meta(
                     verify_catalog,
@@ -412,6 +472,8 @@ class SweepListeningHandler(BaseHTTPRequestHandler):
                     order=order,
                     seed=seed,
                     verification_phase=verify_phase,
+                    pass_number=pass_number,
+                    source_verification=source_verification,
                 )
             except RuntimeError as exc:
                 self._send_error(HTTPStatus.BAD_REQUEST, str(exc))
@@ -423,13 +485,28 @@ class SweepListeningHandler(BaseHTTPRequestHandler):
             if sweep_type != "patch":
                 self._send_error(HTTPStatus.BAD_REQUEST, "Verify swipe is patch-only")
                 return
-            session_path = patch_verify_swipe_session_path(verify_catalog)
+            pass_number = int(query.get("pass", ["1"])[0])
+            source_verification = query.get("from", [""])[0] or None
+            session_path = patch_verify_swipe_session_path(
+                verify_catalog,
+                pass_number=pass_number,
+                source_verification=source_verification,
+            )
             if session_path.is_file():
                 with open(session_path) as f:
                     payload = json.load(f)
             else:
                 payload = {"mode": "verification", "votes": []}
             self._send_json(payload)
+            return
+
+        if path == f"/api/{sweep_type}/verify/swipe/passes":
+            if sweep_type != "patch":
+                self._send_error(HTTPStatus.BAD_REQUEST, "Verify swipe is patch-only")
+                return
+            from experiments.listening.verification import list_verification_files
+
+            self._send_json({"files": list_verification_files(verify_catalog)})
             return
 
         if path == f"/api/{sweep_type}/verify/responses":

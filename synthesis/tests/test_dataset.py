@@ -1,5 +1,7 @@
 """Tests for ablation paths and dataset sampling."""
 
+from pathlib import Path
+
 import pandas as pd
 
 from shared.config import (
@@ -10,7 +12,12 @@ from shared.config import (
     STEMS_DIR_NAME,
     STEMS_REALIFY_DIR_NAME,
 )
-from synthesis.dataset import prepare_ablation_dataset, prepare_full_dataset
+from synthesis.dataset import (
+    prepare_ablation_dataset,
+    prepare_full_dataset,
+    stratified_song_sample,
+    write_listening_sample,
+)
 from synthesis.paths import (
     ablation_dir,
     ablation_raw_dir,
@@ -27,9 +34,34 @@ from synthesis.paths import (
 
 def _fake_pdmx(n: int = 200) -> pd.DataFrame:
     return pd.DataFrame({
-        "path": [f"/p/{i}.json" for i in range(n)],
+        "path": [f"./data/{i}/song.json" for i in range(n)],
+        "mid": [f"./data/{i}/song.mid" for i in range(n)],
         "subset:rated_deduplicated": [i % 2 == 0 for i in range(n)],
     })
+
+
+def _fake_register_for_pdmx(dataset: pd.DataFrame) -> pd.DataFrame:
+    """One piano stem and one drum stem per song mid."""
+    rows = []
+    for _, row in dataset.iterrows():
+        if not row["subset:rated_deduplicated"]:
+            continue
+        mid = row["mid"]
+        rows.append({
+            "mid": mid,
+            "track": 0,
+            "name": "Piano",
+            "is_drum": False,
+            "program_corrected": 0,
+        })
+        rows.append({
+            "mid": mid,
+            "track": 1,
+            "name": "Drums",
+            "is_drum": True,
+            "program_corrected": 0,
+        })
+    return pd.DataFrame(rows)
 
 
 def test_dev_root():
@@ -75,3 +107,49 @@ def test_ablation_filters_subset():
 def test_full_dataset_keeps_all_rows():
     df = prepare_full_dataset(_fake_pdmx(50))
     assert len(df) == 50
+
+
+def test_stratified_song_sample_fills_categories():
+    dataset = _fake_pdmx(80)
+    register = _fake_register_for_pdmx(dataset)
+    selected, inventory = stratified_song_sample(
+        dataset[dataset["subset:rated_deduplicated"]],
+        register,
+        min_stems_per_category=3,
+        max_songs=40,
+        sample_seed=43,
+    )
+    assert len(selected) > 0
+    assert len(inventory) >= len(selected)
+    piano = sum(1 for s in inventory if s["category"] == "piano")
+    drums = sum(1 for s in inventory if s["category"] == "drums")
+    assert piano >= 3
+    assert drums >= 3
+
+
+def test_listening_sample_roundtrip(tmp_path: Path):
+    dataset = _fake_pdmx(40)
+    register = _fake_register_for_pdmx(dataset)
+    rated = dataset[dataset["subset:rated_deduplicated"]].reset_index(drop=True)
+    selected, inventory = stratified_song_sample(
+        rated,
+        register,
+        min_stems_per_category=2,
+        max_songs=20,
+        sample_seed=43,
+    )
+    sample_file = tmp_path / "listening_sample.yaml"
+    write_listening_sample(
+        sample_file,
+        selected,
+        inventory,
+        sample_seed=43,
+        min_stems_per_category=2,
+        max_songs=20,
+    )
+    reloaded = prepare_ablation_dataset(
+        dataset,
+        listening_sample_file=sample_file,
+        persist_sample=False,
+    )
+    assert list(reloaded["path"]) == list(selected["path"])

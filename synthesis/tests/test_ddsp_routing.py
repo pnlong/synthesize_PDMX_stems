@@ -11,8 +11,10 @@ from synthesis.ddsp.routing import (
     BACKEND_DDSP_PIANO,
     BACKEND_MIDI_DDSP,
     BACKEND_SOUNDFONT,
+    DDSP_PIANO_PROGRAMS,
     REASON_BASS_GUITAR,
     REASON_DRUM,
+    REASON_GUITAR,
     REASON_MIDI_DDSP,
     REASON_PIANO,
     REASON_POLYPHONIC,
@@ -40,6 +42,36 @@ def test_route_piano_by_program():
 def test_route_piano_by_name():
     route = route_stem(program=48, is_drum=False, track_name="Grand Piano", check_monophony=False)
     assert route.backend == BACKEND_DDSP_PIANO
+
+
+@pytest.mark.parametrize("program", sorted(DDSP_PIANO_PROGRAMS))
+def test_ddsp_piano_allowlist_programs(program: int):
+    route = route_stem(program=program, is_drum=False, check_monophony=False)
+    assert route.backend == BACKEND_DDSP_PIANO
+
+
+@pytest.mark.parametrize(
+    "program,name",
+    [
+        (2, None),  # Electric Grand
+        (4, None),  # Electric Piano 1
+        (5, None),  # Electric Piano 2
+        (6, None),  # Harpsichord
+        (7, None),  # Clavinet
+        (0, "Harpsichord"),
+        (0, "Electric Piano"),
+        (0, "Rhodes"),
+        (6, "Harpsichord"),
+        (7, "Clavinet"),
+        (4, "E-Piano"),
+        (4, "Piano"),  # GM e-piano wins over vague name
+        (6, "Piano"),
+    ],
+)
+def test_non_acoustic_piano_goes_soundfont(program: int, name: str | None):
+    route = route_stem(program=program, is_drum=False, track_name=name, check_monophony=False)
+    assert route.backend == BACKEND_SOUNDFONT
+    assert route.reason != REASON_PIANO
 
 
 def test_route_violin_mono():
@@ -87,10 +119,105 @@ def test_route_drums_and_vocals():
     assert vocal.reason == REASON_VOCAL
 
 
+def test_alto_sax_not_vocal_goes_midi_ddsp():
+    route = route_stem(
+        program=65,
+        is_drum=False,
+        track_name="Alto Saxophone",
+        check_monophony=False,
+    )
+    assert route.reason != REASON_VOCAL
+    assert route.backend == BACKEND_MIDI_DDSP
+    assert route.instrument_key == "saxophone"
+
+
+@pytest.mark.parametrize(
+    "name,program",
+    [
+        ("Alto", 65),
+        ("Tenor", 66),
+        ("Soprano", 64),
+        ("Baritone", 67),
+        ("Sassofono contralto", 65),
+        ("Sassofono tenore", 66),
+        ("Tenorszaxofon", 66),
+        ("Alto Saksafon", 65),
+    ],
+)
+def test_sax_program_or_multilingual_name_not_vocal(name: str, program: int):
+    route = route_stem(program=program, is_drum=False, track_name=name, check_monophony=False)
+    assert route.reason != REASON_VOCAL
+    assert route.backend == BACKEND_MIDI_DDSP
+    assert route.instrument_key == "saxophone"
+
+
+def test_bare_alto_still_vocal_when_choir_program():
+    route = route_stem(program=52, is_drum=False, track_name="Alto", check_monophony=False)
+    assert route.reason == REASON_VOCAL
+
+
+def test_all_gm_sax_programs_map_to_saxophone():
+    for program in (64, 65, 66, 67):
+        route = route_stem(program=program, is_drum=False, check_monophony=False)
+        assert route.backend == BACKEND_MIDI_DDSP
+        assert route.instrument_key == "saxophone"
+
+
 def test_route_unsupported():
     route = route_stem(program=80, is_drum=False, check_monophony=False)  # synth lead
     assert route.backend == BACKEND_SOUNDFONT
     assert route.reason == REASON_UNSUPPORTED
+
+
+@pytest.mark.parametrize(
+    "name,program",
+    [
+        ("Piccolo", 72),
+        ("Pan Flute", 75),
+        ("English Horn", 69),
+        ("Muted Trumpet", 59),
+        ("Trumpet", 59),  # GM muted; name alone must not force open trumpet
+    ],
+)
+def test_timbre_mismatches_not_midi_ddsp(name: str, program: int):
+    route = route_stem(program=program, is_drum=False, track_name=name, check_monophony=False)
+    assert route.backend == BACKEND_SOUNDFONT
+    assert route.reason != REASON_MIDI_DDSP
+
+
+def test_cornet_and_fiddle_still_map():
+    cornet = route_stem(program=56, is_drum=False, track_name="Cornet", check_monophony=False)
+    assert cornet.backend == BACKEND_MIDI_DDSP
+    assert cornet.instrument_key == "trumpet"
+
+    fiddle = route_stem(program=40, is_drum=False, track_name="Fiddle", check_monophony=False)
+    assert fiddle.backend == BACKEND_MIDI_DDSP
+    assert fiddle.instrument_key == "violin"
+
+
+def test_open_trumpet_still_midi_ddsp():
+    route = route_stem(program=56, is_drum=False, track_name="Trumpet", check_monophony=False)
+    assert route.backend == BACKEND_MIDI_DDSP
+    assert route.instrument_key == "trumpet"
+
+
+def test_french_horn_still_midi_ddsp():
+    route = route_stem(program=60, is_drum=False, track_name="French Horn", check_monophony=False)
+    assert route.backend == BACKEND_MIDI_DDSP
+    assert route.instrument_key == "horn"
+
+
+def test_dwarsfluit_not_guitar():
+    """Dutch flute name contains 'luit' but must not hit the lute/guitar path."""
+    route = route_stem(program=73, is_drum=False, track_name="Dwarsfluit", check_monophony=False)
+    assert route.reason != REASON_GUITAR
+    assert route.backend == BACKEND_MIDI_DDSP
+    assert route.instrument_key == "flute"
+
+
+def test_lute_still_guitar():
+    route = route_stem(program=24, is_drum=False, track_name="Lute", check_monophony=False)
+    assert route.reason == REASON_GUITAR
 
 
 def test_is_monophonic_messages_and_file(tmp_path: Path):

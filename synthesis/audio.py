@@ -372,11 +372,17 @@ def song_is_complete(
     song_dir: Path,
     n_tracks: int,
     audio_format: str = DEFAULT_AUDIO_FORMAT,
+    *,
+    require_mixture: bool = True,
 ) -> bool:
-    """Return True if all expected valid stems and mixture exist."""
+    """Return True if all expected valid stems exist (and mixture, unless disabled)."""
     if not song_dir.is_dir():
         return False
     stems_ok = all(
         stem_is_valid(stem_path(song_dir, j, audio_format)) for j in range(n_tracks)
     )
-    return stems_ok and stem_is_valid(mixture_path(song_dir, audio_format))
+    if not stems_ok:
+        return False
+    if not require_mixture:
+        return True
+    return stem_is_valid(mixture_path(song_dir, audio_format))

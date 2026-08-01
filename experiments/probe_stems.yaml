@@ -43,23 +43,25 @@ stems:
     note: "drumset, large ensemble"
 
   # --- strings (3) ---
+  # Prefer non-tremolo material for verify-swipe (GM 44 Tremolo Strings is common
+  # mislabeling in PDMX; string ensemble reads more like real strings).
   - id: violin
     category: strings
     song_id: "14/56/QmWzkNwfamBpqkdr3piDGZ2Lgy1UosNWibKZX2XjgUE11B"
     track: 0
-    note: "solo violin"
+    note: "solo violin (MIDI GM 44 tremolo — legacy probe)"
 
   - id: violin_2
     category: strings
     song_id: "11/47/QmTUt6qaauHdjT6UsH1BC7RfXzf82YTE9QkdocCWezFK6i"
     track: 0
-    note: "solo violin, different song"
+    note: "solo violin, different song (MIDI GM 44 tremolo — legacy probe)"
 
   - id: cello
     category: strings
     song_id: "14/23/QmWh6w8fwwY2kWAyEquVoZyHuMDGPYHvgQLqDo99xY56CC"
-    track: 6
-    note: "solo violoncello"
+    track: 0
+    note: "string ensemble Violini (GM 48) — verify-swipe preferred"
 
   # --- wind (3) ---
   - id: flute

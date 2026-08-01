@@ -256,7 +256,7 @@ def main(argv=None):
     print(
         "\nListening protocol notes:\n"
         "- Isolated-stem A/B: same notes under B1 (slakh) vs B2 (slakh_realify) vs B3 "
-        "(slakh_ddsp) for piano and one MIDI-DDSP instrument.\n"
+        "(ddsp_slakh) for piano and one MIDI-DDSP instrument.\n"
         "- Full-mix showcase: prefer pieces with high neural coverage "
         "(piano + strings/winds), not random draws dominated by drums/guitar.\n"
         "- Vocals stay on soundfont(+SA3); lyric SVS excluded for provenance.\n"

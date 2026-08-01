@@ -157,7 +157,7 @@ def make_handler(catalog: AblationCatalog, static_dir: Path = STATIC_DIR):
 
 def parse_args(args=None):
     parser = argparse.ArgumentParser(
-        description="Serve ablation listening viewer on localhost (A1–B2).",
+        description="Serve ablation listening viewer on localhost (A1–CB2).",
     )
     parser.add_argument(
         "--ablations-dir",

@@ -23,8 +23,6 @@ from shared.config import (
     REALIFY_BATCH_SIZE,
     REALIFY_CONTENT_FIDELITY_ENFORCE,
     REALIFY_SILENCE_ENFORCE,
-    RENDER_MODE_SLAKH,
-    RENDER_MODE_SLAKH_DDSP,
     SONGS_TABLE_COLUMNS,
     SOUNDFONT_DIR,
     STEMS_FILE_NAME,
@@ -43,7 +41,7 @@ from synthesis.audio import (
     write_mixture_from_waveforms,
 )
 from synthesis.cli_common import add_synthesis_args, default_gm_register_path
-from synthesis.dataset import prepare_ablation_dataset, prepare_full_dataset
+from synthesis.dataset import listening_sample_path, prepare_ablation_dataset, prepare_full_dataset
 from shared.csv_tables import append_rows_deduped, sanitize_track_name
 from synthesis.paths import (
     ablation_raw_dir,
@@ -54,12 +52,15 @@ from synthesis.paths import (
 from shared.repo_symlinks import link_ablations_in_repo
 from synthesis.ddsp.config import DDSP_ROUTING_COLUMNS, DDSP_ROUTING_FILE_NAME
 from synthesis.patches import PatchAssignment, apply_patch_to_midi_track
-
-
-def uses_slakh_recipes(render_mode: str) -> bool:
-    """True when per-category locked soundfont/FX recipes apply (B1 and B3 fallbacks)."""
-    return render_mode in (RENDER_MODE_SLAKH, RENDER_MODE_SLAKH_DDSP)
-
+from synthesis.reuse import (
+    copy_stem,
+    donor_raw_stem_path,
+    fallback_donor_mode,
+    reused_source_label,
+    song_rel_under_data,
+    uses_ddsp,
+    uses_slakh_recipes,
+)
 
 def parse_args(args=None, namespace=None):
     parser = argparse.ArgumentParser(
@@ -76,6 +77,10 @@ def song_output_dir(output_dir: str, original_dataset_dir: str, json_path: str) 
     return f"{output_dir}{rel_no_ext}"
 
 
+def _require_mixture(args) -> bool:
+    return not bool(getattr(args, "no_mixture", False))
+
+
 def synthesize_song_at_index(
     i: int,
     dataset: pd.DataFrame,
@@ -86,11 +91,16 @@ def synthesize_song_at_index(
     path_output = dataset.at[i, "path_output"]
     song_dir = Path(path_output)
     audio_format = synthesis_audio_format(args.flac)
+    require_mixture = _require_mixture(args)
 
     midi = mido.MidiFile(filename=dataset.at[i, "mid"], charset="utf8")
     n_tracks = len(midi.tracks)
 
-    if path_output in completed_paths and song_is_complete(song_dir, n_tracks, audio_format) and not args.reset:
+    if (
+        path_output in completed_paths
+        and song_is_complete(song_dir, n_tracks, audio_format, require_mixture=require_mixture)
+        and not args.reset
+    ):
         del midi
         return None, [], []
     stems_complete = all(
@@ -179,7 +189,7 @@ def synthesize_song_at_index(
                 )
             track_midi.save(track_paths[j])
             route_meta: dict = {}
-            if args.render_mode == RENDER_MODE_SLAKH_DDSP:
+            if uses_ddsp(args.render_mode):
                 from synthesis.ddsp.routing import route_stem
 
                 route = route_stem(
@@ -212,66 +222,70 @@ def synthesize_song_at_index(
     del midi
 
     if need_to_synthesize:
-        waveforms = []
-        for j, track_path in enumerate(track_paths):
-            meta = track_render_meta[j]
-            backend = meta.get("ddsp_backend")
-            if args.render_mode == RENDER_MODE_SLAKH_DDSP and backend in (
-                "midi_ddsp",
-                "ddsp_piano",
-            ):
-                from synthesis.ddsp.routing import StemRoute
-                from synthesis.ddsp.synthesize import synthesize_stem_neural
+        donor_mode = fallback_donor_mode(args.render_mode)
+        song_rel = None
+        if uses_ddsp(args.render_mode) and donor_mode is not None:
+            song_rel = song_rel_under_data(
+                song_dir,
+                ablation_raw_dir(args.output_dir, args.render_mode),
+            )
 
-                route = StemRoute(
-                    backend=backend,
-                    instrument_key=meta.get("ddsp_instrument_key"),
-                    reason=meta.get("ddsp_reason") or "",
-                )
-                waveform = synthesize_stem_neural(track_path, route)
-            else:
-                soundfont_filepath = meta.get("soundfont_filepath") or args.soundfont_filepath
-                fx_profile = meta.get("fx_profile")
-                if uses_slakh_recipes(args.render_mode):
-                    from experiments.patch_sweep.config import soundfont_file_for_id
-                    from experiments.patch_sweep.winners import pick_fx_profile, pick_soundfont_id
+        if uses_ddsp(args.render_mode):
+            for j, track_path in enumerate(track_paths):
+                meta = track_render_meta[j]
+                backend = meta.get("ddsp_backend")
+                out_stem = stem_path(song_dir, j, audio_format)
+                source = "rendered"
+                original_path = None
 
-                    soundfont_ids = meta.get("soundfont_ids") or []
-                    if not soundfont_ids and meta.get("soundfont_id"):
-                        soundfont_ids = [meta["soundfont_id"]]
-                    category = meta.get("category") or "default"
-                    if soundfont_ids:
-                        picked = pick_soundfont_id(
-                            list(soundfont_ids),
-                            category=category,
-                            song_path=path_output,
-                            sample_seed=args.sample_seed,
-                        )
-                        soundfont_filepath = str(
-                            Path(SOUNDFONT_DIR) / soundfont_file_for_id(picked)
-                        )
-                    elif meta.get("soundfont"):
-                        soundfont_filepath = str(Path(SOUNDFONT_DIR) / meta["soundfont"])
+                if backend in ("midi_ddsp", "ddsp_piano"):
+                    from synthesis.ddsp.routing import StemRoute
+                    from synthesis.ddsp.synthesize import synthesize_stem_neural
 
-                    fx_profiles = meta.get("fx_profiles") or []
-                    if not fx_profiles and meta.get("fx_profile"):
-                        fx_profiles = [meta["fx_profile"]]
-                    if fx_profiles:
-                        fx_profile = pick_fx_profile(
-                            list(fx_profiles),
-                            category=category,
-                            song_path=path_output,
-                            sample_seed=args.sample_seed,
+                    route = StemRoute(
+                        backend=backend,
+                        instrument_key=meta.get("ddsp_instrument_key"),
+                        reason=meta.get("ddsp_reason") or "",
+                    )
+                    waveform = synthesize_stem_neural(track_path, route)
+                    waveform = pad_and_loudness_normalize([waveform])[0]
+                    save_stem(waveform, song_dir, j, audio_format)
+                elif donor_mode is not None and song_rel is not None:
+                    donor_stem = donor_raw_stem_path(
+                        args.output_dir,
+                        donor_mode,
+                        song_rel,
+                        j,
+                        audio_format,
+                    )
+                    if stem_is_valid(donor_stem):
+                        copy_stem(donor_stem, out_stem)
+                        source = reused_source_label(donor_mode)
+                        original_path = str(donor_stem.resolve())
+                    elif getattr(args, "allow_fallback_render", False):
+                        waveform = _render_soundfont_stem(
+                            track_path, meta, args, path_output,
                         )
-                elif meta.get("soundfont"):
-                    soundfont_filepath = str(Path(SOUNDFONT_DIR) / meta["soundfont"])
-                waveform = get_waveform_tensor(
-                    track_path,
-                    soundfont_filepath,
-                    fx_profile=fx_profile,
-                )
-            waveforms.append(waveform)
-            if args.render_mode == RENDER_MODE_SLAKH_DDSP:
+                        waveform = pad_and_loudness_normalize([waveform])[0]
+                        save_stem(waveform, song_dir, j, audio_format)
+                    else:
+                        for path in track_paths:
+                            if exists(path):
+                                remove(path)
+                        temp_dir.cleanup()
+                        raise RuntimeError(
+                            f"Missing donor stem for DDSP fallback: {donor_stem}\n"
+                            f"Generate the donor ablation first:\n"
+                            f"  uv run python -m synthesis.synthesize --render-mode {donor_mode}\n"
+                            "Or pass --allow-fallback-render to Fluidsynth-render missing donors."
+                        )
+                else:
+                    waveform = _render_soundfont_stem(
+                        track_path, meta, args, path_output,
+                    )
+                    waveform = pad_and_loudness_normalize([waveform])[0]
+                    save_stem(waveform, song_dir, j, audio_format)
+
                 routing_rows.append({
                     "path": path_output,
                     "track": j,
@@ -282,23 +296,81 @@ def synthesize_song_at_index(
                     "instrument_key": meta.get("ddsp_instrument_key"),
                     "reason": meta.get("ddsp_reason"),
                     "n_notes": meta.get("n_notes"),
+                    "source": source,
+                    "original_path": original_path,
                 })
-            remove(track_path)
-
-        temp_dir.cleanup()
-        waveforms = pad_and_loudness_normalize(waveforms)
-
-        for j, waveform in enumerate(waveforms):
-            save_stem(waveform, song_dir, j, audio_format)
-
-        write_mixture_from_waveforms(waveforms, song_dir, audio_format)
-    elif stems_complete and not mixture_path(song_dir, audio_format).exists():
+                remove(track_path)
+            temp_dir.cleanup()
+            if require_mixture:
+                write_mixture_from_song_dir(song_dir, list(range(n_tracks)), audio_format)
+        else:
+            waveforms = []
+            for j, track_path in enumerate(track_paths):
+                meta = track_render_meta[j]
+                waveforms.append(
+                    _render_soundfont_stem(track_path, meta, args, path_output)
+                )
+                remove(track_path)
+            temp_dir.cleanup()
+            waveforms = pad_and_loudness_normalize(waveforms)
+            for j, waveform in enumerate(waveforms):
+                save_stem(waveform, song_dir, j, audio_format)
+            if require_mixture:
+                write_mixture_from_waveforms(waveforms, song_dir, audio_format)
+    elif (
+        require_mixture
+        and stems_complete
+        and not mixture_path(song_dir, audio_format).exists()
+    ):
         write_mixture_from_song_dir(song_dir, list(range(n_tracks)), audio_format)
 
     song_info = dataset.loc[i].to_dict()
     song_info["path"] = path_output
     del song_info["path_output"], song_info["mid"]
     return song_info, stem_rows, routing_rows
+
+
+def _render_soundfont_stem(track_path: str, meta: dict, args, path_output: str):
+    soundfont_filepath = meta.get("soundfont_filepath") or args.soundfont_filepath
+    fx_profile = meta.get("fx_profile")
+    if uses_slakh_recipes(args.render_mode):
+        from experiments.patch_sweep.config import soundfont_file_for_id
+        from experiments.patch_sweep.winners import pick_fx_profile, pick_soundfont_id
+
+        soundfont_ids = meta.get("soundfont_ids") or []
+        if not soundfont_ids and meta.get("soundfont_id"):
+            soundfont_ids = [meta["soundfont_id"]]
+        category = meta.get("category") or "default"
+        if soundfont_ids:
+            picked = pick_soundfont_id(
+                list(soundfont_ids),
+                category=category,
+                song_path=path_output,
+                sample_seed=args.sample_seed,
+            )
+            soundfont_filepath = str(
+                Path(SOUNDFONT_DIR) / soundfont_file_for_id(picked)
+            )
+        elif meta.get("soundfont"):
+            soundfont_filepath = str(Path(SOUNDFONT_DIR) / meta["soundfont"])
+
+        fx_profiles = meta.get("fx_profiles") or []
+        if not fx_profiles and meta.get("fx_profile"):
+            fx_profiles = [meta["fx_profile"]]
+        if fx_profiles:
+            fx_profile = pick_fx_profile(
+                list(fx_profiles),
+                category=category,
+                song_path=path_output,
+                sample_seed=args.sample_seed,
+            )
+    elif meta.get("soundfont"):
+        soundfont_filepath = str(Path(SOUNDFONT_DIR) / meta["soundfont"])
+    return get_waveform_tensor(
+        track_path,
+        soundfont_filepath,
+        fx_profile=fx_profile,
+    )
 
 
 _WORKER_CTX: dict = {}
@@ -345,10 +417,11 @@ def run_synthesis(args, output_dir: str):
 
     # GM register: required step-0 corrections unless --no-register.
     args.gm_register_lookup = None
+    register_df = None
+    register_path = getattr(args, "register", None) or default_gm_register_path(args.output_dir)
     if not getattr(args, "no_register", False):
         from analysis.gm_register import load_register_lookup
 
-        register_path = getattr(args, "register", None) or default_gm_register_path(args.output_dir)
         if not exists(register_path):
             raise RuntimeError(
                 f"GM register not found at {register_path}\n"
@@ -358,7 +431,11 @@ def run_synthesis(args, output_dir: str):
             )
         pdmx_root = dirname(args.dataset_filepath)
         args.gm_register_lookup = load_register_lookup(register_path, pdmx_root=pdmx_root)
+        register_df = pd.read_csv(register_path)
         print(f"Loaded GM register ({len(args.gm_register_lookup)} keys) from {register_path}")
+
+    if uses_ddsp(args.render_mode) and not args.full:
+        require_donor_ablation(args, realify=False)
 
     dataset = pd.read_csv(args.dataset_filepath, sep=",", header=0, index_col=False)
     dataset = dataset[dataset["subset:all_valid"]].reset_index(drop=True)
@@ -366,11 +443,18 @@ def run_synthesis(args, output_dir: str):
     if args.full:
         dataset = prepare_full_dataset(dataset)
     else:
+        sample_file = listening_sample_path(args.output_dir)
         dataset = prepare_ablation_dataset(
             dataset,
             sample_size=args.sample_size,
             sample_seed=args.sample_seed,
+            min_stems_per_category=args.min_stems_per_category,
+            register_df=register_df,
+            listening_sample_file=sample_file,
+            persist_sample=True,
         )
+        if sample_file.is_file():
+            print(f"Ablation sample: {sample_file} ({len(dataset)} songs)")
     original_dataset_dir = dirname(args.dataset_filepath)
     dataset["path"] = [original_dataset_dir + p[1:] for p in dataset["path"]]
     dataset["mid"] = [original_dataset_dir + p[1:] for p in dataset["mid"]]
@@ -396,7 +480,7 @@ def run_synthesis(args, output_dir: str):
             stems_output_filepath, sep=",", na_rep=NA_STRING, header=True, index=False, mode="w",
         )
     routing_output_filepath = f"{output_dir}/{DDSP_ROUTING_FILE_NAME}"
-    if args.render_mode == RENDER_MODE_SLAKH_DDSP and (
+    if uses_ddsp(args.render_mode) and (
         not exists(routing_output_filepath) or args.reset
     ):
         pd.DataFrame(columns=DDSP_ROUTING_COLUMNS).to_csv(
@@ -405,13 +489,14 @@ def run_synthesis(args, output_dir: str):
 
     # Neural DDSP needs Torch in workers for resample. Fork-after-CUDA causes
     # SIGKILL (exit -9); use spawn so each worker initializes cleanly.
-    jobs = 1 if args.render_mode == RENDER_MODE_SLAKH_DDSP else args.jobs
-    if args.render_mode == RENDER_MODE_SLAKH_DDSP and args.jobs > 1:
+    jobs = 1 if uses_ddsp(args.render_mode) else args.jobs
+    if uses_ddsp(args.render_mode) and args.jobs > 1:
         print(
-            f"Note: slakh_ddsp uses spawn + -j 1 (was {args.jobs}) to avoid "
+            f"Note: {args.render_mode} uses spawn + -j 1 (was {args.jobs}) to avoid "
             "CUDA-after-fork kills (exit -9)."
         )
 
+    require_mixture = _require_mixture(args)
     work_indices = []
     for i in dataset.index:
         if args.reset:
@@ -423,12 +508,14 @@ def run_synthesis(args, output_dir: str):
             continue
         n_tracks = int(dataset.at[i, "n_tracks"])
         audio_format = synthesis_audio_format(args.flac)
-        if not song_is_complete(Path(path_output), n_tracks, audio_format):
+        if not song_is_complete(
+            Path(path_output), n_tracks, audio_format, require_mixture=require_mixture,
+        ):
             work_indices.append(i)
 
     pool_ctx = (
         multiprocessing.get_context("spawn")
-        if args.render_mode == RENDER_MODE_SLAKH_DDSP
+        if uses_ddsp(args.render_mode)
         else multiprocessing
     )
     with pool_ctx.Pool(
@@ -450,7 +537,7 @@ def run_synthesis(args, output_dir: str):
                     STEMS_TABLE_COLUMNS,
                     stem_rows,
                 )
-            if routing_rows and args.render_mode == RENDER_MODE_SLAKH_DDSP:
+            if routing_rows and uses_ddsp(args.render_mode):
                 append_rows_deduped(
                     routing_output_filepath,
                     DDSP_ROUTING_COLUMNS,
@@ -463,7 +550,12 @@ def run_synthesis(args, output_dir: str):
             )
 
 
-def synthesis_is_complete(source_dir: str, audio_format: str) -> bool:
+def synthesis_is_complete(
+    source_dir: str,
+    audio_format: str,
+    *,
+    require_mixture: bool = True,
+) -> bool:
     """True when data/stems tables exist and every listed song has stem files on disk."""
     source = Path(source_dir)
     data_csv = source / f"{DATA_DIR_NAME}.csv"
@@ -479,7 +571,9 @@ def synthesis_is_complete(source_dir: str, audio_format: str) -> bool:
     for _, row in songs.iterrows():
         song_dir = Path(row["path"])
         n_tracks = int(row["n_tracks"])
-        if not song_is_complete(song_dir, n_tracks, audio_format):
+        if not song_is_complete(
+            song_dir, n_tracks, audio_format, require_mixture=require_mixture,
+        ):
             return False
     return True
 
@@ -489,9 +583,10 @@ def require_raw_synthesis(
     *,
     run_command: str,
     audio_format: str = DEFAULT_AUDIO_FORMAT,
+    require_mixture: bool = True,
 ) -> None:
     """Raise if the non-realify synthesis pass has not completed successfully."""
-    if synthesis_is_complete(source_dir, audio_format):
+    if synthesis_is_complete(source_dir, audio_format, require_mixture=require_mixture):
         return
     raise RuntimeError(
         "Cannot realify: raw stems are missing or incomplete at "
@@ -501,12 +596,49 @@ def require_raw_synthesis(
     )
 
 
+def require_donor_ablation(args, *, realify: bool) -> None:
+    """Ensure the soundfont-fallback donor ablation exists for DDSP modes."""
+    donor_mode = fallback_donor_mode(args.render_mode)
+    if donor_mode is None:
+        return
+    audio_format = synthesis_audio_format(args.flac)
+    require_mixture = _require_mixture(args)
+    if realify:
+        donor_dir = ablation_realify_dir(args.output_dir, donor_mode)
+        cmd = (
+            f"uv run python -m synthesis.synthesize --render-mode {donor_mode} --realify"
+        )
+    else:
+        donor_dir = ablation_raw_dir(args.output_dir, donor_mode)
+        cmd = f"uv run python -m synthesis.synthesize --render-mode {donor_mode}"
+    if getattr(args, "no_mixture", False):
+        cmd += " --no-mixture"
+    if args.flac:
+        cmd += " --flac"
+    if synthesis_is_complete(donor_dir, audio_format, require_mixture=require_mixture):
+        return
+    if getattr(args, "allow_fallback_render", False) and not realify:
+        print(
+            f"Warning: donor ablation incomplete at {donor_dir}; "
+            "--allow-fallback-render will Fluidsynth-render missing stems."
+        )
+        return
+    kind = "realify" if realify else "raw"
+    raise RuntimeError(
+        f"Cannot run {args.render_mode}{' --realify' if realify else ''}: "
+        f"donor {kind} ablation incomplete at {donor_dir}\n"
+        f"Run first:\n  {cmd}"
+    )
+
+
 def raw_synthesis_command(args) -> str:
     cmd = f"uv run python -m synthesis.synthesize --render-mode {args.render_mode}"
     if args.full:
         cmd += " --full"
     if args.flac:
         cmd += " --flac"
+    if getattr(args, "no_mixture", False):
+        cmd += " --no-mixture"
     return cmd
 
 
@@ -532,6 +664,9 @@ def run_realify_pass(args, source_dir: str, dest_dir: str):
         reset=args.reset,
         silence_enforce=REALIFY_SILENCE_ENFORCE and not args.no_silence_enforce,
         content_fidelity_enforce=content_fidelity_enforce,
+        no_mixture=bool(getattr(args, "no_mixture", False)),
+        output_root=args.output_dir,
+        render_mode=args.render_mode,
     )
 
 
@@ -550,7 +685,10 @@ def main():
             source_dir,
             run_command=raw_synthesis_command(args),
             audio_format=audio_format,
+            require_mixture=_require_mixture(args),
         )
+        if uses_ddsp(args.render_mode) and not args.full:
+            require_donor_ablation(args, realify=True)
         run_realify_pass(args, source_dir, dest_dir)
     else:
         run_synthesis(args, source_dir)

@@ -10,13 +10,19 @@ Development artifacts live under `{OUTPUT_DIR}/dev/`. The shipped dataset is `{O
 
 ```
 {OUTPUT_DIR}/dev/ablations/
+├── listening_sample.yaml   # shared stratified song/stem inventory
 ├── basic/                  # A1
 ├── basic_realify/          # A2
 ├── slakh/                  # B1
 ├── slakh_realify/          # B2
-├── slakh_ddsp/             # B3 (MIDI-DDSP + DDSP-Piano + slakh fallback)
-└── slakh_ddsp_realify/     # B4 (optional SA3 on B3 stems)
+├── ddsp_basic/             # CA1 (neural DDSP + basic soundfont fallback copies)
+├── ddsp_basic_realify/     # CA2
+├── ddsp_slakh/             # CB1 (neural DDSP + slakh soundfont fallback copies)
+├── ddsp_slakh_realify/     # CB2
+└── clips/{condition}/      # aligned 10s MP3 clips for listening.serve
 ```
+
+If an older `slakh_ddsp/` tree exists, rename it to `ddsp_slakh/` (and `*_realify` likewise).
 
 **Full-scale stems** (`synthesize --full`; normally called by `build_spdmx.py`):
 
@@ -130,26 +136,26 @@ python -m synthesis.realify.realify \
 All synthesis flows go through `synthesis.synthesize` (expects GM `register.csv` unless `--no-register`):
 
 ```bash
+COMMON="--sample-seed 43 --no-mixture -j 8"
+
 # Step 0
 python -m analysis.analyze_gm_register --subset all_valid -j 8
 
-# A1 (default: random sample from rated_deduplicated)
-python -m synthesis.synthesize --render-mode basic
+# Donors (stratified sample written on first run → listening_sample.yaml)
+python -m synthesis.synthesize --render-mode basic $COMMON          # A1
+python -m synthesis.synthesize --render-mode slakh $COMMON          # B1
+python -m synthesis.synthesize --render-mode basic --realify $COMMON  # A2
+python -m synthesis.synthesize --render-mode slakh --realify $COMMON  # B2
 
-# B1
-python -m synthesis.synthesize --render-mode slakh
+# DDSP (copies soundfont fallbacks from donors; renders neural stems only)
+python -m synthesis.synthesize --render-mode ddsp_basic $COMMON          # CA1
+python -m synthesis.synthesize --render-mode ddsp_slakh $COMMON          # CB1
+python -m synthesis.synthesize --render-mode ddsp_basic --realify $COMMON  # CA2
+python -m synthesis.synthesize --render-mode ddsp_slakh --realify $COMMON  # CB2
 
-# A2 (requires A1 stems, or synthesizes first if missing)
-python -m synthesis.synthesize --render-mode basic --realify
-
-# B2
-python -m synthesis.synthesize --render-mode slakh --realify
-
-# B3 — neural DDSP (MIDI-DDSP + DDSP-Piano) on slakh base; see SETUP Track C
-python -m synthesis.synthesize --render-mode slakh_ddsp
-
-# B4 — optional SA3 after B3
-python -m synthesis.synthesize --render-mode slakh_ddsp --realify
+# Aligned 10s clips (windows from A1) + listening viewer
+python -m synthesis.listening.make_clips --clip-seconds 10
+python -m synthesis.listening.serve
 
 # Full PDMX after listening test
 python -m synthesis.synthesize --render-mode basic --full
@@ -201,10 +207,22 @@ synthesis/
 | A2 | `basic`, `--realify` | `dev/ablations/basic_realify/` |
 | B1 | `slakh` | `dev/ablations/slakh/` |
 | B2 | `slakh`, `--realify` | `dev/ablations/slakh_realify/` |
-| B3 | `slakh_ddsp` | `dev/ablations/slakh_ddsp/` |
-| B4 | `slakh_ddsp`, `--realify` | `dev/ablations/slakh_ddsp_realify/` |
+| CA1 | `ddsp_basic` | `dev/ablations/ddsp_basic/` |
+| CA2 | `ddsp_basic`, `--realify` | `dev/ablations/ddsp_basic_realify/` |
+| CB1 | `ddsp_slakh` | `dev/ablations/ddsp_slakh/` |
+| CB2 | `ddsp_slakh`, `--realify` | `dev/ablations/ddsp_slakh_realify/` |
 
-Same `ABLATION_SAMPLE_SEED` ensures basic / slakh / slakh_ddsp render the same songs.
+Shared stratified sample (`listening_sample.yaml`, seed 43, ≥20 stems/category) ensures all eight conditions render the same songs.
+
+**Donor reuse (NFS-safe copies):** CA/CB soundfont-fallback stems are `copy2`'d from A/B (raw) and A2/B2 (realify). Neural stems are newly rendered / SA3'd. Provenance is in `ddsp_routing.csv`:
+
+| Column | Meaning |
+|--------|---------|
+| `path` | Song directory in this ablation (same as `stems.csv`) |
+| `source` | `rendered` or `reused:basic` / `reused:slakh` |
+| `original_path` | Absolute stem filepath copied from; `NA` when newly rendered |
+
+No symlinks/hardlinks.
 
 ### Slakh mode (`--render-mode slakh`)
 
@@ -216,36 +234,33 @@ Slakh-style rendering adds **per-track patch variety** on top of basic Fluidsynt
 
 See [`experiments/TUNING.md`](../experiments/TUNING.md) for the phased tuning workflow (soundfonts → FX → pools).
 
-### Neural DDSP mode (`--render-mode slakh_ddsp`, B3)
+### Neural DDSP modes (`ddsp_basic` / `ddsp_slakh`)
 
-Hybrid per-stem backends on the **slakh** soundfont base:
+Hybrid per-stem backends. Soundfont fallbacks copy from **basic** (`ddsp_basic`) or **slakh** (`ddsp_slakh`):
 
 | Stem | Backend |
 |------|---------|
-| GM piano (0–7) / piano track names | **DDSP-Piano** (MAESTRO; polyphony OK) |
+| Acoustic hammer piano (GM **0, 1, 3**) / acoustic piano names | **DDSP-Piano** (MAESTRO; polyphony OK) |
+| Harpsichord, clavinet, e-piano, electric grand (GM 2, 4–7) | donor soundfont copy |
 | 13 URMP instruments, **monophonic** | **MIDI-DDSP** |
-| Polyphonic URMP-eligible stems | slakh soundfont fallback |
-| Drums, guitar, bass guitar, vocals, synths, other | slakh soundfont fallback |
+| Timbre mismatches (piccolo, pan flute, english horn, muted trumpet, …) | donor soundfont copy |
+| Polyphonic URMP-eligible stems | donor soundfont copy |
+| Drums, guitar, bass guitar, vocals, synths, other | donor soundfont copy |
 
-- Default **no SA3** on neural stems (B3). Optional B4 runs the existing realify pass on completed B3 stems.
+Routing details live in [`synthesis/ddsp/routing.py`](ddsp/routing.py) (`DDSP_PIANO_PROGRAMS`, name deny-lists, SATB-vs-sax vocal guard).
+
+- CA2/CB2 SA3 only neural stems; fallback stems copy from A2/B2.
 - Neural models run in an isolated TF venv (`.venv-ddsp`); see SETUP Track C. Linux x86_64 only.
 - **GPU by default** (CUDA 12 / cuDNN 8 pip wheels + `LD_LIBRARY_PATH`); override with `SPDMX_DDSP_CUDA_VISIBLE_DEVICES` or `SPDMX_DDSP_FORCE_CPU=1`. Use `-j 1` (flock-serialized).
 - Routing decisions are written to `ddsp_routing.csv` beside the ablation tables.
 - Provenance: [`THIRD_PARTY.md`](../THIRD_PARTY.md). Vocals deliberately stay on soundfont(+SA3); lyric SVS is out of scope.
 
-**Listening protocol (recommended):**
-
-1. **Isolated stems** — same notes under B1 vs B2 vs B3 for piano and one MIDI-DDSP instrument (cleanest signal).
-2. **Full-mix** — prefer pieces with high neural coverage (piano + strings/winds), not random draws dominated by drums/guitar.
-3. Report corpus coverage via `python -m analysis.ddsp_coverage`.
-
 ## Listening test
 
-Subjective comparison across A1–B4 once dirs exist. See prior hypotheses in git history / project notes.
-
-Browse and compare generated audio locally:
+Stem-level comparison across A1–CB2. After ablations, build aligned **10s** clips (windows chosen from A1) and serve the clips tree:
 
 ```bash
+uv run python -m synthesis.listening.make_clips --clip-seconds 10
 uv run python -m synthesis.listening.serve
 ```
 
@@ -257,11 +272,12 @@ See [`listening/README.md`](listening/README.md).
 |---------|--------|
 | Mono + BS.1770 stems | Done |
 | `--render-mode` + `--realify` on synthesize | Done |
-| `--render-mode slakh_ddsp` (B3 neural DDSP) | Done (isolated TF venv; SETUP Track C) |
+| `--render-mode ddsp_basic` / `ddsp_slakh` + donor copy reuse | Done (isolated TF venv; SETUP Track C) |
+| Stratified listening sample + 10s clips | Done |
 | `--full` for all valid PDMX | Done |
 | `build_spdmx.py` | Stub |
 | Patch pools (Slakh) | Stub |
-| `mixture.flac` per song | Done |
+| `mixture` per song | Done (optional via `--no-mixture`) |
 | Listening test | Viewer available (`python -m synthesis.listening.serve`) |
 | Song-length analysis (PDMX metadata + plots) | Done |
 | Neural-DDSP coverage (`analysis.ddsp_coverage`) | Done |

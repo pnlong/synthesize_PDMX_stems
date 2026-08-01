@@ -29,8 +29,10 @@ CONDITION_ORDER = (
     "basic_realify",
     "slakh",
     "slakh_realify",
-    "slakh_ddsp",
-    "slakh_ddsp_realify",
+    "ddsp_basic",
+    "ddsp_basic_realify",
+    "ddsp_slakh",
+    "ddsp_slakh_realify",
 )
 
 CONDITION_LABELS: dict[str, str] = {
@@ -38,14 +40,17 @@ CONDITION_LABELS: dict[str, str] = {
     "basic_realify": "A2",
     "slakh": "B1",
     "slakh_realify": "B2",
-    "slakh_ddsp": "B3",
-    "slakh_ddsp_realify": "B4",
+    "ddsp_basic": "CA1",
+    "ddsp_basic_realify": "CA2",
+    "ddsp_slakh": "CB1",
+    "ddsp_slakh_realify": "CB2",
 }
 
 REALIFY_CONDITIONS = frozenset({
     "basic_realify",
     "slakh_realify",
-    "slakh_ddsp_realify",
+    "ddsp_basic_realify",
+    "ddsp_slakh_realify",
 })
 
 
@@ -58,9 +63,18 @@ class ConditionInfo:
 
 
 def default_ablations_dir() -> Path:
+    """Prefer ``ablations/clips/`` when present (10s listening set)."""
     if REPO_ABLATIONS_SYMLINK.is_dir():
-        return REPO_ABLATIONS_SYMLINK.resolve()
-    return Path(ablations_root(OUTPUT_DIR))
+        root = REPO_ABLATIONS_SYMLINK.resolve()
+    else:
+        root = Path(ablations_root(OUTPUT_DIR))
+    clips = root / "clips"
+    if clips.is_dir() and any(
+        (clips / condition / f"{DATA_DIR_NAME}.csv").is_file()
+        for condition in CONDITION_ORDER
+    ):
+        return clips
+    return root
 
 
 def song_id_from_path(song_path: str | Path) -> str:
@@ -76,6 +90,9 @@ def detect_audio_format(song_dir: Path) -> str | None:
     from shared.config import FLAC_AUDIO_FORMAT
 
     for fmt in (DEFAULT_AUDIO_FORMAT, FLAC_AUDIO_FORMAT):
+        # Prefer stems (mixtures may be absent with --no-mixture).
+        if any(song_dir.glob(f"stem_*.{fmt}")):
+            return fmt
         if (song_dir / mixture_filename(fmt)).exists():
             return fmt
     return None
@@ -127,10 +144,20 @@ def stem_listening_category(stem_row: pd.Series) -> str:
 
 
 class AblationCatalog:
-    def __init__(self, ablations_dir: Path, caption_seed: int = ABLATION_SAMPLE_SEED):
+    def __init__(
+        self,
+        ablations_dir: Path,
+        caption_seed: int = ABLATION_SAMPLE_SEED,
+        *,
+        include_mixtures: bool | None = None,
+    ):
         self.ablations_dir = ablations_dir.resolve()
         self.caption_seed = caption_seed
         self.reference_condition = self._pick_reference_condition()
+        # Clips trees are stem-only; hide mixtures by default there.
+        if include_mixtures is None:
+            include_mixtures = self.ablations_dir.name != "clips"
+        self.include_mixtures = include_mixtures
         self._songs_df = self._load_songs()
         self._stems_df = self._load_stems()
         self._captions_df = self._build_captions()
@@ -281,6 +308,9 @@ class AblationCatalog:
                 mixture_filename_str,
             )
             for condition in CONDITION_ORDER
+        } if self.include_mixtures else {
+            condition: {"available": False, "url": None}
+            for condition in CONDITION_ORDER
         }
 
         return {
@@ -307,6 +337,7 @@ class AblationCatalog:
             "duration_seconds": _safe_float(row.get("song_length.seconds")),
             "audio_format": audio_format,
             "mixture": mixture,
+            "include_mixtures": self.include_mixtures,
             "stems": stems,
         }
 

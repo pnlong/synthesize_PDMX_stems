@@ -20,6 +20,12 @@ if TYPE_CHECKING:
 PRESET_VERIFY_SOURCE = "winners.yaml"
 PATCH_VERIFY_SOURCE = "winners.yaml"
 
+# Preferred probe stem when building one representative verify-swipe clip per soundfont.
+VERIFY_SWIPE_PREFERRED_STEMS = {
+    "organ": "organ_2",  # GM 19 church/hymn organ instead of GM 22 percussive
+    "strings": "cello",  # GM 48 string ensemble instead of GM 44 tremolo probes
+}
+
 
 def variant_stats(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
@@ -237,6 +243,11 @@ def build_patch_verify_swipe_cards(
             ]
             if rows.empty:
                 continue
+            preferred_stem = VERIFY_SWIPE_PREFERRED_STEMS.get(str(category))
+            if preferred_stem:
+                preferred_rows = rows[rows["stem_id"].astype(str) == str(preferred_stem)]
+                if not preferred_rows.empty:
+                    rows = preferred_rows
             rows = rows.sort_values(["stem_id", "clip_index"])
             row = rows.iloc[0]
             variant_id = str(row["variant_id"])
@@ -272,6 +283,90 @@ def build_patch_verify_swipe_cards(
     return cards
 
 
+def _safe_verification_token(name: str | None) -> str:
+    if not name:
+        return ""
+    safe = str(name).replace("/", "_").replace("\\", "_")
+    if safe.endswith(".json"):
+        safe = safe[: -len(".json")]
+    return safe
+
+
+def patch_verify_swipe_session_id(
+    catalog: SweepCatalog,
+    *,
+    pass_number: int = 1,
+    source_verification: str | None = None,
+) -> str:
+    session_id = f"{catalog.sweep_dir.resolve().name}_verify_pass{int(pass_number)}"
+    token = _safe_verification_token(source_verification)
+    if token:
+        session_id = f"{session_id}_from_{token}"
+    return session_id
+
+
+def shortlists_from_verification_doc(doc: dict) -> dict[str, list[str]]:
+    """Approved soundfonts per category from a prior verification pass."""
+    return winners_from_verification(doc, sweep_type="patch")
+
+
+def resolve_verification_path(catalog: SweepCatalog, name: str) -> Path | None:
+    """Resolve a verification JSON under the catalog responses dir."""
+    return resolve_responses_path(catalog, name)
+
+
+def list_verification_files(catalog: SweepCatalog) -> list[dict]:
+    """Final verification JSON files available as multi-pass inputs."""
+    responses_dir = catalog.responses_dir()
+    files = []
+    for path in sorted(responses_dir.glob("verification_final_*.json"), reverse=True):
+        if "in_progress" in path.name:
+            continue
+        stat = path.stat()
+        files.append({
+            "name": path.name,
+            "path": str(path),
+            "size": stat.st_size,
+            "mtime": stat.st_mtime,
+        })
+    return files
+
+
+def category_counts_from_votes(
+    cards: list[dict],
+    votes: list[dict] | dict[str, dict],
+) -> dict[str, dict[str, int]]:
+    """Per-category left / accepted / rejected counts for verify swipe."""
+    vote_by_card: dict[str, dict]
+    if isinstance(votes, dict):
+        vote_by_card = {str(k): v for k, v in votes.items() if isinstance(v, dict)}
+    else:
+        vote_by_card = {}
+        for vote in votes:
+            card_id = vote.get("card_id")
+            if card_id:
+                vote_by_card[str(card_id)] = vote
+
+    counts: dict[str, dict[str, int]] = {}
+    for card in cards:
+        category = str(card.get("category") or "")
+        if not category:
+            continue
+        entry = counts.setdefault(
+            category,
+            {"total": 0, "left": 0, "accepted": 0, "rejected": 0},
+        )
+        entry["total"] += 1
+        vote = vote_by_card.get(str(card.get("card_id") or ""))
+        if not vote:
+            entry["left"] += 1
+        elif str(vote.get("tier")) == "strong_accept":
+            entry["accepted"] += 1
+        else:
+            entry["rejected"] += 1
+    return counts
+
+
 def build_patch_verify_swipe_meta(
     catalog: SweepCatalog,
     shortlists: dict[str, list[str]],
@@ -279,13 +374,24 @@ def build_patch_verify_swipe_meta(
     order: str = "sequential",
     seed: int = 42,
     verification_phase: str | None = None,
+    pass_number: int = 1,
+    source_verification: str | None = None,
 ) -> dict:
     from experiments.listening.swipe import order_swipe_cards, swipe_storage_key
 
     cards = build_patch_verify_swipe_cards(catalog, shortlists)
     cards = order_swipe_cards(cards, order=order, seed=seed)
-    session_id = f"{catalog.sweep_dir.resolve().name}_verify"
+    session_id = patch_verify_swipe_session_id(
+        catalog,
+        pass_number=pass_number,
+        source_verification=source_verification,
+    )
     categories = sorted({str(card["category"]) for card in cards if card.get("category")})
+    normalized_shortlists = {
+        str(category): [str(v) for v in values if v]
+        for category, values in shortlists.items()
+        if values
+    }
     return {
         "sweep_type": catalog.sweep_type,
         "mode": "verification",
@@ -295,11 +401,18 @@ def build_patch_verify_swipe_meta(
         "session_id": session_id,
         "storage_key": swipe_storage_key(catalog.sweep_type, session_id),
         "source_responses": PATCH_VERIFY_SOURCE,
+        "source_verification": source_verification,
+        "pass": int(pass_number),
         "verification_phase": verification_phase,
         "order": order,
         "seed": seed,
         "total_cards": len(cards),
         "categories": categories,
+        "shortlists": normalized_shortlists,
+        "category_totals": {
+            category: len(normalized_shortlists.get(category, []))
+            for category in categories
+        },
         "cards": cards,
         "keyboard": {
             "strong_reject": "ArrowLeft",
@@ -315,6 +428,8 @@ def verification_from_patch_swipe_votes(
     shortlists: dict[str, list[str]],
     *,
     source_responses: str = PATCH_VERIFY_SOURCE,
+    pass_number: int = 1,
+    source_verification: str | None = None,
 ) -> dict:
     """Convert binary swipe votes into patch verification JSON for lock."""
     vote_index = {
@@ -338,12 +453,34 @@ def verification_from_patch_swipe_votes(
         "sweep_type": "patch",
         "verification_mode": "soundfont_shortlist_swipe",
         "source_responses": source_responses,
+        "source_verification": source_verification,
+        "pass": int(pass_number),
         "categories": categories,
     }
 
 
-def patch_verify_swipe_session_path(catalog: SweepCatalog) -> Path:
-    return catalog.responses_dir() / "verification_swipe_in_progress.json"
+def patch_verify_swipe_session_path(
+    catalog: SweepCatalog,
+    *,
+    pass_number: int = 1,
+    source_verification: str | None = None,
+) -> Path:
+    """In-progress swipe session; pass-aware so multi-pass runs don't collide.
+
+    Pass 1 with no prior verification keeps the legacy filename for compatibility.
+    """
+    if int(pass_number) == 1 and not source_verification:
+        return catalog.responses_dir() / "verification_swipe_in_progress.json"
+    token = _safe_verification_token(source_verification)
+    if token:
+        return (
+            catalog.responses_dir()
+            / f"verification_swipe_pass{int(pass_number)}_from_{token}_in_progress.json"
+        )
+    return (
+        catalog.responses_dir()
+        / f"verification_swipe_pass{int(pass_number)}_in_progress.json"
+    )
 
 
 def build_preset_realify_verification_meta(

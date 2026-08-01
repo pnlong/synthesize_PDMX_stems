@@ -278,7 +278,7 @@ Preset notebook: `synthesis/realify/tests/explore_presets.ipynb`
 
 ---
 
-## Track C — Neural DDSP (ablation B3 `slakh_ddsp`)
+## Track C — Neural DDSP (ablations CA/CB: `ddsp_basic` / `ddsp_slakh`)
 
 MIDI-DDSP + DDSP-Piano run in a **separate TensorFlow venv** so they do not fight
 PyTorch CUDA in `.venv`. **Linux x86_64 only** — `midi-ddsp` does not install on
@@ -352,11 +352,11 @@ Listen before large B3 batches. Provenance notes: [`THIRD_PARTY.md`](THIRD_PARTY
 # B3 — neural DDSP + slakh soundfont fallback (no SA3)
 # Force -j 1: TF models are large; the synthesizer also flock-serializes workers.
 SPDMX_DDSP_PYTHON=$PWD/.venv-ddsp/bin/python \
-  uv run python -m synthesis.synthesize --render-mode slakh_ddsp -j 1
+  uv run python -m synthesis.synthesize --render-mode ddsp_slakh -j 1
 
 # B4 — optional SA3 after B3 (requires completed B3 stems)
 SPDMX_DDSP_PYTHON=$PWD/.venv-ddsp/bin/python \
-  uv run python -m synthesis.synthesize --render-mode slakh_ddsp --realify -j 1
+  uv run python -m synthesis.synthesize --render-mode ddsp_slakh --realify -j 1
 ```
 
 Coverage stats (program-only, then optional monophony pass):

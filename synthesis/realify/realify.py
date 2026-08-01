@@ -814,8 +814,10 @@ def resolve_stem_output_path(
 
 
 def copy_metadata_tables(source_dir: Path, output_dir: Path):
+    from synthesis.ddsp.config import DDSP_ROUTING_FILE_NAME
+
     output_dir.mkdir(parents=True, exist_ok=True)
-    for name in ("data.csv", "stems.csv"):
+    for name in ("data.csv", "stems.csv", DDSP_ROUTING_FILE_NAME):
         src = source_dir / name
         if src.exists():
             shutil.copy2(src, output_dir / name)
@@ -838,6 +840,20 @@ def _stem_metadata_row(
     return pd.Series(merged)
 
 
+def _load_ddsp_routing_index(source_dir: Path) -> dict[tuple[str, int], dict]:
+    """Map (path, track) → routing row for DDSP donor reuse."""
+    from synthesis.ddsp.config import DDSP_ROUTING_FILE_NAME
+
+    routing_path = source_dir / DDSP_ROUTING_FILE_NAME
+    if not routing_path.is_file():
+        return {}
+    df = pd.read_csv(routing_path)
+    index: dict[tuple[str, int], dict] = {}
+    for _, row in df.iterrows():
+        index[(str(row["path"]), int(row["track"]))] = row.to_dict()
+    return index
+
+
 def build_realify_tasks(
     captions: pd.DataFrame,
     source_dir: Path,
@@ -845,13 +861,29 @@ def build_realify_tasks(
     audio_format: str = DEFAULT_AUDIO_FORMAT,
     sample_seed: int = ABLATION_SAMPLE_SEED,
     presets: dict | None = None,
+    *,
+    output_root: str | None = None,
+    render_mode: str | None = None,
 ) -> list[dict]:
     from synthesis.realify.preset_config import realify_enabled, select_preset
+    from synthesis.reuse import (
+        copy_stem,
+        donor_mode_from_source,
+        donor_realify_stem_path,
+        fallback_donor_mode,
+        is_reused_source,
+        song_rel_under_data,
+        uses_ddsp,
+    )
 
     stems_path = source_dir / "stems.csv"
     stems_df = pd.read_csv(stems_path) if stems_path.is_file() else None
+    routing_index = _load_ddsp_routing_index(source_dir)
+    donor_mode = fallback_donor_mode(render_mode) if render_mode else None
+    ddsp_mode = bool(render_mode and uses_ddsp(render_mode))
 
     tasks = []
+    original_path_updates: list[tuple[str, int, str]] = []
     for _, row in captions.iterrows():
         song_dir = Path(row["path"])
         track = int(row["track"])
@@ -863,12 +895,40 @@ def build_realify_tasks(
         source_stem_path = stem_path(song_dir, track, audio_format)
         if not stem_is_valid(source_stem_path):
             continue
+
+        # DDSP: copy already-realified donor stems for soundfont fallbacks (skip SA3).
+        if ddsp_mode and output_root and donor_mode:
+            route = routing_index.get((str(song_dir), track), {})
+            source_label = route.get("source")
+            backend = route.get("backend")
+            reuse = is_reused_source(source_label) or backend == "soundfont"
+            if reuse:
+                song_rel = song_rel_under_data(song_dir, source_dir)
+                donor = donor_mode_from_source(source_label) or donor_mode
+                donor_stem = donor_realify_stem_path(
+                    output_root, donor, song_rel, track, audio_format,
+                )
+                if stem_is_valid(donor_stem):
+                    copy_stem(donor_stem, out_path)
+                    original_path_updates.append(
+                        (str(song_dir), track, str(donor_stem.resolve()))
+                    )
+                    continue
+                raise RuntimeError(
+                    f"Missing donor realify stem for DDSP fallback: {donor_stem}\n"
+                    f"Generate the donor realify ablation first:\n"
+                    f"  uv run python -m synthesis.synthesize --render-mode {donor} --realify"
+                )
+
         if presets is not None:
             meta_row = _stem_metadata_row(row, stems_df)
             preset = select_preset(presets, meta_row)
             if not realify_enabled(preset):
                 out_path.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(source_stem_path, out_path)
+                copy_stem(source_stem_path, out_path)
+                original_path_updates.append(
+                    (str(song_dir), track, str(source_stem_path.resolve()))
+                )
                 continue
         tasks.append({
             "row": row.to_dict(),
@@ -879,7 +939,29 @@ def build_realify_tasks(
             "audio_format": audio_format,
             "seed": stem_seed(sample_seed, str(song_dir), track),
         })
+
+    if original_path_updates:
+        _update_routing_original_paths(output_dir, original_path_updates)
     return tasks
+
+
+def _update_routing_original_paths(
+    output_dir: Path,
+    updates: list[tuple[str, int, str]],
+) -> None:
+    """Set ``original_path`` on copied stems in the realify-tree ``ddsp_routing.csv``."""
+    from synthesis.ddsp.config import DDSP_ROUTING_FILE_NAME
+
+    routing_path = Path(output_dir) / DDSP_ROUTING_FILE_NAME
+    if not routing_path.is_file() or not updates:
+        return
+    df = pd.read_csv(routing_path)
+    if "original_path" not in df.columns:
+        df["original_path"] = pd.NA
+    for song_path, track, original in updates:
+        mask = (df["path"].astype(str) == str(song_path)) & (df["track"].astype(int) == int(track))
+        df.loc[mask, "original_path"] = original
+    df.to_csv(routing_path, index=False)
 
 
 def _shutdown_pool(pool) -> None:
@@ -1231,6 +1313,9 @@ def run_realify(
     silence_enforce: bool = REALIFY_SILENCE_ENFORCE,
     content_fidelity_enforce: bool = REALIFY_CONTENT_FIDELITY_ENFORCE,
     backend: str = REALIFY_BACKEND,
+    no_mixture: bool = False,
+    output_root: str | None = None,
+    render_mode: str | None = None,
 ):
     """Realify stems on visible GPU(s) or CPU (small-music only)."""
     configure_sa3_env()
@@ -1261,6 +1346,8 @@ def run_realify(
         audio_format,
         sample_seed=sample_seed,
         presets=presets,
+        output_root=output_root,
+        render_mode=render_mode,
     )
     use_gpu = (backend == "trt" or realify_uses_gpu(model)) if tasks else False
     log_realify_plan(
@@ -1273,9 +1360,10 @@ def run_realify(
         batch_size=batch_size,
     )
     if not tasks:
-        write_mixtures_for_dataset(
-            source_dir, output_dir, audio_format, jobs=jobs,
-        )
+        if not no_mixture:
+            write_mixtures_for_dataset(
+                source_dir, output_dir, audio_format, jobs=jobs,
+            )
         return
 
     if use_gpu:
@@ -1302,9 +1390,10 @@ def run_realify(
             backend=backend,
         )
 
-    write_mixtures_for_dataset(
-        source_dir, output_dir, audio_format, jobs=jobs,
-    )
+    if not no_mixture:
+        write_mixtures_for_dataset(
+            source_dir, output_dir, audio_format, jobs=jobs,
+        )
 
 
 def resolve_output_song_dir(song_dir: Path, source_dir: Path, output_dir: Path) -> Path:

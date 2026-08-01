@@ -5,7 +5,7 @@ Turn the [PDMX](https://zenodo.org/records/13763756) symbolic music dataset into
 ## Pipeline
 
 1. **GM register** — `python -m analysis.analyze_gm_register` (correct track-name ↔ GM id mismatches; **required before any ablation**)
-2. **Synthesis** — `python -m synthesis.synthesize` with `--render-mode {basic,slakh,slakh_ddsp}`
+2. **Synthesis** — `python -m synthesis.synthesize` with `--render-mode {basic,slakh,ddsp_basic,ddsp_slakh}`
 3. **Realify** (optional) — same command with `--realify`
 4. **Full dataset** — `python -m synthesis.build_spdmx` (planned; calls `synthesize --full` internally)
 5. **Analysis** — duration stats and SA3 model recommendation

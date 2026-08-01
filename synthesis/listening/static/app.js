@@ -212,12 +212,16 @@ function renderSongDetail(detail) {
   songPathEl.textContent = detail.id || "";
 
   mixtureGridEl.innerHTML = "";
-  for (const condition of state.conditions) {
-    mixtureGridEl.append(
-      renderConditionCell(condition, detail.mixture[condition.id], null, {
-        showCaption: false,
-      })
-    );
+  const showMixtures = detail.include_mixtures !== false;
+  mixtureGridEl.classList.toggle("hidden", !showMixtures);
+  if (showMixtures) {
+    for (const condition of state.conditions) {
+      mixtureGridEl.append(
+        renderConditionCell(condition, detail.mixture[condition.id], null, {
+          showCaption: false,
+        })
+      );
+    }
   }
 
   stemsContainerEl.innerHTML = "";

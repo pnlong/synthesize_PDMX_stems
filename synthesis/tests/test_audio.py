@@ -200,6 +200,7 @@ def test_song_is_complete_requires_mixture(tmp_path: Path):
     sr = 44100
     sf.write(str(song_dir / "stem_0.mp3"), np.zeros(sr, dtype=np.float32), sr, format="MP3")
     assert not song_is_complete(song_dir, 1)
+    assert song_is_complete(song_dir, 1, require_mixture=False)
     write_mixture_from_song_dir(song_dir, [0])
     assert song_is_complete(song_dir, 1)
 

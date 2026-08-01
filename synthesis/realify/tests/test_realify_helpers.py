@@ -77,7 +77,9 @@ def test_build_realify_tasks_skips_existing(tmp_path: Path):
         "name": [None, None],
     })
 
-    tasks = build_realify_tasks(captions, source_dir, output_dir)
+    tasks = build_realify_tasks(
+        captions, source_dir, output_dir, audio_format="flac",
+    )
     assert len(tasks) == 1
     assert tasks[0]["out_path"] == str(out_song_dir / "stem_1.flac")
 
@@ -116,7 +118,7 @@ def test_build_realify_tasks_copies_passthrough_when_realify_disabled(tmp_path: 
     }
 
     tasks = build_realify_tasks(
-        captions, source_dir, output_dir, presets=presets,
+        captions, source_dir, output_dir, presets=presets, audio_format="flac",
     )
     assert len(tasks) == 1
     assert tasks[0]["out_path"] == str(out_song_dir / "stem_1.flac")
@@ -144,7 +146,9 @@ def test_build_realify_tasks_skips_invalid_stem(tmp_path: Path, monkeypatch):
         "synthesis.realify.realify.stem_is_valid",
         lambda path: path.name == "stem_0.flac",
     )
-    tasks = build_realify_tasks(captions, source_dir, output_dir)
+    tasks = build_realify_tasks(
+        captions, source_dir, output_dir, audio_format="flac",
+    )
     assert len(tasks) == 1
     assert tasks[0]["stem_path"].endswith("stem_0.flac")
 
@@ -326,7 +330,9 @@ def test_build_realify_tasks_includes_seed(tmp_path: Path):
         "prompt": ["piano"],
     })
 
-    tasks = build_realify_tasks(captions, source_dir, output_dir, sample_seed=7)
+    tasks = build_realify_tasks(
+        captions, source_dir, output_dir, sample_seed=7, audio_format="flac",
+    )
     assert len(tasks) == 1
     assert tasks[0]["seed"] == stem_seed(7, str(song_dir), 0)
 
@@ -758,6 +764,7 @@ def test_run_realify_reset_clears_existing_outputs(tmp_path: Path, monkeypatch):
         generate_captions(source_dir),
         source_dir,
         output_dir,
+        audio_format="flac",
     )
     assert tasks_before_reset == []
 
@@ -767,6 +774,7 @@ def test_run_realify_reset_clears_existing_outputs(tmp_path: Path, monkeypatch):
         generate_captions(source_dir),
         source_dir,
         output_dir,
+        audio_format="flac",
     )
     assert len(tasks_after_reset) == 1
 

@@ -2,6 +2,8 @@ const params = new URLSearchParams(window.location.search);
 const SWEEP_TYPE = params.get("type") || "patch";
 const ORDER = params.get("order") || "sequential";
 const SESSION_SEED = Number(params.get("seed") || "42");
+const PASS_NUMBER = Math.max(1, Number(params.get("pass") || "1") || 1);
+const SOURCE_VERIFICATION = params.get("from") || null;
 
 const TIER_KEYS = {
   ArrowLeft: "strong_reject",
@@ -18,18 +20,21 @@ const state = {
   cards: [],
   cardIndex: 0,
   votes: {},
+  deferred: [],
   history: [],
   storageKey: null,
   audioUnlocked: false,
   saveChain: Promise.resolve(),
   serverDirty: false,
   finalizing: false,
+  savedName: null,
 };
 
 const loadingEl = document.getElementById("loading");
 const completeEl = document.getElementById("complete");
 const panelEl = document.getElementById("swipe-panel");
 const progressEl = document.getElementById("progress");
+const categoryStatsEl = document.getElementById("category-stats");
 const saveStatusEl = document.getElementById("save-status");
 const cardLabelEl = document.getElementById("card-label");
 const cardMetaEl = document.getElementById("card-meta");
@@ -38,6 +43,8 @@ const autoplayHintEl = document.getElementById("autoplay-hint");
 const finishBtn = document.getElementById("finish-btn");
 const completeMessageEl = document.getElementById("complete-message");
 const completePathEl = document.getElementById("complete-path");
+const nextPassBtn = document.getElementById("next-pass-btn");
+const titleEl = document.getElementById("title");
 
 const audioEl = document.createElement("audio");
 audioEl.controls = true;
@@ -59,13 +66,24 @@ async function fetchJson(url) {
 
 function loadLocalVotes() {
   if (!state.storageKey) {
-    return {};
+    return { votes: {}, deferred: [] };
   }
   try {
     const raw = localStorage.getItem(state.storageKey);
-    return raw ? JSON.parse(raw) : {};
+    if (!raw) {
+      return { votes: {}, deferred: [] };
+    }
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object" && parsed.votes) {
+      return {
+        votes: parsed.votes || {},
+        deferred: Array.isArray(parsed.deferred) ? parsed.deferred : [],
+      };
+    }
+    // Legacy: plain votes map
+    return { votes: parsed || {}, deferred: [] };
   } catch {
-    return {};
+    return { votes: {}, deferred: [] };
   }
 }
 
@@ -73,13 +91,17 @@ function saveLocalVotes({ immediate = false } = {}) {
   if (!state.storageKey) {
     return;
   }
+  const payload = {
+    votes: state.votes,
+    deferred: state.deferred,
+  };
   window.clearTimeout(localSaveTimer);
   if (immediate) {
-    localStorage.setItem(state.storageKey, JSON.stringify(state.votes));
+    localStorage.setItem(state.storageKey, JSON.stringify(payload));
     return;
   }
   localSaveTimer = window.setTimeout(() => {
-    localStorage.setItem(state.storageKey, JSON.stringify(state.votes));
+    localStorage.setItem(state.storageKey, JSON.stringify(payload));
   }, LOCAL_SAVE_DEBOUNCE_MS);
 }
 
@@ -130,11 +152,201 @@ function firstUnvotedIndex(startFrom = 0) {
   return state.cards.length;
 }
 
+function removeDeferred(cardId) {
+  state.deferred = state.deferred.filter((id) => id !== cardId);
+}
+
+function isDeferred(cardId) {
+  return state.deferred.includes(cardId);
+}
+
+function categoryOrder() {
+  if (state.meta?.categories?.length) {
+    return state.meta.categories;
+  }
+  const seen = [];
+  for (const card of state.cards) {
+    if (card.category && !seen.includes(card.category)) {
+      seen.push(card.category);
+    }
+  }
+  return seen;
+}
+
+function unvotedIndicesInCategory(category) {
+  const indices = [];
+  for (let index = 0; index < state.cards.length; index += 1) {
+    const card = state.cards[index];
+    if (card.category === category && !state.votes[card.card_id]) {
+      indices.push(index);
+    }
+  }
+  return indices;
+}
+
+function pickWithinCategory(category, afterIndex) {
+  const unvoted = unvotedIndicesInCategory(category);
+  if (!unvoted.length) {
+    return null;
+  }
+
+  const fresh = unvoted.filter((index) => !isDeferred(state.cards[index].card_id));
+  const laterFresh = fresh.find((index) => index > afterIndex);
+  if (laterFresh !== undefined) {
+    return laterFresh;
+  }
+
+  // Skipped cards come back only after every other card in this category.
+  for (const cardId of state.deferred) {
+    if (state.votes[cardId]) {
+      continue;
+    }
+    const index = state.cards.findIndex((card) => card.card_id === cardId);
+    if (index >= 0 && state.cards[index].category === category) {
+      return index;
+    }
+  }
+
+  if (fresh.length > 0) {
+    return fresh[0];
+  }
+
+  const later = unvoted.find((index) => index > afterIndex);
+  if (later !== undefined) {
+    return later;
+  }
+  return unvoted[0];
+}
+
+function nextIndexAfter(fromIndex, category) {
+  // Always finish earlier/unfinished categories before continuing.
+  // This also pulls you back if a skip left unvoted cards behind.
+  for (const cat of categoryOrder()) {
+    const afterIndex = cat === category ? fromIndex : -1;
+    const pick = pickWithinCategory(cat, afterIndex);
+    if (pick === null) {
+      continue;
+    }
+    // Never land back on a card that was just voted (fromIndex).
+    if (pick === fromIndex) {
+      continue;
+    }
+    return pick;
+  }
+  return state.cards.length;
+}
+
+function activateCurrentCard() {
+  const card = currentCard();
+  if (card) {
+    removeDeferred(card.card_id);
+  }
+}
+
+function deferredCountInCategory(category) {
+  return state.deferred.filter((cardId) => {
+    if (state.votes[cardId]) {
+      return false;
+    }
+    const card = state.cards.find((entry) => entry.card_id === cardId);
+    return card && card.category === category;
+  }).length;
+}
+
+function jumpToFirstUnfinished() {
+  for (const cat of categoryOrder()) {
+    const pick = pickWithinCategory(cat, -1);
+    if (pick !== null) {
+      state.cardIndex = pick;
+      activateCurrentCard();
+      return;
+    }
+  }
+  state.cardIndex = state.cards.length;
+}
+
+function reconcileDeferredGaps() {
+  // Unvoted cards behind the furthest voted card were left behind (e.g. an
+  // old skip that jumped categories). Queue them for end-of-category return.
+  let maxVotedIndex = -1;
+  for (let index = 0; index < state.cards.length; index += 1) {
+    if (state.votes[state.cards[index].card_id]) {
+      maxVotedIndex = index;
+    }
+  }
+  for (let index = 0; index < maxVotedIndex; index += 1) {
+    const cardId = state.cards[index].card_id;
+    if (!state.votes[cardId] && !isDeferred(cardId)) {
+      state.deferred.push(cardId);
+    }
+  }
+  saveLocalVotes({ immediate: true });
+}
+
+function categoryStats(category) {
+  const cards = state.cards.filter((card) => card.category === category);
+  let left = 0;
+  let accepted = 0;
+  let rejected = 0;
+  for (const card of cards) {
+    const vote = state.votes[card.card_id];
+    if (!vote) {
+      left += 1;
+    } else if (vote.tier === "strong_accept") {
+      accepted += 1;
+    } else {
+      rejected += 1;
+    }
+  }
+  return { total: cards.length, left, accepted, rejected };
+}
+
+function allCategoryStats() {
+  const categories = state.meta?.categories || [
+    ...new Set(state.cards.map((card) => card.category).filter(Boolean)),
+  ];
+  return categories.map((category) => ({
+    category,
+    ...categoryStats(category),
+  }));
+}
+
+function formatCategoryStat(entry) {
+  return (
+    `${entry.category}: ${entry.left} left · ` +
+    `${entry.accepted} kept · ${entry.rejected} rejected`
+  );
+}
+
 function updateProgress() {
   const total = state.cards.length;
   const done = votedCount();
-  progressEl.textContent = `${done}/${total} reviewed · ${Math.max(total - done, 0)} left`;
+  const passLabel = `Pass ${state.meta?.pass || PASS_NUMBER}`;
+  progressEl.textContent =
+    `${passLabel} · ${done}/${total} reviewed · ${Math.max(total - done, 0)} left`;
   finishBtn.disabled = done === 0;
+
+  const stats = allCategoryStats();
+  if (!stats.length) {
+    categoryStatsEl.textContent = "";
+    categoryStatsEl.classList.add("hidden");
+    return;
+  }
+  categoryStatsEl.classList.remove("hidden");
+  const current = currentCard()?.category;
+  categoryStatsEl.innerHTML = "";
+  for (const entry of stats) {
+    const chip = document.createElement("span");
+    chip.className = "category-stat-chip";
+    if (entry.category === current) {
+      chip.classList.add("active");
+    }
+    if (entry.left === 0 && entry.total > 0) {
+      chip.classList.add("done");
+    }
+    chip.textContent = formatCategoryStat(entry);
+    categoryStatsEl.append(chip);
+  }
 }
 
 function updateSaveIndicator({ syncing = false, path = null, error = null } = {}) {
@@ -161,12 +373,16 @@ function buildExportPayload({ checkpoint = false } = {}) {
     verification_mode: "soundfont_shortlist_swipe",
     sweep_type: SWEEP_TYPE,
     source_responses: state.meta?.source_responses || "winners.yaml",
+    source_verification: state.meta?.source_verification || SOURCE_VERIFICATION,
+    pass: state.meta?.pass || PASS_NUMBER,
+    shortlists: state.meta?.shortlists || {},
     manifest_id: state.meta?.manifest_id,
     session_seed: SESSION_SEED,
     order: ORDER,
     exported_at: new Date().toISOString(),
     checkpoint,
     votes: Object.values(state.votes),
+    deferred: state.deferred,
   };
 }
 
@@ -188,6 +404,9 @@ function saveToServer({ checkpoint = true } = {}) {
       }
       const result = await response.json();
       state.serverDirty = false;
+      if (result.name) {
+        state.savedName = result.name;
+      }
       updateSaveIndicator({ path: result.saved });
       return result;
     })
@@ -234,17 +453,63 @@ function submitTier(tier) {
     return;
   }
   unlockAudio();
-  state.history.push({ cardId: card.card_id, previous: state.votes[card.card_id] || null });
+  removeDeferred(card.card_id);
+  state.history.push({
+    type: "vote",
+    cardId: card.card_id,
+    previous: state.votes[card.card_id] || null,
+  });
   state.votes[card.card_id] = buildVote(card, tier);
   saveLocalVotes();
   scheduleSaveToServer({ checkpoint: true });
-  state.cardIndex = firstUnvotedIndex(state.cardIndex);
+  if (isComplete()) {
+    state.cardIndex = state.cards.length;
+  } else {
+    state.cardIndex = nextIndexAfter(state.cardIndex, card.category);
+    activateCurrentCard();
+  }
+  renderCard();
+}
+
+function skipCurrentCard() {
+  const card = currentCard();
+  if (!card || state.votes[card.card_id] || isComplete()) {
+    return;
+  }
+  unlockAudio();
+  const fromIndex = state.cardIndex;
+  removeDeferred(card.card_id);
+  state.deferred.push(card.card_id);
+  saveLocalVotes();
+
+  const nextIndex = nextIndexAfter(fromIndex, card.category);
+  if (nextIndex === fromIndex) {
+    // Only this card left in the category — stay put.
+    removeDeferred(card.card_id);
+    saveLocalVotes();
+    return;
+  }
+
+  state.history.push({
+    type: "skip",
+    fromIndex,
+    cardId: card.card_id,
+  });
+  state.cardIndex = nextIndex;
+  activateCurrentCard();
   renderCard();
 }
 
 function undoLastVote() {
   const last = state.history.pop();
   if (!last) {
+    return;
+  }
+  if (last.type === "skip") {
+    removeDeferred(last.cardId);
+    state.cardIndex = last.fromIndex;
+    saveLocalVotes();
+    renderCard();
     return;
   }
   if (last.previous) {
@@ -270,19 +535,86 @@ function unlockAudio() {
   playCurrentCard();
 }
 
+function keptSummary() {
+  const stats = allCategoryStats();
+  const kept = stats.reduce((sum, entry) => sum + entry.accepted, 0);
+  const categoriesWithKept = stats.filter((entry) => entry.accepted > 0).length;
+  return { kept, categoriesWithKept, stats };
+}
+
+function nextPassUrl(savedName) {
+  const next = new URLSearchParams({
+    type: SWEEP_TYPE,
+    order: ORDER,
+    seed: String(SESSION_SEED),
+    pass: String((state.meta?.pass || PASS_NUMBER) + 1),
+    from: savedName,
+  });
+  return `/verify-swipe?${next.toString()}`;
+}
+
+function showComplete({ message, savedPath = null, offerNextPass = false } = {}) {
+  stopPlayback();
+  panelEl.classList.add("hidden");
+  completeEl.classList.remove("hidden");
+  completeMessageEl.textContent = message;
+  completePathEl.textContent = savedPath || "";
+  if (offerNextPass && state.savedName) {
+    const { kept, categoriesWithKept } = keptSummary();
+    nextPassBtn.classList.toggle("hidden", kept === 0);
+    nextPassBtn.textContent =
+      kept > 0
+        ? `Start pass ${(state.meta?.pass || PASS_NUMBER) + 1} (${kept} kept across ${categoriesWithKept} categories)`
+        : "No soundfonts kept";
+    nextPassBtn.onclick = () => {
+      window.location.href = nextPassUrl(state.savedName);
+    };
+  } else {
+    nextPassBtn.classList.add("hidden");
+  }
+}
+
 function renderCard() {
-  const card = currentCard();
-  if (!card) {
-    if (isComplete()) {
-      stopPlayback();
-      panelEl.classList.add("hidden");
-      completeEl.classList.remove("hidden");
-      completeMessageEl.textContent = "All soundfonts reviewed. Press Finish to save.";
-    }
+  if (isComplete()) {
+    state.cardIndex = state.cards.length;
+    showComplete({
+      message: "All soundfonts reviewed. Press Finish to save this pass.",
+      offerNextPass: false,
+    });
+    updateProgress();
+    finishBtn.disabled = false;
     return;
   }
+
+  let card = currentCard();
+  // If navigation landed on an already-voted card, jump to unfinished work.
+  if (!card || state.votes[card.card_id]) {
+    jumpToFirstUnfinished();
+    if (isComplete() || state.cardIndex >= state.cards.length) {
+      showComplete({
+        message: "All soundfonts reviewed. Press Finish to save this pass.",
+        offerNextPass: false,
+      });
+      updateProgress();
+      finishBtn.disabled = false;
+      return;
+    }
+    card = currentCard();
+  }
+  if (!card) {
+    return;
+  }
+
+  completeEl.classList.add("hidden");
+  panelEl.classList.remove("hidden");
+  const stats = categoryStats(card.category);
+  const skipped = deferredCountInCategory(card.category);
   cardLabelEl.textContent = card.label;
-  cardMetaEl.textContent = `${card.category} · keep or reject this soundfont`;
+  cardMetaEl.textContent = [
+    `${card.category} · keep or reject`,
+    `${stats.left} left · ${stats.accepted} kept · ${stats.rejected} rejected`,
+    skipped > 0 ? `${skipped} skipped → end of category` : null,
+  ].filter(Boolean).join(" · ");
   playCurrentCard();
   updateProgress();
 }
@@ -297,10 +629,12 @@ async function onFinish() {
   window.clearTimeout(serverSaveTimer);
   try {
     const result = await saveToServer({ checkpoint: false });
-    completePathEl.textContent = result.saved || "";
-    panelEl.classList.add("hidden");
-    completeEl.classList.remove("hidden");
-    completeMessageEl.textContent = "Verification saved on the server.";
+    state.savedName = result.name || String(result.saved || "").split(/[/\\]/).pop();
+    showComplete({
+      message: `Pass ${state.meta?.pass || PASS_NUMBER} saved. Start another pass to keep filtering, or lock with this file.`,
+      savedPath: result.saved || "",
+      offerNextPass: true,
+    });
   } catch (err) {
     state.finalizing = false;
     window.alert(`Could not save verification:\n${err.message}`);
@@ -326,6 +660,11 @@ function handleKeydown(event) {
     undoLastVote();
     return;
   }
+  if (event.key === "s" || event.key === "S" || event.key === "ArrowDown") {
+    event.preventDefault();
+    skipCurrentCard();
+    return;
+  }
   const tier = TIER_KEYS[event.key];
   if (tier) {
     event.preventDefault();
@@ -339,9 +678,25 @@ document.querySelectorAll(".swipe-pad-btn[data-tier]").forEach((button) => {
   });
 });
 
+document.getElementById("skip-btn").addEventListener("click", () => {
+  skipCurrentCard();
+});
+
 finishBtn.addEventListener("click", onFinish);
 document.addEventListener("click", unlockAudio, { once: true });
 document.addEventListener("keydown", handleKeydown);
+
+function passQuery() {
+  const query = new URLSearchParams({
+    seed: String(SESSION_SEED),
+    order: ORDER,
+    pass: String(PASS_NUMBER),
+  });
+  if (SOURCE_VERIFICATION) {
+    query.set("from", SOURCE_VERIFICATION);
+  }
+  return query;
+}
 
 async function init() {
   if (SWEEP_TYPE !== "patch") {
@@ -349,35 +704,51 @@ async function init() {
     return;
   }
 
-  const query = new URLSearchParams({
-    seed: String(SESSION_SEED),
-    order: ORDER,
-  });
+  const query = passQuery();
   state.meta = await fetchJson(`/api/${SWEEP_TYPE}/verify/swipe/meta?${query.toString()}`);
   state.storageKey = state.meta.storage_key;
   state.cards = state.meta.cards || [];
 
-  let serverPayload = { votes: [] };
+  const pass = state.meta.pass || PASS_NUMBER;
+  titleEl.textContent =
+    pass > 1 || state.meta.source_verification
+      ? `Patch shortlist verify · pass ${pass}`
+      : "Patch shortlist verify";
+
+  let serverPayload = { votes: [], deferred: [] };
   try {
-    serverPayload = await fetchJson(`/api/${SWEEP_TYPE}/verify/swipe/session`);
+    serverPayload = await fetchJson(
+      `/api/${SWEEP_TYPE}/verify/swipe/session?${query.toString()}`
+    );
   } catch {
-    serverPayload = { votes: [] };
+    serverPayload = { votes: [], deferred: [] };
   }
-  state.votes = mergeVotes(loadLocalVotes(), votesFromServerPayload(serverPayload));
+  const local = loadLocalVotes();
+  state.votes = mergeVotes(local.votes, votesFromServerPayload(serverPayload));
+  const serverDeferred = Array.isArray(serverPayload.deferred) ? serverPayload.deferred : [];
+  state.deferred = [...new Set([...(local.deferred || []), ...serverDeferred])]
+    .filter((cardId) => !state.votes[cardId]);
   saveLocalVotes({ immediate: true });
 
   if (state.cards.length === 0) {
-    loadingEl.textContent = "No shortlisted soundfonts found. Record phase-1 winners first.";
+    loadingEl.textContent = state.meta.source_verification
+      ? "No soundfonts left from the previous pass."
+      : "No shortlisted soundfonts found. Record phase-1 winners first.";
     return;
   }
 
-  state.cardIndex = firstUnvotedIndex(0);
+  // Auto-mark leftover unvoted cards behind the frontier as deferred so they
+  // return at end-of-category rather than being stranded after a bad skip.
+  reconcileDeferredGaps();
+  jumpToFirstUnfinished();
   loadingEl.classList.add("hidden");
   panelEl.classList.remove("hidden");
   if (isComplete()) {
-    completeEl.classList.remove("hidden");
-    panelEl.classList.add("hidden");
-    completeMessageEl.textContent = "All soundfonts reviewed. Press Finish to save.";
+    showComplete({
+      message: "All soundfonts reviewed. Press Finish to save this pass.",
+      offerNextPass: false,
+    });
+    finishBtn.disabled = false;
   } else {
     renderCard();
   }

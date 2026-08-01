@@ -96,6 +96,8 @@ def test_conditions_and_list_songs(tmp_path: Path):
     assert [c["id"] for c in conditions] == list(CONDITION_ORDER)
     assert conditions[0]["available"] is True
     assert conditions[0]["label"] == CONDITION_LABELS["basic"]
+    assert CONDITION_LABELS["ddsp_basic"] == "CA1"
+    assert CONDITION_LABELS["ddsp_slakh"] == "CB1"
     assert conditions[2]["available"] is False
 
     songs = catalog.list_songs()

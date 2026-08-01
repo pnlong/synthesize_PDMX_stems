@@ -67,6 +67,27 @@ def test_require_raw_synthesis_passes_when_complete(tmp_path: Path):
     )
 
 
+def test_synthesis_is_complete_stems_only_without_mixture(tmp_path: Path):
+    ablation_dir = tmp_path / "basic"
+    ablation_dir.mkdir()
+    song_dir = ablation_dir / "data" / "song"
+    song_dir.mkdir(parents=True)
+    import numpy as np
+    import soundfile as sf
+
+    sf.write(str(song_dir / "stem_0.mp3"), np.zeros(44100), 44100, format="MP3")
+    pd.DataFrame({"path": [str(song_dir)], "n_tracks": [1]}).to_csv(
+        ablation_dir / f"{DATA_DIR_NAME}.csv", index=False
+    )
+    pd.DataFrame({"path": [str(song_dir)], "track": [0]}).to_csv(
+        ablation_dir / f"{STEMS_FILE_NAME}.csv", index=False
+    )
+    assert not synthesis_is_complete(str(ablation_dir), DEFAULT_AUDIO_FORMAT)
+    assert synthesis_is_complete(
+        str(ablation_dir), DEFAULT_AUDIO_FORMAT, require_mixture=False,
+    )
+
+
 def test_reset_synthesis_output_removes_stems_and_tables(tmp_path: Path):
     ablation_dir = tmp_path / "basic"
     _write_complete_ablation(ablation_dir)

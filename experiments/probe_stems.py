@@ -35,7 +35,7 @@ PROBE_CATEGORIES = (
 PROBE_CATEGORY_GM_CLASSES: dict[str, frozenset[str]] = {
     "piano": frozenset({"piano"}),
     "drums": frozenset({"drums"}),
-    "strings": frozenset({"strings"}),
+    "strings": frozenset({"strings", "ensemble"}),
     "wind": frozenset({"pipe", "reed"}),
     "voice": frozenset({"ensemble"}),
     "mallet": frozenset({"chromatic_percussion"}),

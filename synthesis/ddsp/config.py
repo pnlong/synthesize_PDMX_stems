@@ -72,4 +72,7 @@ DDSP_ROUTING_COLUMNS = [
     "instrument_key",
     "reason",
     "n_notes",
+    "source",
+    # Absolute stem filepath this row was copied from; NA when newly rendered.
+    "original_path",
 ]

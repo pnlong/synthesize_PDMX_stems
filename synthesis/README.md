@@ -22,7 +22,8 @@ Flags: `--register PATH` to point at another CSV; `--no-register` to use raw MID
 | Script | Purpose |
 |--------|---------|
 | `synthesize.py` | Main CLI: ablation sample (default) or `--full` PDMX, `--render-mode`, `--realify` |
-| `listening/serve.py` | Localhost viewer for A1–B2 ablation comparison |
+| `listening/serve.py` | Localhost viewer for A1–CB2 ablation comparison |
+| `listening/make_clips.py` | Aligned 10s clips (windows from A1) for listening |
 | `build_spdmx.py` | Assemble final dataset at `{OUTPUT_DIR}/SPDMX/` (stub) |
 
 ## Source files
@@ -46,7 +47,7 @@ On deepfreeze:
 
 ```
 {OUTPUT_DIR}/dev/
-├── ablations/{basic,basic_realify,slakh,slakh_realify}/
+├── ablations/{basic,basic_realify,slakh,slakh_realify,ddsp_basic,ddsp_basic_realify,ddsp_slakh,ddsp_slakh_realify,clips}/
 ├── stems/              # synthesize --full
 └── stems_realify/
 ```

@@ -742,10 +742,10 @@ function renderCategory() {
   if (patchMode) {
     const shortlist = shortlistForCategory(category);
     const kept = decision.approved.length;
+    const rejected = shortlist.filter((id) => !decision.approved.includes(id)).length;
     categoryMetaEl.textContent = [
       meta?.verification_phase ? `phase ${meta.verification_phase}` : null,
-      `${shortlist.length} in auto-shortlist`,
-      `${kept} kept`,
+      `${kept} kept · ${rejected} rejected · ${shortlist.length} total`,
       meta?.mean_rating_threshold != null
         ? `threshold ≥ ${meta.mean_rating_threshold}`
         : null,

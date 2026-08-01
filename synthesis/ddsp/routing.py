@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -44,6 +45,8 @@ MIDI_DDSP_PROGRAM_TO_NAME: dict[int, str] = {
 }
 
 # Track-name substrings → MIDI-DDSP instrument (checked before coarse GM class).
+# Distinct neighbors (piccolo, pan flute, english horn, muted trumpet) are denied
+# separately — do not fold them onto URMP models.
 _NAME_ALIASES: tuple[tuple[str, str], ...] = (
     ("contrabass", "double bass"),
     ("double bass", "double bass"),
@@ -54,11 +57,15 @@ _NAME_ALIASES: tuple[tuple[str, str], ...] = (
     ("violin", "violin"),
     ("fiddle", "violin"),
     ("flute", "flute"),
-    ("piccolo", "flute"),
     ("oboe", "oboe"),
     ("clarinet", "clarinet"),
     ("bassoon", "bassoon"),
     ("saxophone", "saxophone"),
+    ("sassofono", "saxophone"),  # Italian
+    ("saxofon", "saxophone"),  # DE/SV/PL stem (saxofon/saxofón/…)
+    ("szaxofon", "saxophone"),  # Hungarian
+    ("saksafon", "saxophone"),  # TR/ID-ish spellings
+    ("saksofon", "saxophone"),  # FI/NO/…
     ("alto sax", "saxophone"),
     ("tenor sax", "saxophone"),
     ("bari sax", "saxophone"),
@@ -71,11 +78,107 @@ _NAME_ALIASES: tuple[tuple[str, str], ...] = (
     ("horn", "horn"),
 )
 
+# Name cues that must NOT map to a MIDI-DDSP instrument (timbre too different).
+_MIDI_DDSP_NAME_DENY: tuple[str, ...] = (
+    "piccolo",
+    "english horn",
+    "englishhorn",
+    "cor anglais",
+    "coranglais",
+    "pan flute",
+    "panflute",
+    "recorder",
+    "muted trumpet",
+    "mute trumpet",
+)
+
+# GM muted trumpet — keep on soundfont even when the track is named "Trumpet".
+MUTED_TRUMPET_PROGRAM = 59
+
+# GM saxophone family (Soprano/Alto/Tenor/Bari) → one MIDI-DDSP sax model.
+SAX_PROGRAMS = frozenset(range(64, 68))
+
 # GM programs that look like "bass" but are bass guitar / synth bass — never double bass.
 BASS_GUITAR_PROGRAMS = frozenset(range(32, 40))
 
-# GM piano family routed to DDSP-Piano (0–7 per plan).
+# Full GM piano-class byte range (0–7). Not all go to DDSP-Piano.
 PIANO_PROGRAMS = frozenset(range(0, 8))
+
+# Acoustic hammer pianos only (MAESTRO). Exclude electric grand (2), e-pianos (4–5),
+# harpsichord (6), clavinet (7).
+DDSP_PIANO_PROGRAMS = frozenset({0, 1, 3})
+
+# Name cues that are keyboard-family but not acoustic MAESTRO piano → soundfont.
+_PIANO_DENY_NEEDLES: tuple[str, ...] = (
+    "harpsichord",
+    "cembalo",
+    "clavinet",
+    "clavi",
+    "electric piano",
+    "epiano",
+    "e-piano",
+    "e piano",
+    "rhodes",
+    "wurlitzer",
+    "wurli",
+    "dx7",
+    "dx piano",
+    "toy piano",
+    "synth piano",
+    "digital piano",
+)
+
+# SATB part names that imply choir/voice — skipped when an instrument keyword is present
+# (e.g. "Alto Saxophone" must not count as vocal).
+_VOCAL_PART_NEEDLES: tuple[str, ...] = (
+    "soprano",
+    "alto",
+    "tenor",
+    "baritone",
+)
+_VOCAL_ALWAYS_NEEDLES: tuple[str, ...] = (
+    "voice",
+    "vocal",
+    "choir",
+    "bass singer",
+)
+# If any of these appear, SATB part needles do not imply vocals.
+_VOCAL_INSTRUMENT_EXCEPTIONS: tuple[str, ...] = (
+    "sax",
+    "saxophone",
+    "sassofono",
+    "saxofon",
+    "szaxofon",
+    "saksafon",
+    "saksofon",
+    "trumpet",
+    "cornet",
+    "trombone",
+    "tuba",
+    "clarinet",
+    "oboe",
+    "bassoon",
+    "flute",
+    "piccolo",
+    "violin",
+    "viola",
+    "cello",
+    "guitar",
+    "piano",
+    "organ",
+    "harp",
+    "french horn",
+    "english horn",
+    "horn",
+    "recorder",
+)
+
+# Guitar / lute name cues. Use word boundaries so Dutch "dwarsfluit" (flute) is not
+# matched by the "luit" substring.
+_GUITAR_NAME_RE = re.compile(
+    r"(guitar|gitar|gitarre|\blute\b|\bluit\b)",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
@@ -85,14 +188,28 @@ class StemRoute:
     reason: str
 
 
-def midi_ddsp_instrument_from_name(track_name: str | None) -> str | None:
+def _has_any(name: str, needles: tuple[str, ...]) -> bool:
+    return any(needle in name for needle in needles)
+
+
+def midi_ddsp_instrument_from_name(
+    track_name: str | None,
+    *,
+    program: int | None = None,
+) -> str | None:
     name = _normalize_name(track_name)
     if not name:
         return None
+    if _has_any(name, _MIDI_DDSP_NAME_DENY):
+        return None
     # Prefer longer / more specific aliases first (tuple order).
     for needle, instrument in _NAME_ALIASES:
-        if needle in name:
-            return instrument
+        if needle not in name:
+            continue
+        # Muted trumpet (GM 59) stays on soundfont even if named "Trumpet".
+        if instrument == "trumpet" and program is not None and int(program) == MUTED_TRUMPET_PROGRAM:
+            return None
+        return instrument
     return None
 
 
@@ -101,29 +218,49 @@ def midi_ddsp_instrument_from_program(program: int, is_drum: bool) -> str | None
         return None
     if program in BASS_GUITAR_PROGRAMS:
         return None
-    return MIDI_DDSP_PROGRAM_TO_NAME.get(int(program))
+    prog = int(program)
+    if prog in SAX_PROGRAMS:
+        return "saxophone"
+    return MIDI_DDSP_PROGRAM_TO_NAME.get(prog)
 
 
 def is_piano_stem(*, program: int, is_drum: bool, track_name: str | None) -> bool:
+    """True only for acoustic hammer piano (DDSP-Piano / MAESTRO).
+
+    Harpsichord, clavinet, and electric pianos are intentionally excluded even
+    though GM places them in the 0–7 piano class.
+    """
     if is_drum:
         return False
     name = _normalize_name(track_name)
+    if _has_any(name, _PIANO_DENY_NEEDLES):
+        return False
+    prog = int(program)
+    # Explicit non-acoustic GM piano-class programs stay on soundfont even when
+    # the track is vaguely named "Piano".
+    if prog in PIANO_PROGRAMS and prog not in DDSP_PIANO_PROGRAMS:
+        return False
     if "piano" in name and "guitar" not in name:
         return True
-    if any(k in name for k in ("harpsichord", "clavinet", "clavi", "electric piano", "epiano")):
-        return True
-    return int(program) in PIANO_PROGRAMS and _gm_class(program, is_drum) == "piano"
+    return prog in DDSP_PIANO_PROGRAMS and _gm_class(program, is_drum) == "piano"
 
 
 def is_vocal_stem(*, program: int, is_drum: bool, track_name: str | None) -> bool:
     if is_drum:
         return False
     name = _normalize_name(track_name)
-    if any(k in name for k in ("voice", "vocal", "choir", "soprano", "alto", "tenor", "baritone", "bass singer")):
-        # "bass" alone is ambiguous; require singer-ish cues above except choir/voice.
+    prog = int(program)
+    # GM saxophone family: never treat bare SATB names ("Alto", "Tenor") as choir.
+    # Only explicit voice/choir cues win (rare mislabel).
+    if prog in SAX_PROGRAMS:
+        return _has_any(name, _VOCAL_ALWAYS_NEEDLES)
+    if _has_any(name, _VOCAL_ALWAYS_NEEDLES):
+        return True
+    # SATB part names → vocal unless the track is clearly an instrument (Alto Sax, …).
+    if _has_any(name, _VOCAL_PART_NEEDLES) and not _has_any(name, _VOCAL_INSTRUMENT_EXCEPTIONS):
         return True
     gm = _gm_class(program, is_drum)
-    return gm == "ensemble" and int(program) in (52, 53, 54)  # Choir Aahs, Voice Oohs, Synth Voice
+    return gm == "ensemble" and prog in (52, 53, 54)  # Choir Aahs, Voice Oohs, Synth Voice
 
 
 def is_monophonic_messages(messages, *, ticks_per_beat: int = 480) -> bool:
@@ -180,7 +317,7 @@ def route_stem(
         return StemRoute(BACKEND_DDSP_PIANO, "piano", REASON_PIANO)
 
     name = _normalize_name(track_name)
-    if any(k in name for k in ("guitar", "gitar", "gitarre", "luit")):
+    if name and _GUITAR_NAME_RE.search(name):
         return StemRoute(BACKEND_SOUNDFONT, None, REASON_GUITAR)
     if int(program) in BASS_GUITAR_PROGRAMS or (
         _gm_class(program, is_drum) == "bass" and int(program) in BASS_GUITAR_PROGRAMS
@@ -192,7 +329,7 @@ def route_stem(
     if _gm_class(program, is_drum) == "guitar":
         return StemRoute(BACKEND_SOUNDFONT, None, REASON_GUITAR)
 
-    instrument = midi_ddsp_instrument_from_name(track_name)
+    instrument = midi_ddsp_instrument_from_name(track_name, program=program)
     if instrument is None:
         instrument = midi_ddsp_instrument_from_program(program, is_drum)
 
