@@ -130,8 +130,9 @@ REALIFY_CHUNK_OVERLAP_SEC = 2.0
 # Skip GPUs with less free VRAM at realify startup (medium needs ~8–10 GiB per worker).
 REALIFY_MIN_GPU_FREE_GB = 10.0
 REALIFY_CHUNKED_DECODE = True
-# SA3 stems per GPU forward pass. Raise on 24 GB cards (try 2–4); keep 1 on 11 GB 2080 Ti.
-REALIFY_BATCH_SIZE = 1
+# SA3 stems per GPU forward pass. 0 = auto from free/total VRAM per GPU
+# (see suggest_realify_batch_size). Positive ints override (--realify-batch-size N).
+REALIFY_BATCH_SIZE = 0
 
 # Post-SA3 silence enforcement (reference vs realified energy comparison)
 REALIFY_SILENCE_ENFORCE = True

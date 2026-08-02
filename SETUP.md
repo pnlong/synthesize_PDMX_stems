@@ -303,13 +303,16 @@ Optional override: `export SPDMX_DDSP_VENV=/path/to/venv` or
 `export SPDMX_DDSP_PYTHON=/path/to/python`.
 
 **GPU (default):** `bootstrap_venv.sh` installs CUDA 12 / cuDNN 8 pip wheels into
-`.venv-ddsp`. The worker prepends those libs to `LD_LIBRARY_PATH` and uses GPU `0`
-unless you override. Useful knobs:
+`.venv-ddsp`. The synthesizer starts a **persistent worker pool** (one long-lived
+`worker serve` process per GPU; models stay loaded). Useful knobs:
 
 | Variable | Meaning |
 |---|---|
-| `SPDMX_DDSP_CUDA_VISIBLE_DEVICES` | GPU id(s) for the TF worker (default `0`) |
-| `SPDMX_DDSP_FORCE_CPU=1` | Hide GPUs (`CUDA_VISIBLE_DEVICES=-1`) |
+| `SPDMX_DDSP_CUDA_VISIBLE_DEVICES` | GPU id(s); one serve worker each (default `0`; e.g. `0,1`) |
+| `SPDMX_DDSP_FORCE_CPU=1` | Single CPU serve worker (`CUDA_VISIBLE_DEVICES=-1`) |
+| `SPDMX_DDSP_ONESHOT=1` | Legacy per-stem subprocess + flock (debug) |
+| `SPDMX_DDSP_PIANO_CHUNK_SEC` | Piano inference chunk length (default `12`) |
+| `SPDMX_DDSP_PIANO_CHUNK_OVERLAP_SEC` | Piano chunk crossfade overlap (default `2.0`) |
 
 TF 2.15 needs CUDA **12.x** + cuDNN **8**; a host driver advertising CUDA 13 is fine
 as long as the pip CUDA-12 libs are on `LD_LIBRARY_PATH` (handled automatically).
@@ -350,13 +353,14 @@ Listen before large B3 batches. Provenance notes: [`THIRD_PARTY.md`](THIRD_PARTY
 
 ```bash
 # B3 — neural DDSP + slakh soundfont fallback (no SA3)
-# Force -j 1: TF models are large; the synthesizer also flock-serializes workers.
+# Song-level -j stays 1; neural stems within a song fan out across the GPU pool.
 SPDMX_DDSP_PYTHON=$PWD/.venv-ddsp/bin/python \
-  uv run python -m synthesis.synthesize --render-mode ddsp_slakh -j 1
+  SPDMX_DDSP_CUDA_VISIBLE_DEVICES=0,1 \
+  uv run python -m synthesis.synthesize --render-mode ddsp_slakh
 
 # B4 — optional SA3 after B3 (requires completed B3 stems)
 SPDMX_DDSP_PYTHON=$PWD/.venv-ddsp/bin/python \
-  uv run python -m synthesis.synthesize --render-mode ddsp_slakh --realify -j 1
+  uv run python -m synthesis.synthesize --render-mode ddsp_slakh --realify
 ```
 
 Coverage stats (program-only, then optional monophony pass):

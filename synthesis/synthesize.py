@@ -6,6 +6,7 @@ import argparse
 import multiprocessing
 import shutil
 import tempfile
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from os import makedirs, remove
 from os.path import dirname, exists, expanduser
 from pathlib import Path
@@ -87,11 +88,17 @@ def synthesize_song_at_index(
     completed_paths: set[str],
     args,
 ) -> tuple[dict | None, list[dict], list[dict]]:
-    """Synthesize one song. Returns (song_row, stem_rows, ddsp_routing_rows)."""
+    """Synthesize one song. Returns (song_row, stem_rows, ddsp_routing_rows).
+
+    For DDSP render modes, ``args.ddsp_pass`` selects a global phase:
+    ``ddsp_piano`` / ``midi_ddsp`` only render that neural backend; ``finalize``
+    fills donor/soundfont stems, mixtures, and CSV rows.
+    """
     path_output = dataset.at[i, "path_output"]
     song_dir = Path(path_output)
     audio_format = synthesis_audio_format(args.flac)
     require_mixture = _require_mixture(args)
+    ddsp_pass = getattr(args, "ddsp_pass", None)
 
     midi = mido.MidiFile(filename=dataset.at[i, "mid"], charset="utf8")
     n_tracks = len(midi.tracks)
@@ -106,7 +113,10 @@ def synthesize_song_at_index(
     stems_complete = all(
         stem_is_valid(stem_path(song_dir, j, audio_format)) for j in range(n_tracks)
     )
+    # Neural-only passes still run when some stems exist (render missing neural).
     need_to_synthesize = args.reset or not stems_complete
+    if uses_ddsp(args.render_mode) and ddsp_pass in ("ddsp_piano", "midi_ddsp"):
+        need_to_synthesize = True
     stem_rows: list[dict] = []
     routing_rows: list[dict] = []
 
@@ -231,6 +241,56 @@ def synthesize_song_at_index(
             )
 
         if uses_ddsp(args.render_mode):
+            from synthesis.ddsp.pool import ddsp_oneshot_enabled, get_ddsp_pool
+            from synthesis.ddsp.routing import StemRoute
+            from synthesis.ddsp.synthesize import synthesize_stem_neural
+
+            # Global two-pass: neural phases only render one backend; finalize does the rest.
+            if ddsp_pass in ("ddsp_piano", "midi_ddsp"):
+                neural_jobs: list[tuple[int, str, StemRoute]] = []
+                for j, track_path in enumerate(track_paths):
+                    meta = track_render_meta[j]
+                    if meta.get("ddsp_backend") != ddsp_pass:
+                        continue
+                    out_stem = stem_path(song_dir, j, audio_format)
+                    if stem_is_valid(out_stem) and not args.reset:
+                        continue
+                    neural_jobs.append((
+                        j,
+                        track_path,
+                        StemRoute(
+                            backend=ddsp_pass,
+                            instrument_key=meta.get("ddsp_instrument_key"),
+                            reason=meta.get("ddsp_reason") or "",
+                        ),
+                    ))
+
+                if neural_jobs:
+                    def _neural_one(job: tuple[int, str, StemRoute]):
+                        idx, mid_path, route = job
+                        return idx, synthesize_stem_neural(mid_path, route)
+
+                    if ddsp_oneshot_enabled():
+                        max_workers = 1
+                    else:
+                        max_workers = max(1, get_ddsp_pool().size)
+                    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                        futures = [
+                            executor.submit(_neural_one, job) for job in neural_jobs
+                        ]
+                        for fut in as_completed(futures):
+                            idx, waveform = fut.result()
+                            waveform = pad_and_loudness_normalize([waveform])[0]
+                            save_stem(waveform, song_dir, idx, audio_format)
+
+                for path in track_paths:
+                    if exists(path):
+                        remove(path)
+                temp_dir.cleanup()
+                # CSV / mixtures only on finalize pass.
+                return None, [], []
+
+            # Finalize (default when ddsp_pass is None or "finalize"): non-neural stems + mix.
             for j, track_path in enumerate(track_paths):
                 meta = track_render_meta[j]
                 backend = meta.get("ddsp_backend")
@@ -239,17 +299,17 @@ def synthesize_song_at_index(
                 original_path = None
 
                 if backend in ("midi_ddsp", "ddsp_piano"):
-                    from synthesis.ddsp.routing import StemRoute
-                    from synthesis.ddsp.synthesize import synthesize_stem_neural
-
-                    route = StemRoute(
-                        backend=backend,
-                        instrument_key=meta.get("ddsp_instrument_key"),
-                        reason=meta.get("ddsp_reason") or "",
-                    )
-                    waveform = synthesize_stem_neural(track_path, route)
-                    waveform = pad_and_loudness_normalize([waveform])[0]
-                    save_stem(waveform, song_dir, j, audio_format)
+                    if not stem_is_valid(out_stem):
+                        for path in track_paths:
+                            if exists(path):
+                                remove(path)
+                        temp_dir.cleanup()
+                        raise RuntimeError(
+                            f"Missing neural DDSP stem after neural passes: {out_stem}\n"
+                            f"backend={backend} song={path_output} track={j}"
+                        )
+                elif stem_is_valid(out_stem) and not args.reset:
+                    pass
                 elif donor_mode is not None and song_rel is not None:
                     donor_stem = donor_raw_stem_path(
                         args.output_dir,
@@ -383,6 +443,15 @@ def _init_synthesis_worker(dataset, completed_paths, args):
         "completed_paths": completed_paths,
         "args": args,
     }
+    if uses_ddsp(args.render_mode):
+        from synthesis.ddsp.pool import ddsp_oneshot_enabled, ensure_ddsp_pool
+
+        ddsp_pass = getattr(args, "ddsp_pass", None)
+        if (
+            ddsp_pass in ("ddsp_piano", "midi_ddsp")
+            and not ddsp_oneshot_enabled()
+        ):
+            ensure_ddsp_pool()
 
 
 def _synthesis_worker(i: int) -> tuple[dict | None, list[dict], list[dict]]:
@@ -392,6 +461,57 @@ def _synthesis_worker(i: int) -> tuple[dict | None, list[dict], list[dict]]:
         _WORKER_CTX["completed_paths"],
         _WORKER_CTX["args"],
     )
+
+
+def _run_song_pool(
+    *,
+    dataset: pd.DataFrame,
+    completed_paths: set[str],
+    args,
+    work_indices: list,
+    jobs: int,
+    desc: str,
+    stems_output_filepath: str,
+    routing_output_filepath: str | None,
+    output_filepath: str,
+    write_tables: bool,
+) -> None:
+    """Run song workers once (one DDSP pass or the non-DDSP path)."""
+    pool_ctx = (
+        multiprocessing.get_context("spawn")
+        if uses_ddsp(args.render_mode)
+        else multiprocessing
+    )
+    with pool_ctx.Pool(
+        processes=jobs,
+        initializer=_init_synthesis_worker,
+        initargs=(dataset, completed_paths, args),
+    ) as pool:
+        for song_info, stem_rows, routing_rows in tqdm(
+            pool.imap(_synthesis_worker, work_indices, chunksize=CHUNK_SIZE),
+            desc=desc,
+            total=len(work_indices),
+            unit="song",
+        ):
+            if not write_tables or song_info is None:
+                continue
+            if stem_rows:
+                append_rows_deduped(
+                    stems_output_filepath,
+                    STEMS_TABLE_COLUMNS,
+                    stem_rows,
+                )
+            if routing_rows and routing_output_filepath is not None:
+                append_rows_deduped(
+                    routing_output_filepath,
+                    DDSP_ROUTING_COLUMNS,
+                    routing_rows,
+                )
+            append_rows_deduped(
+                output_filepath,
+                SONGS_TABLE_COLUMNS,
+                [song_info],
+            )
 
 
 def reset_synthesis_output(output_dir: str) -> None:
@@ -513,41 +633,57 @@ def run_synthesis(args, output_dir: str):
         ):
             work_indices.append(i)
 
-    pool_ctx = (
-        multiprocessing.get_context("spawn")
-        if uses_ddsp(args.render_mode)
-        else multiprocessing
-    )
-    with pool_ctx.Pool(
-        processes=jobs,
-        initializer=_init_synthesis_worker,
-        initargs=(dataset, completed_paths, args),
-    ) as pool:
-        for song_info, stem_rows, routing_rows in tqdm(
-            pool.imap(_synthesis_worker, work_indices, chunksize=CHUNK_SIZE),
-            desc="Synthesizing songs",
-            total=len(work_indices),
-            unit="song",
-        ):
-            if song_info is None:
-                continue
-            if stem_rows:
-                append_rows_deduped(
-                    stems_output_filepath,
-                    STEMS_TABLE_COLUMNS,
-                    stem_rows,
-                )
-            if routing_rows and uses_ddsp(args.render_mode):
-                append_rows_deduped(
-                    routing_output_filepath,
-                    DDSP_ROUTING_COLUMNS,
-                    routing_rows,
-                )
-            append_rows_deduped(
-                output_filepath,
-                SONGS_TABLE_COLUMNS,
-                [song_info],
+    if not work_indices:
+        return
+
+    if uses_ddsp(args.render_mode):
+        from synthesis.ddsp.pool import shutdown_ddsp_pool
+
+        # Global two-pass: keep one neural backend hot per phase, then finalize.
+        print(
+            "DDSP schedule: pass1=ddsp_piano, pass2=midi_ddsp, "
+            "pass3=donors/soundfont+mixtures (pool restarts between neural passes).",
+            flush=True,
+        )
+        ddsp_passes = (
+            ("ddsp_piano", "DDSP piano stems", False),
+            ("midi_ddsp", "DDSP mono stems", False),
+            ("finalize", "DDSP finalize", True),
+        )
+        for pass_name, desc, write_tables in ddsp_passes:
+            args.ddsp_pass = pass_name
+            if pass_name == "finalize":
+                shutdown_ddsp_pool()
+            _run_song_pool(
+                dataset=dataset,
+                completed_paths=completed_paths,
+                args=args,
+                work_indices=work_indices,
+                jobs=jobs,
+                desc=desc,
+                stems_output_filepath=stems_output_filepath,
+                routing_output_filepath=routing_output_filepath,
+                output_filepath=output_filepath,
+                write_tables=write_tables,
             )
+            if pass_name in ("ddsp_piano", "midi_ddsp"):
+                # Drop resident TF models before the next backend.
+                shutdown_ddsp_pool()
+        args.ddsp_pass = None
+        return
+
+    _run_song_pool(
+        dataset=dataset,
+        completed_paths=completed_paths,
+        args=args,
+        work_indices=work_indices,
+        jobs=jobs,
+        desc="Synthesizing songs",
+        stems_output_filepath=stems_output_filepath,
+        routing_output_filepath=None,
+        output_filepath=output_filepath,
+        write_tables=True,
+    )
 
 
 def synthesis_is_complete(
@@ -658,7 +794,11 @@ def run_realify_pass(args, source_dir: str, dest_dir: str):
         model=args.model,
         limit=args.realify_limit,
         jobs=args.jobs,
-        batch_size=args.realify_batch_size or REALIFY_BATCH_SIZE,
+        batch_size=(
+            REALIFY_BATCH_SIZE
+            if args.realify_batch_size is None
+            else args.realify_batch_size
+        ),
         audio_format=audio_format,
         sample_seed=args.sample_seed,
         reset=args.reset,

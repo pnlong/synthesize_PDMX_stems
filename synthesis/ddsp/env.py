@@ -79,11 +79,48 @@ def nvidia_cuda_lib_dirs(python_exe: Path | None = None) -> list[str]:
     return libs
 
 
-def ddsp_worker_env(base: dict[str, str] | None = None) -> dict[str, str]:
+def parse_ddsp_gpu_ids(
+    *,
+    force_cpu: bool | None = None,
+    cuda_visible: str | None = None,
+    spdmx_cuda_visible: str | None = None,
+) -> list[str]:
+    """Return logical GPU id strings for one serve worker each.
+
+    - ``SPDMX_DDSP_FORCE_CPU=1`` → ``["-1"]`` (single CPU worker)
+    - Else prefer ``SPDMX_DDSP_CUDA_VISIBLE_DEVICES``, then ``CUDA_VISIBLE_DEVICES``
+    - Default ``["0"]``
+    """
+    if force_cpu is None:
+        force_cpu = os.environ.get("SPDMX_DDSP_FORCE_CPU") == "1"
+    if force_cpu:
+        return ["-1"]
+
+    if spdmx_cuda_visible is None:
+        spdmx_cuda_visible = os.environ.get("SPDMX_DDSP_CUDA_VISIBLE_DEVICES")
+    if cuda_visible is None:
+        cuda_visible = os.environ.get("CUDA_VISIBLE_DEVICES")
+
+    raw = spdmx_cuda_visible if spdmx_cuda_visible is not None else cuda_visible
+    if raw is None or str(raw).strip() == "":
+        return ["0"]
+    raw = str(raw).strip()
+    if raw == "-1":
+        return ["-1"]
+    ids = [part.strip() for part in raw.split(",") if part.strip() != ""]
+    return ids or ["0"]
+
+
+def ddsp_worker_env(
+    base: dict[str, str] | None = None,
+    *,
+    cuda_visible_devices: str | None = None,
+) -> dict[str, str]:
     """Environment for the TF worker: CUDA 12 pip libs on LD_LIBRARY_PATH.
 
     GPU is on by default. Set ``SPDMX_DDSP_FORCE_CPU=1`` to hide devices.
     Optional ``SPDMX_DDSP_CUDA_VISIBLE_DEVICES`` (default ``0``) picks a GPU.
+    Pass ``cuda_visible_devices`` to pin a single pool worker to one device.
     """
     env = dict(base if base is not None else os.environ)
     python = ddsp_python_executable()
@@ -95,7 +132,9 @@ def ddsp_worker_env(base: dict[str, str] | None = None) -> dict[str, str]:
         )
 
     env.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")
-    if os.environ.get("SPDMX_DDSP_FORCE_CPU") == "1":
+    if cuda_visible_devices is not None:
+        env["CUDA_VISIBLE_DEVICES"] = str(cuda_visible_devices)
+    elif os.environ.get("SPDMX_DDSP_FORCE_CPU") == "1":
         env["CUDA_VISIBLE_DEVICES"] = "-1"
     else:
         # Prefer an explicit picker; default to first GPU so we don't claim all cards.

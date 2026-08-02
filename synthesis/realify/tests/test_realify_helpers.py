@@ -25,9 +25,13 @@ from synthesis.realify.realify import (
     realify_uses_gpu,
     load_model,
     reset_realify_output,
+    resolve_realify_batch_size,
     select_realify_gpu_indices,
+    shard_tasks_contiguous,
     should_use_flash_attention,
+    sort_realify_tasks_for_batching,
     stem_seed,
+    suggest_realify_batch_size,
     write_mixture_task,
     write_mixtures_for_dataset,
     _normalize_generated_audio,
@@ -413,6 +417,9 @@ def test_configure_sa3_env_adds_submodule_to_sys_path():
 
 def test_run_realify_gpu_uses_spawn_pool(tmp_path: Path, monkeypatch):
     captured = {}
+    presets_path = tmp_path / "presets" / "categories.yaml"
+    presets_path.parent.mkdir(parents=True, exist_ok=True)
+    presets_path.write_text("default: {}\nrouting: []\n", encoding="utf-8")
 
     class FakeQueue:
         def __init__(self):
@@ -448,6 +455,7 @@ def test_run_realify_gpu_uses_spawn_pool(tmp_path: Path, monkeypatch):
         def imap(self, func, tasks, chunksize=1):
             captured["imap_chunksize"] = chunksize
             captured["imap_func"] = func.__name__
+            captured["imap_tasks"] = list(tasks)
             return []
 
     fake_ctx = FakeContext()
@@ -466,9 +474,9 @@ def test_run_realify_gpu_uses_spawn_pool(tmp_path: Path, monkeypatch):
     )
 
     _run_realify_gpu(
-        [{"row": {"prompt": "p", "path": "/p", "track": 0}, "stem_path": "/s", "out_path": "/o", "duration": 1.0, "seed": 1, "audio_format": "flac"}] * 2,
+        [{"row": {"prompt": "p", "path": "/p", "track": 0}, "stem_path": "/s", "out_path": "/o", "duration": 1.0, "seed": 1, "audio_format": "flac", "n_samples": 44100}] * 2,
         model="medium",
-        presets_filepath=tmp_path / "presets" / "categories.yaml",
+        presets_filepath=presets_path,
         batch_size=1,
         audio_format="flac",
     )
@@ -487,6 +495,10 @@ def test_run_realify_gpu_uses_spawn_pool(tmp_path: Path, monkeypatch):
     assert initargs[7] is not None
     assert captured["imap_func"] == "_realify_gpu_worker_shard"
     assert captured["imap_chunksize"] == 1
+    # Each shard arg is (device_id, tasks, per-GPU batch_size).
+    assert all(len(item) == 3 for item in captured["imap_tasks"])
+    assert [item[0] for item in captured["imap_tasks"]] == [0, 1]
+    assert [item[2] for item in captured["imap_tasks"]] == [1, 1]
     assert captured["pool_closed"] is True
     assert captured["pool_joined"] is True
 
@@ -521,13 +533,14 @@ def test_build_generate_kwargs_enables_chunked_decode():
     assert kwargs["batch_size"] == 1
 
 
-def test_iter_realify_batches_groups_by_preset_and_size(monkeypatch):
-    class FakeModel:
-        model_config = {"sample_size": 44100 * 120}
-        model = type("M", (), {"sample_rate": 44100})()
-
-    presets = {
-        "default": {"steps": 8, "cfg_scale": 1.0, "init_noise_level": 0.45, "prompt_variant": "current"},
+def _batching_presets():
+    return {
+        "default": {
+            "steps": 8,
+            "cfg_scale": 1.0,
+            "init_noise_level": 0.45,
+            "prompt_variant": "current",
+        },
         "categories": {
             "drums": {"steps": 10, "cfg_scale": 1.0},
         },
@@ -536,6 +549,14 @@ def test_iter_realify_batches_groups_by_preset_and_size(monkeypatch):
             {"category": "piano", "name_keywords": ["piano"]},
         ],
     }
+
+
+def test_iter_realify_batches_groups_by_preset_and_size(monkeypatch):
+    class FakeModel:
+        model_config = {"sample_size": 44100 * 120}
+        model = type("M", (), {"sample_rate": 44100})()
+
+    presets = _batching_presets()
     tasks = [
         {"row": {"prompt": "a", "is_drum": False, "name": "Piano"}, "duration": 10.0, "n_samples": 441000},
         {"row": {"prompt": "b", "is_drum": False, "name": "Piano"}, "duration": 12.0, "n_samples": 441000},
@@ -549,6 +570,73 @@ def test_iter_realify_batches_groups_by_preset_and_size(monkeypatch):
 
     batches = list(iter_realify_batches(tasks, FakeModel(), presets, batch_size=2))
     assert [len(batch) for batch in batches] == [2, 1, 1]
+
+
+def test_sort_realify_tasks_category_first_improves_batching(monkeypatch):
+    class FakeModel:
+        model_config = {"sample_size": 44100 * 120}
+        model = type("M", (), {"sample_rate": 44100})()
+
+    presets = _batching_presets()
+    # Song-major interleave: piano, drums, piano — without sorting, batching breaks.
+    tasks = [
+        {
+            "row": {"prompt": "a", "is_drum": False, "name": "Piano", "path": "s1", "track": 0},
+            "duration": 10.0,
+            "n_samples": 441000,
+        },
+        {
+            "row": {"prompt": "b", "is_drum": True, "name": "Kick", "path": "s1", "track": 1},
+            "duration": 8.0,
+            "n_samples": 352800,
+        },
+        {
+            "row": {"prompt": "c", "is_drum": False, "name": "Piano", "path": "s2", "track": 0},
+            "duration": 10.0,
+            "n_samples": 441000,
+        },
+        {
+            "row": {"prompt": "d", "is_drum": True, "name": "Snare", "path": "s2", "track": 1},
+            "duration": 8.0,
+            "n_samples": 352800,
+        },
+    ]
+    monkeypatch.setattr(
+        "synthesis.realify.realify.task_needs_chunking",
+        lambda task, model: False,
+    )
+
+    unsorted = list(iter_realify_batches(tasks, FakeModel(), presets, batch_size=2))
+    assert [len(b) for b in unsorted] == [1, 1, 1, 1]
+
+    sorted_tasks = sort_realify_tasks_for_batching(tasks, presets)
+    batches = list(iter_realify_batches(sorted_tasks, FakeModel(), presets, batch_size=2))
+    assert [len(b) for b in batches] == [2, 2]
+    assert all(t["row"]["is_drum"] for t in batches[0]) or all(
+        not t["row"]["is_drum"] for t in batches[0]
+    )
+
+
+def test_shard_tasks_contiguous_keeps_blocks():
+    tasks = [{"i": i} for i in range(5)]
+    shards = shard_tasks_contiguous(tasks, 2)
+    assert [t["i"] for t in shards[0]] == [0, 1, 2]
+    assert [t["i"] for t in shards[1]] == [3, 4]
+
+
+def test_suggest_realify_batch_size_by_gpu_class():
+    # 2080 Ti class: ~11 GiB total
+    assert suggest_realify_batch_size(10.5, 11.0, model="medium") == 1
+    # 3090 class with plenty free
+    assert suggest_realify_batch_size(22.0, 24.0, model="medium") >= 2
+    # Busy 3090 with little free → stay at 1
+    assert suggest_realify_batch_size(9.5, 24.0, model="medium") == 1
+
+
+def test_resolve_realify_batch_size_explicit_override():
+    assert resolve_realify_batch_size(3, free_gb=10.0, total_gb=11.0) == 3
+    assert resolve_realify_batch_size(0, free_gb=10.5, total_gb=11.0, model="medium") == 1
+    assert resolve_realify_batch_size(None, free_gb=10.5, total_gb=11.0, model="medium") == 1
 
 
 def test_realify_stems_batch_calls_generate_once(tmp_path: Path, monkeypatch):

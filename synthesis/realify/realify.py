@@ -59,6 +59,7 @@ from synthesis.realify.preset_config import (
     DEFAULT_PRESETS_FILE,
     load_presets,
     preset_key,
+    resolve_category,
     select_preset,
 )
 from synthesis.realify.silence import apply_silence_enforcement
@@ -169,6 +170,47 @@ def task_n_samples(task: dict) -> int | None:
     return None
 
 
+def task_category(task: dict, presets: dict) -> str:
+    row = pd.Series(task["row"])
+    return resolve_category(row, presets)
+
+
+def sort_realify_tasks_for_batching(tasks: list[dict], presets: dict) -> list[dict]:
+    """Order stems category-first, then by length, so adjacent tasks share batch keys."""
+
+    def sort_key(task: dict):
+        row = task.get("row") or {}
+        path = str(row.get("path", task.get("stem_path", "")))
+        track = int(row.get("track", 0) or 0)
+        return (
+            task_category(task, presets),
+            task_n_samples(task) or 0,
+            path,
+            track,
+        )
+
+    return sorted(tasks, key=sort_key)
+
+
+def shard_tasks_contiguous(tasks: list[dict], n_workers: int) -> list[list[dict]]:
+    """Split into contiguous blocks (keeps category/length locality for batching)."""
+    if n_workers <= 0:
+        raise ValueError("n_workers must be >= 1")
+    if n_workers == 1:
+        return [list(tasks)]
+    n = len(tasks)
+    if n == 0:
+        return [[] for _ in range(n_workers)]
+    base, rem = divmod(n, n_workers)
+    shards: list[list[dict]] = []
+    start = 0
+    for i in range(n_workers):
+        size = base + (1 if i < rem else 0)
+        shards.append(list(tasks[start : start + size]))
+        start += size
+    return shards
+
+
 def _pad_waveforms_to_common_length(
     waveforms: list[torch.Tensor],
 ) -> tuple[list[torch.Tensor], list[int]]:
@@ -253,6 +295,55 @@ def gpu_memory_snapshot(device_index: int) -> tuple[float, float, str]:
     )
 
 
+def suggest_realify_batch_size(
+    free_gb: float,
+    total_gb: float,
+    *,
+    model: str = "medium",
+    max_batch: int = 4,
+) -> int:
+    """Heuristic SA3 batch size from free/total VRAM.
+
+    Caps by GPU class (total) and by current free memory so a busy 3090
+    does not over-subscribe. Tuned for medium; small-music is lighter.
+    """
+    if model == "small-music":
+        base_gb = 4.0
+        per_extra_gb = 1.5
+        # (total_gb upper bound exclusive-ish, max batch)
+        total_caps = ((8.0, 1), (12.0, 2), (16.0, 3), (float("inf"), 4))
+    else:
+        # medium: ~8–10 GiB for batch=1; ~3 GiB per extra concurrent stem.
+        base_gb = 9.0
+        per_extra_gb = 3.0
+        total_caps = ((13.0, 1), (20.0, 2), (26.0, 3), (float("inf"), 4))
+
+    by_free = 1
+    if free_gb >= base_gb and per_extra_gb > 0:
+        by_free = 1 + int((free_gb - base_gb) / per_extra_gb)
+
+    by_total = 1
+    for threshold, cap in total_caps:
+        if total_gb < threshold:
+            by_total = cap
+            break
+
+    return max(1, min(int(max_batch), int(by_free), int(by_total)))
+
+
+def resolve_realify_batch_size(
+    requested: int | None,
+    *,
+    free_gb: float,
+    total_gb: float,
+    model: str = "medium",
+) -> int:
+    """Return explicit batch size, or VRAM heuristic when requested is None/<=0."""
+    if requested is not None and int(requested) > 0:
+        return int(requested)
+    return suggest_realify_batch_size(free_gb, total_gb, model=model)
+
+
 def select_realify_gpu_indices(
     *,
     min_free_gb: float = REALIFY_MIN_GPU_FREE_GB,
@@ -319,8 +410,12 @@ def log_realify_plan(
     print(f"Realify source: {source_dir}")
     print(f"Realify output: {output_dir}")
     print(f"Realify model: {model} ({backend})")
-    if batch_size > 1:
+    if batch_size is None or int(batch_size) <= 0:
+        print("Realify batch size: auto (per-GPU from free/total VRAM)")
+    elif batch_size > 1:
         print(f"Realify batch size: {batch_size} stems per forward pass")
+    else:
+        print("Realify batch size: 1 stem per forward pass")
     if use_gpu:
         print(
             f"Realify devices: {describe_visible_gpus(min_free_gb=REALIFY_MIN_GPU_FREE_GB)}"
@@ -782,6 +877,7 @@ def process_realify_tasks(
         batch_size = 1
     if content_fidelity_enforce and batch_size != 1:
         batch_size = 1
+    tasks = sort_realify_tasks_for_batching(tasks, presets)
     batches = list(iter_realify_batches(tasks, model, presets, batch_size))
     progress = tqdm(total=len(tasks), desc=desc, unit="stem", disable=not show_progress)
     try:
@@ -1073,8 +1169,8 @@ def _init_cpu_realify_worker(
     _REALIFY_MODEL = load_realify_model(model_name, backend=backend)
 
 
-def _realify_gpu_worker_shard(args: tuple[int, list[dict]]) -> int:
-    device_id, shard = args
+def _realify_gpu_worker_shard(args: tuple[int, list[dict], int]) -> int:
+    device_id, shard, batch_size = args
     if not shard:
         return 0
     try:
@@ -1084,7 +1180,7 @@ def _realify_gpu_worker_shard(args: tuple[int, list[dict]]) -> int:
             model=_REALIFY_MODEL,
             presets=_REALIFY_PRESETS,
             audio_format=_REALIFY_WORKER_CONFIG["audio_format"],
-            batch_size=_REALIFY_BATCH_SIZE,
+            batch_size=batch_size,
             desc="Realifying stems",
             show_progress=False,
             silence_enforce=_REALIFY_WORKER_CONFIG["silence_enforce"],
@@ -1137,7 +1233,21 @@ def _run_realify_gpu(
             "(e.g. CUDA_VISIBLE_DEVICES=0,3), or use -m small-music for CPU realify."
         )
 
+    presets = load_presets(presets_filepath)
+    tasks = sort_realify_tasks_for_batching(tasks, presets)
     n_workers = min(len(gpu_indices), len(tasks))
+
+    worker_batch_sizes: list[int] = []
+    for device_id in gpu_indices[:n_workers]:
+        free_gb, total_gb, _name = gpu_memory_snapshot(device_id)
+        worker_batch_sizes.append(
+            resolve_realify_batch_size(
+                batch_size,
+                free_gb=free_gb,
+                total_gb=total_gb,
+                model=model,
+            )
+        )
 
     if n_workers == 1:
         configure_sa3_env()
@@ -1146,22 +1256,24 @@ def _run_realify_gpu(
         device_index = gpu_indices[0]
         torch.cuda.set_device(device_index)
         free_gb, total_gb, name = gpu_memory_snapshot(device_index)
+        resolved_bs = worker_batch_sizes[0]
         print(
             f"Realify: loading SA3 {model} on GPU {device_index} "
-            f"({name}, {free_gb:.1f}/{total_gb:.1f} GiB free)"
+            f"({name}, {free_gb:.1f}/{total_gb:.1f} GiB free); "
+            f"batch_size={resolved_bs}"
+            + (" (auto)" if batch_size is None or int(batch_size) <= 0 else "")
         )
         sa3_model = load_realify_model(
             model,
             backend=backend,
             device_index=device_index,
         )
-        presets = load_presets(presets_filepath)
         process_realify_tasks(
             tasks,
             model=sa3_model,
             presets=presets,
             audio_format=audio_format,
-            batch_size=batch_size,
+            batch_size=resolved_bs,
             desc="Realifying stems (GPU)",
             silence_enforce=silence_enforce,
             content_fidelity_enforce=content_fidelity_enforce,
@@ -1170,18 +1282,21 @@ def _run_realify_gpu(
         return
 
     device_labels = []
-    for device_id in gpu_indices[:n_workers]:
+    for device_id, bs in zip(gpu_indices[:n_workers], worker_batch_sizes):
         free_gb, total_gb, name = gpu_memory_snapshot(device_id)
         device_labels.append(
-            f"GPU {device_id} ({name}, {free_gb:.1f}/{total_gb:.1f} GiB free)"
+            f"GPU {device_id} ({name}, {free_gb:.1f}/{total_gb:.1f} GiB free, "
+            f"batch={bs})"
         )
     print(
         f"Realify: loading SA3 {model} on {n_workers} GPU worker(s): "
         + "; ".join(device_labels)
     )
-    shard_size = (len(tasks) + n_workers - 1) // n_workers
+    shards = shard_tasks_contiguous(tasks, n_workers)
+    shard_sizes = ", ".join(str(len(s)) for s in shards)
     print(
-        f"Realify: {n_workers} workers × ~{shard_size} stems each; "
+        f"Realify: {n_workers} workers × [{shard_sizes}] stems "
+        "(category-sorted contiguous shards); "
         "progress updates as stems complete. "
         "Model load in workers is silent for a few minutes first.",
         flush=True,
@@ -1190,18 +1305,18 @@ def _run_realify_gpu(
     ctx = multiprocessing.get_context("spawn")
     manager = ctx.Manager()
     progress_queue = manager.Queue()
-    shards = [tasks[i::n_workers] for i in range(n_workers)]
     shard_args = [
-        (gpu_indices[i], shards[i])
+        (gpu_indices[i], shards[i], worker_batch_sizes[i])
         for i in range(n_workers)
     ]
+    # initargs batch_size is only a placeholder; each shard carries its own.
     pool = ctx.Pool(
         processes=n_workers,
         initializer=_init_gpu_realify_worker,
         initargs=(
             model,
             str(presets_filepath),
-            batch_size,
+            max(worker_batch_sizes),
             silence_enforce,
             content_fidelity_enforce,
             audio_format,
@@ -1241,6 +1356,11 @@ def _run_realify_cpu(
         raise RuntimeError("TensorRT backend requires a CUDA GPU.")
     if content_fidelity_enforce:
         batch_size = 1
+    elif batch_size is None or int(batch_size) <= 0:
+        # CPU path: no VRAM signal; keep batching modest.
+        batch_size = 1 if model == "medium" else 2
+    presets = load_presets(presets_filepath)
+    tasks = sort_realify_tasks_for_batching(tasks, presets)
     n_workers = min(max(jobs, 1), len(tasks))
 
     if n_workers == 1:
@@ -1265,7 +1385,7 @@ def _run_realify_cpu(
         )
         return
 
-    shards = [tasks[i::n_workers] for i in range(n_workers)]
+    shards = shard_tasks_contiguous(tasks, n_workers)
     ctx = multiprocessing.get_context("spawn")
     manager = ctx.Manager()
     progress_queue = manager.Queue()
@@ -1326,8 +1446,8 @@ def run_realify(
     if reset:
         reset_realify_output(output_dir)
 
-    if batch_size < 1:
-        raise ValueError(f"batch_size must be >= 1, got {batch_size}")
+    if batch_size is not None and int(batch_size) < 0:
+        raise ValueError(f"batch_size must be >= 0 (0=auto), got {batch_size}")
     if content_fidelity_enforce:
         batch_size = 1
 
@@ -1490,7 +1610,10 @@ def parse_args(args=None, namespace=None):
         "--realify-batch-size",
         default=REALIFY_BATCH_SIZE,
         type=int,
-        help="SA3 stems per GPU forward pass (default: REALIFY_BATCH_SIZE in shared/config.py).",
+        help=(
+            "SA3 stems per GPU forward pass. 0=auto from each GPU's free/total VRAM "
+            "(default: REALIFY_BATCH_SIZE in shared/config.py)."
+        ),
     )
     parser.add_argument(
         "--reset",

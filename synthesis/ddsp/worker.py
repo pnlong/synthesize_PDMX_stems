@@ -7,14 +7,20 @@ Usage (from repo root, with SPDMX_DDSP_PYTHON or .venv-ddsp):
 
   .venv-ddsp/bin/python -m synthesis.ddsp.worker ddsp_piano \\
       --midi stem.mid --out out.wav --ckpt ... --gin ... --piano-root ...
+
+  # Persistent JSONL server (one process per GPU; models cached):
+  .venv-ddsp/bin/python -m synthesis.ddsp.worker serve
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
 
 
 def _write_wav(path: Path, audio, sample_rate: int) -> None:
@@ -32,15 +38,40 @@ def _write_wav(path: Path, audio, sample_rate: int) -> None:
     sf.write(str(path), arr, sample_rate, subtype="FLOAT")
 
 
-def _run_midi_ddsp(args: argparse.Namespace) -> dict:
-    import numpy as np
+def _namespace(**kwargs: Any) -> SimpleNamespace:
+    return SimpleNamespace(**kwargs)
 
-    from midi_ddsp.data_handling.instrument_name_utils import INST_NAME_TO_ID_DICT
+
+# ---------------------------------------------------------------------------
+# MIDI-DDSP (cached)
+# ---------------------------------------------------------------------------
+
+_MIDI_CACHE: dict[str, Any] = {
+    "key": None,
+    "synthesis_generator": None,
+    "expression_generator": None,
+}
+
+
+def _midi_weights_key(weights_dir: str) -> str:
+    return str(Path(weights_dir).resolve()) if weights_dir else ""
+
+
+def _load_midi_ddsp_models(weights_dir: str):
     from midi_ddsp.midi_ddsp_synthesize import load_pretrained_model
-    from midi_ddsp.utils.midi_synthesis_utils import synthesize_mono_midi
+
+    key = _midi_weights_key(weights_dir)
+    if (
+        _MIDI_CACHE["key"] == key
+        and _MIDI_CACHE["synthesis_generator"] is not None
+    ):
+        return (
+            _MIDI_CACHE["synthesis_generator"],
+            _MIDI_CACHE["expression_generator"],
+        )
 
     load_kwargs: dict = {}
-    weights = Path(args.weights_dir) if args.weights_dir else None
+    weights = Path(weights_dir) if weights_dir else None
     if weights and weights.is_dir():
         synth_ckpt = weights / "synthesis_generator" / "50000"
         expr_ckpt = weights / "expression_generator" / "5000"
@@ -54,7 +85,21 @@ def _run_midi_ddsp(args: argparse.Namespace) -> dict:
             load_kwargs["expression_generator_path"] = str(expr_ckpt)
 
     synthesis_generator, expression_generator = load_pretrained_model(**load_kwargs)
+    _MIDI_CACHE["key"] = key
+    _MIDI_CACHE["synthesis_generator"] = synthesis_generator
+    _MIDI_CACHE["expression_generator"] = expression_generator
+    return synthesis_generator, expression_generator
 
+
+def _run_midi_ddsp(args: argparse.Namespace | SimpleNamespace) -> dict:
+    import numpy as np
+
+    from midi_ddsp.data_handling.instrument_name_utils import INST_NAME_TO_ID_DICT
+    from midi_ddsp.utils.midi_synthesis_utils import synthesize_mono_midi
+
+    synthesis_generator, expression_generator = _load_midi_ddsp_models(
+        getattr(args, "weights_dir", "") or ""
+    )
     instrument_id = INST_NAME_TO_ID_DICT[args.instrument]
     midi_audio, *_rest = synthesize_mono_midi(
         synthesis_generator,
@@ -78,20 +123,58 @@ def _run_midi_ddsp(args: argparse.Namespace) -> dict:
     }
 
 
-def _run_ddsp_piano(args: argparse.Namespace) -> dict:
-    """Run DDSP-Piano inference in fixed-duration chunks (matches gin training)."""
-    import os
-    import sys
+# ---------------------------------------------------------------------------
+# DDSP-Piano (cached)
+# ---------------------------------------------------------------------------
 
-    import gin
-    import numpy as np
-    import tensorflow as tf
-    from absl import logging
+_PIANO_CACHE: dict[str, Any] = {
+    "key": None,
+    "model": None,
+    "sample_rate": None,
+    "chunk_sec": None,
+    "warm_up": None,
+}
+
+
+def _piano_cache_key(
+    *,
+    piano_root: str,
+    ckpt: str,
+    gin: str,
+    chunk_sec: float,
+    warm_up: float,
+) -> tuple:
+    return (
+        str(Path(piano_root).resolve()),
+        str(Path(ckpt).resolve()),
+        str(Path(gin).resolve()),
+        float(chunk_sec),
+        float(warm_up),
+    )
+
+
+def _load_ddsp_piano_model(
+    *,
+    piano_root: Path,
+    ckpt: str,
+    gin: str,
+    chunk_sec: float,
+    warm_up: float,
+):
+    import gin as gin_lib
     from ddsp.training import trainers, train_util
     from ddsp.training.models import get_model
-    from soundfile import write as sf_write
 
-    piano_root = Path(args.piano_root)
+    key = _piano_cache_key(
+        piano_root=str(piano_root),
+        ckpt=ckpt,
+        gin=gin,
+        chunk_sec=chunk_sec,
+        warm_up=warm_up,
+    )
+    if _PIANO_CACHE["key"] == key and _PIANO_CACHE["model"] is not None:
+        return _PIANO_CACHE["model"]
+
     if not piano_root.is_dir():
         raise FileNotFoundError(
             f"DDSP-Piano root not found: {piano_root}. "
@@ -99,21 +182,56 @@ def _run_ddsp_piano(args: argparse.Namespace) -> dict:
             "synthesis/ddsp/third_party/ddsp-piano"
         )
 
-    sys.path.insert(0, str(piano_root))
+    if str(piano_root) not in sys.path:
+        sys.path.insert(0, str(piano_root))
     os.chdir(piano_root)
 
     from ddsp_piano.data_pipeline import get_dummy_data
-    from ddsp_piano.utils.io_utils import load_midi_as_conditioning
 
-    warm_up = float(getattr(args, "warm_up", 0.5))
-    # Longer chunks = fewer CPU forwards. Override with --chunk-sec / env.
+    gin_lib.parse_config_file(str(gin))
+    gin_lib.bind_parameter("%inference", True)
+    gin_lib.bind_parameter("%duration", chunk_sec + warm_up)
+
+    strategy = train_util.get_strategy()
+    with strategy.scope():
+        model = get_model()
+        trainer = trainers.Trainer(model=model, strategy=strategy)
+        trainer.build(
+            get_dummy_data(
+                batch_size=1,
+                duration=chunk_sec + warm_up,
+                sample_rate=model.sample_rate,
+            )
+        )
+        trainer.restore(str(ckpt))
+
+    _PIANO_CACHE["key"] = key
+    _PIANO_CACHE["model"] = model
+    _PIANO_CACHE["sample_rate"] = int(model.sample_rate)
+    _PIANO_CACHE["chunk_sec"] = chunk_sec
+    _PIANO_CACHE["warm_up"] = warm_up
+    return model
+
+
+def _run_ddsp_piano(args: argparse.Namespace | SimpleNamespace) -> dict:
+    """Run DDSP-Piano inference in fixed-duration chunks (matches gin training)."""
+    import numpy as np
+    import tensorflow as tf
+    from absl import logging
+    from soundfile import write as sf_write
+
+    piano_root = Path(args.piano_root)
+    warm_up_raw = getattr(args, "warm_up", None)
+    warm_up = float(warm_up_raw) if warm_up_raw is not None else 0.5
     chunk_sec = float(
         getattr(args, "chunk_sec", None)
         or os.environ.get("SPDMX_DDSP_PIANO_CHUNK_SEC", "12")
     )
+    overlap_sec_raw = getattr(args, "overlap_sec", None)
     overlap_sec = float(
-        getattr(args, "overlap_sec", None)
-        or os.environ.get("SPDMX_DDSP_PIANO_CHUNK_OVERLAP_SEC", "2.0")
+        overlap_sec_raw
+        if overlap_sec_raw is not None
+        else os.environ.get("SPDMX_DDSP_PIANO_CHUNK_OVERLAP_SEC", "2.0")
     )
     if overlap_sec < 0:
         raise ValueError("overlap_sec must be >= 0")
@@ -126,6 +244,20 @@ def _run_ddsp_piano(args: argparse.Namespace) -> dict:
         frames_to_samples,
         plan_chunk_frame_spans,
         stitch_audio_chunks,
+    )
+
+    # Ensure piano package imports work before loading MIDI conditioning.
+    if str(piano_root) not in sys.path:
+        sys.path.insert(0, str(piano_root))
+    os.chdir(piano_root)
+    from ddsp_piano.utils.io_utils import load_midi_as_conditioning
+
+    model = _load_ddsp_piano_model(
+        piano_root=piano_root,
+        ckpt=str(args.ckpt),
+        gin=str(args.gin),
+        chunk_sec=chunk_sec,
+        warm_up=warm_up,
     )
 
     full = load_midi_as_conditioning(
@@ -141,23 +273,6 @@ def _run_ddsp_piano(args: argparse.Namespace) -> dict:
     warm_frames = int(warm_up * frame_rate)
     n_frames = cond.shape[1]
     frame_spans = plan_chunk_frame_spans(n_frames, chunk_frames, overlap_frames)
-
-    gin.parse_config_file(str(args.gin))
-    gin.bind_parameter("%inference", True)
-    gin.bind_parameter("%duration", chunk_sec + warm_up)
-
-    strategy = train_util.get_strategy()
-    with strategy.scope():
-        model = get_model()
-        trainer = trainers.Trainer(model=model, strategy=strategy)
-        trainer.build(
-            get_dummy_data(
-                batch_size=1,
-                duration=chunk_sec + warm_up,
-                sample_rate=model.sample_rate,
-            )
-        )
-        trainer.restore(str(args.ckpt))
 
     audio_chunks: list[np.ndarray] = []
     sample_spans: list[tuple[int, int]] = []
@@ -192,7 +307,6 @@ def _run_ddsp_piano(args: argparse.Namespace) -> dict:
         }
         outs = model(inputs)
         chunk_audio = outs["audio_synth"][0, int(warm_up * model.sample_rate) :].numpy()
-        # Keep only the real (non-right-pad) audio for this MIDI span.
         start_sample = frames_to_samples(start, frame_rate, model.sample_rate)
         end_sample = frames_to_samples(end, frame_rate, model.sample_rate)
         keep = end_sample - start_sample
@@ -214,6 +328,86 @@ def _run_ddsp_piano(args: argparse.Namespace) -> dict:
     }
 
 
+# ---------------------------------------------------------------------------
+# Persistent JSONL serve mode
+# ---------------------------------------------------------------------------
+
+def _request_to_args(req: dict) -> SimpleNamespace:
+    command = req.get("command")
+    if command == "midi_ddsp":
+        return _namespace(
+            midi=req["midi"],
+            instrument=req["instrument"],
+            out=req["out"],
+            weights_dir=req.get("weights_dir", "") or "",
+        )
+    if command == "ddsp_piano":
+        return _namespace(
+            midi=req["midi"],
+            out=req["out"],
+            piano_type=int(req.get("piano_type", 0)),
+            ckpt=req["ckpt"],
+            gin=req["gin"],
+            piano_root=req["piano_root"],
+            warm_up=req.get("warm_up"),
+            chunk_sec=req.get("chunk_sec"),
+            overlap_sec=req.get("overlap_sec"),
+        )
+    raise ValueError(f"unknown command {command!r}")
+
+
+def _handle_serve_request(req: dict) -> dict:
+    req_id = req.get("id")
+    command = req.get("command")
+    if command == "ping":
+        return {"id": req_id, "ok": True, "pong": True}
+    if command == "shutdown":
+        return {"id": req_id, "ok": True, "shutdown": True}
+    try:
+        args = _request_to_args(req)
+        if command == "midi_ddsp":
+            status = _run_midi_ddsp(args)
+        elif command == "ddsp_piano":
+            status = _run_ddsp_piano(args)
+        else:
+            raise ValueError(f"unknown command {command!r}")
+        status = dict(status)
+        status["id"] = req_id
+        return status
+    except Exception as exc:
+        return {"id": req_id, "ok": False, "error": str(exc)}
+
+
+def _emit(obj: dict) -> None:
+    """Write one JSONL protocol line to stdout (never use print for logs here)."""
+    sys.stdout.write(json.dumps(obj) + "\n")
+    sys.stdout.flush()
+
+
+def _run_serve() -> int:
+    """Read JSONL jobs from stdin; write JSONL responses to stdout."""
+    # Keep protocol on stdout; send incidental noise to stderr only.
+    try:
+        sys.stdout.reconfigure(line_buffering=True)  # type: ignore[attr-defined]
+    except Exception:
+        pass
+    _emit({"ok": True, "ready": True})
+    for line in sys.stdin:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            req = json.loads(line)
+        except json.JSONDecodeError as exc:
+            _emit({"ok": False, "error": f"invalid JSON: {exc}"})
+            continue
+        status = _handle_serve_request(req)
+        _emit(status)
+        if req.get("command") == "shutdown":
+            return 0
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="synthesis.ddsp.worker")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -232,7 +426,12 @@ def main(argv: list[str] | None = None) -> int:
     p_piano.add_argument("--gin", required=True)
     p_piano.add_argument("--piano-root", required=True)
 
+    sub.add_parser("serve", help="Persistent JSONL server; models stay loaded")
+
     args = parser.parse_args(argv)
+    if args.command == "serve":
+        return _run_serve()
+
     try:
         if args.command == "midi_ddsp":
             status = _run_midi_ddsp(args)

@@ -77,7 +77,10 @@ def add_synthesis_args(parser: argparse.ArgumentParser):
         "--realify-batch-size",
         default=None,
         type=int,
-        help="SA3 stems per GPU forward pass (default: REALIFY_BATCH_SIZE in shared/config.py).",
+        help=(
+            "SA3 stems per GPU forward pass. 0=auto from each GPU's free/total VRAM "
+            "(default: REALIFY_BATCH_SIZE in shared/config.py)."
+        ),
     )
     parser.add_argument(
         "-n",

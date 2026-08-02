@@ -26,9 +26,10 @@ from synthesis.ddsp.config import (
     PIPELINE_SAMPLE_RATE,
 )
 from synthesis.ddsp.env import DdspEnvError, ddsp_python_executable, ddsp_worker_env
+from synthesis.ddsp.pool import ddsp_oneshot_enabled, get_ddsp_pool
 from synthesis.ddsp.routing import BACKEND_DDSP_PIANO, BACKEND_MIDI_DDSP, StemRoute
 
-# Cross-process lock: serialize TF workers (models are large).
+# Cross-process lock: serialize one-shot TF workers (models are large).
 _DDSP_LOCK_PATH = Path(os.environ.get("SPDMX_DDSP_LOCK", "/tmp/spdmx_ddsp_worker.lock"))
 
 # Scale timeout by MIDI length (CPU is slow; GPU is faster but loads still take time).
@@ -52,6 +53,7 @@ def _worker_timeout_sec(midi_path: Path) -> float:
 
 
 def _run_worker(args: list[str], *, timeout_sec: float) -> dict:
+    """Legacy one-shot subprocess path (also used when SPDMX_DDSP_ONESHOT=1)."""
     python = ddsp_python_executable()
     cmd = [str(python), "-m", "synthesis.ddsp.worker", *args]
     env = ddsp_worker_env()
@@ -98,6 +100,25 @@ def _run_worker(args: list[str], *, timeout_sec: float) -> dict:
         raise RuntimeError(f"DDSP worker returned non-JSON status: {lines[-1]!r}") from exc
 
 
+def _run_via_pool_or_oneshot(payload: dict, *, cli_args: list[str], timeout_sec: float) -> dict:
+    if ddsp_oneshot_enabled():
+        return _run_worker(cli_args, timeout_sec=timeout_sec)
+    pool = get_ddsp_pool()
+    status = pool.submit(payload, timeout_sec=timeout_sec)
+    if not status.get("ok"):
+        raise RuntimeError(
+            f"DDSP pool job failed: {status.get('error', status)}"
+        )
+    return status
+
+
+def _midi_ddsp_weights_dir(weights_dir: Path | None) -> Path | None:
+    weights = Path(weights_dir or MIDI_DDSP_WEIGHTS_DIR)
+    if weights.is_dir() and any(weights.iterdir()):
+        return weights
+    return None
+
+
 def synthesize_stem_midi_ddsp(
     midi_path: str | Path,
     instrument_name: str,
@@ -107,25 +128,28 @@ def synthesize_stem_midi_ddsp(
     """Synthesize a monophonic stem with MIDI-DDSP; returns (channels, samples) @ 44.1 kHz."""
     midi_path = Path(midi_path)
     timeout = _worker_timeout_sec(midi_path)
+    weights = _midi_ddsp_weights_dir(weights_dir)
     with tempfile.TemporaryDirectory(prefix="midi_ddsp_") as tmp:
         out_wav = Path(tmp) / "out.wav"
-        status = _run_worker(
-            [
-                "midi_ddsp",
-                "--midi",
-                str(midi_path),
-                "--instrument",
-                instrument_name,
-                "--out",
-                str(out_wav),
-                *(
-                    ["--weights-dir", str(weights)]
-                    if (weights := Path(weights_dir or MIDI_DDSP_WEIGHTS_DIR)).is_dir()
-                    and any(weights.iterdir())
-                    else []
-                ),
-            ],
-            timeout_sec=timeout,
+        cli_args = [
+            "midi_ddsp",
+            "--midi",
+            str(midi_path),
+            "--instrument",
+            instrument_name,
+            "--out",
+            str(out_wav),
+            *(["--weights-dir", str(weights)] if weights is not None else []),
+        ]
+        payload = {
+            "command": "midi_ddsp",
+            "midi": str(midi_path),
+            "instrument": instrument_name,
+            "out": str(out_wav),
+            "weights_dir": str(weights) if weights is not None else "",
+        }
+        status = _run_via_pool_or_oneshot(
+            payload, cli_args=cli_args, timeout_sec=timeout
         )
         sr = int(status.get("sample_rate", MIDI_DDSP_SAMPLE_RATE))
         audio, file_sr = sf.read(str(out_wav), always_2d=False)
@@ -149,25 +173,37 @@ def synthesize_stem_ddsp_piano(
     """Synthesize a (possibly polyphonic) piano stem with DDSP-Piano @ 44.1 kHz."""
     midi_path = Path(midi_path)
     timeout = _worker_timeout_sec(midi_path)
+    piano_type_i = piano_type if piano_type is not None else DDSP_PIANO_TYPE
+    ckpt_p = Path(ckpt or DDSP_PIANO_CKPT)
+    gin_p = Path(gin or DDSP_PIANO_GIN)
     with tempfile.TemporaryDirectory(prefix="ddsp_piano_") as tmp:
         out_wav = Path(tmp) / "out.wav"
-        status = _run_worker(
-            [
-                "ddsp_piano",
-                "--midi",
-                str(midi_path),
-                "--out",
-                str(out_wav),
-                "--piano-type",
-                str(piano_type if piano_type is not None else DDSP_PIANO_TYPE),
-                "--ckpt",
-                str(ckpt or DDSP_PIANO_CKPT),
-                "--gin",
-                str(gin or DDSP_PIANO_GIN),
-                "--piano-root",
-                str(DDSP_PIANO_ROOT),
-            ],
-            timeout_sec=timeout,
+        cli_args = [
+            "ddsp_piano",
+            "--midi",
+            str(midi_path),
+            "--out",
+            str(out_wav),
+            "--piano-type",
+            str(piano_type_i),
+            "--ckpt",
+            str(ckpt_p),
+            "--gin",
+            str(gin_p),
+            "--piano-root",
+            str(DDSP_PIANO_ROOT),
+        ]
+        payload = {
+            "command": "ddsp_piano",
+            "midi": str(midi_path),
+            "out": str(out_wav),
+            "piano_type": int(piano_type_i),
+            "ckpt": str(ckpt_p),
+            "gin": str(gin_p),
+            "piano_root": str(DDSP_PIANO_ROOT),
+        }
+        status = _run_via_pool_or_oneshot(
+            payload, cli_args=cli_args, timeout_sec=timeout
         )
         sr = int(status.get("sample_rate", sample_rate or DDSP_PIANO_SAMPLE_RATE))
         audio, file_sr = sf.read(str(out_wav), always_2d=False)
