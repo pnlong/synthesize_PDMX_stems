@@ -111,6 +111,23 @@ def _run_ddsp_piano(args: argparse.Namespace) -> dict:
         getattr(args, "chunk_sec", None)
         or os.environ.get("SPDMX_DDSP_PIANO_CHUNK_SEC", "12")
     )
+    overlap_sec = float(
+        getattr(args, "overlap_sec", None)
+        or os.environ.get("SPDMX_DDSP_PIANO_CHUNK_OVERLAP_SEC", "2.0")
+    )
+    if overlap_sec < 0:
+        raise ValueError("overlap_sec must be >= 0")
+    if overlap_sec >= chunk_sec:
+        raise ValueError(
+            f"overlap_sec ({overlap_sec}) must be smaller than chunk_sec ({chunk_sec})"
+        )
+
+    from synthesis.ddsp.chunking import (
+        frames_to_samples,
+        plan_chunk_frame_spans,
+        stitch_audio_chunks,
+    )
+
     full = load_midi_as_conditioning(
         args.midi,
         duration=None,
@@ -120,8 +137,10 @@ def _run_ddsp_piano(args: argparse.Namespace) -> dict:
     pedal = np.asarray(full["pedal"])
     frame_rate = 250
     chunk_frames = int(chunk_sec * frame_rate)
+    overlap_frames = int(overlap_sec * frame_rate)
     warm_frames = int(warm_up * frame_rate)
     n_frames = cond.shape[1]
+    frame_spans = plan_chunk_frame_spans(n_frames, chunk_frames, overlap_frames)
 
     gin.parse_config_file(str(args.gin))
     gin.bind_parameter("%inference", True)
@@ -141,8 +160,8 @@ def _run_ddsp_piano(args: argparse.Namespace) -> dict:
         trainer.restore(str(args.ckpt))
 
     audio_chunks: list[np.ndarray] = []
-    for start in range(0, max(n_frames, 1), chunk_frames):
-        end = min(start + chunk_frames, n_frames)
+    sample_spans: list[tuple[int, int]] = []
+    for start, end in frame_spans:
         cond_chunk = cond[:, start:end]
         pedal_chunk = pedal[:, start:end]
         # Left-pad warm-up silence so recurrent state settles.
@@ -174,10 +193,14 @@ def _run_ddsp_piano(args: argparse.Namespace) -> dict:
         outs = model(inputs)
         chunk_audio = outs["audio_synth"][0, int(warm_up * model.sample_rate) :].numpy()
         # Keep only the real (non-right-pad) audio for this MIDI span.
-        keep = int((end - start) / frame_rate * model.sample_rate)
+        start_sample = frames_to_samples(start, frame_rate, model.sample_rate)
+        end_sample = frames_to_samples(end, frame_rate, model.sample_rate)
+        keep = end_sample - start_sample
         audio_chunks.append(chunk_audio[:keep])
+        sample_spans.append((start_sample, end_sample))
 
-    audio = np.concatenate(audio_chunks, axis=0) if audio_chunks else np.zeros(0, dtype=np.float32)
+    overlap_samples = frames_to_samples(overlap_frames, frame_rate, model.sample_rate)
+    audio = stitch_audio_chunks(audio_chunks, sample_spans, overlap_samples)
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     sf_write(str(out_path), data=np.asarray(audio, dtype=np.float32), samplerate=model.sample_rate)

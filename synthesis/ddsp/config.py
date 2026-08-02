@@ -57,6 +57,10 @@ DDSP_PIANO_GIN = Path(
 DDSP_PIANO_TYPE = int(os.environ.get("DDSP_PIANO_TYPE", "0"))
 # Paper train @ 16 kHz; verify at install. Always resample to SAMPLE_RATE in wrappers.
 DDSP_PIANO_SAMPLE_RATE = int(os.environ.get("DDSP_PIANO_SAMPLE_RATE", "16000"))
+# Overlap used when stitching fixed-duration piano chunks (linear crossfade).
+DDSP_PIANO_CHUNK_OVERLAP_SEC = float(
+    os.environ.get("SPDMX_DDSP_PIANO_CHUNK_OVERLAP_SEC", "2.0")
+)
 
 PIPELINE_SAMPLE_RATE = SAMPLE_RATE
 
