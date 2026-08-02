@@ -15,6 +15,7 @@ dependencies = [
     "tqdm",
     "pyloudnorm",
     "matplotlib",
+    "seaborn",
     "librosa",
 ]
 

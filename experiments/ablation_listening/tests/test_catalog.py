@@ -11,10 +11,12 @@ from experiments.ablation_listening.catalog import AblationListeningCatalog
 
 @pytest.fixture
 def manifest_and_clips(tmp_path: Path):
+    from experiments.ablation_listening.conditions import ABLATION_MUSHRA_CONDITIONS
+
     clips_dir = tmp_path / "clips"
     trial_dir = clips_dir / "mix_01"
     trial_dir.mkdir(parents=True)
-    for cond in ("basic", "basic_realify", "slakh", "slakh_realify"):
+    for cond in ABLATION_MUSHRA_CONDITIONS:
         (trial_dir / f"{cond}.mp3").write_bytes(b"\x00" * 128)
 
     manifest = tmp_path / "trial_manifest.yaml"
@@ -30,7 +32,7 @@ def manifest_and_clips(tmp_path: Path):
             "audio_format": "mp3",
             "conditions": {
                 cond: f"mix_01/{cond}.mp3"
-                for cond in ("basic", "basic_realify", "slakh", "slakh_realify")
+                for cond in ABLATION_MUSHRA_CONDITIONS
             },
         }],
     }
@@ -40,13 +42,16 @@ def manifest_and_clips(tmp_path: Path):
 
 
 def test_catalog_get_trial(manifest_and_clips):
+    from experiments.ablation_listening.conditions import ABLATION_MUSHRA_CONDITIONS
+
     manifest, clips_dir = manifest_and_clips
     catalog = AblationListeningCatalog(manifest, clips_dir)
     detail = catalog.get_trial("mix_01", session_seed=42)
     assert detail is not None
     assert detail["reference"]["condition_id"] == "basic"
     assert detail["reference"]["available"] is True
-    assert len(detail["samples"]) == 3
+    # Blind samples = all conditions except the fixed Reference button.
+    assert len(detail["samples"]) == len(ABLATION_MUSHRA_CONDITIONS) - 1
     assert all(sample["available"] for sample in detail["samples"])
 
 

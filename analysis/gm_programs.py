@@ -164,6 +164,21 @@ def gm_id_label(gm_id_value: int) -> str:
     return f"{gm_id_value}: Unknown"
 
 
+def gm_program_display_name(gm_id_value: int) -> str:
+    """Short instrument name for plots (drums omit the channel-10 note)."""
+    if int(gm_id_value) == DRUM_GM_ID:
+        return "Drums"
+    return gm_program_name(int(gm_id_value))
+
+
+def gm_program_paper_label(gm_id_value: int) -> str:
+    """Paper-style label: ``{instrument name} ({program})``; drums are just ``Drums``."""
+    gm_id = int(gm_id_value)
+    if gm_id == DRUM_GM_ID:
+        return "Drums"
+    return f"{gm_program_display_name(gm_id)} ({gm_id})"
+
+
 def parse_tracks_cell(tracks) -> list[int] | None:
     """Split a PDMX ``tracks`` cell on ``-`` and return GM program ids."""
     if pd.isna(tracks):

@@ -9,6 +9,15 @@ from pathlib import Path
 import soundfile as sf
 import yaml
 
+from experiments.ablation_listening.conditions import (
+    ABLATION_MUSHRA_CONDITIONS,
+    CONDITION_LABELS,
+    RATING_SCALES,
+    REFERENCE_CONDITION,
+    SCALE_HELP,
+    SCALE_LABELS,
+    mushra_page_id,
+)
 from experiments.ablation_listening.paths import (
     DEFAULT_CLIPS_DIR,
     DEFAULT_MANIFEST,
@@ -17,19 +26,24 @@ from experiments.ablation_listening.paths import (
     WEBMUSHRA_STIMULI_DIR,
     WEBMUSHRA_TEST_ID,
 )
-from synthesis.listening.catalog import CONDITION_LABELS, CONDITION_ORDER
 
-REFERENCE_CONDITION = "basic"
+_CONDITION_LIST = ", ".join(
+    f"{CONDITION_LABELS[c]} ({c})" for c in ABLATION_MUSHRA_CONDITIONS
+)
 
-MUSHRA_INTRO_HTML = """
-<p><strong>sPDMX ablation listening test.</strong> Use wired headphones in a quiet room.</p>
-<p>Each trial plays four versions of the same musical excerpt (A1–B2 rendering ablations).
-The <strong>Reference</strong> button plays A1 (basic Fluidsynth synthesis). One of the four
-blind conditions is identical to the Reference; the labels are shuffled so you cannot tell
-which blind slot is the Reference.</p>
-<p>Rate <strong>Basic Audio Quality (BAQ)</strong> from 0–100 for each blind condition
-relative to the Reference (100 = transparent / identical to Reference).</p>
-<p>You may loop excerpts and switch between Reference and conditions while rating.</p>
+MUSHRA_INTRO_HTML = f"""
+<p><strong>sPDMX ablation listening test (8 conditions).</strong>
+Use wired headphones in a quiet room.</p>
+<p>Each musical excerpt appears <strong>twice</strong> — once for
+<strong>content adherence</strong> and once for <strong>realism</strong>
+(separate rating pages; same audio).</p>
+<p>The <strong>Reference</strong> button plays <strong>A1</strong>
+(<code>basic</code> Fluidsynth). Eight blind conditions are shuffled and unlabeled:
+{_CONDITION_LIST}. One blind slot is identical to the Reference.</p>
+<p>Rate each blind condition from 0–100 relative to the Reference on the scale
+named on that page. You may loop and switch between Reference and conditions.</p>
+<p>Stem trials cover all instrument categories so scores can be analyzed
+<strong>per category</strong> as well as overall.</p>
 """
 
 VOLUME_PAGE_HTML = """
@@ -87,7 +101,7 @@ def export_trial_wavs(
     conditions = trial.get("conditions") or {}
     rel_paths: dict[str, str] = {}
 
-    for condition_id in CONDITION_ORDER:
+    for condition_id in ABLATION_MUSHRA_CONDITIONS:
         rel_clip = conditions.get(condition_id)
         if not rel_clip:
             raise FileNotFoundError(f"Trial {trial_id} missing condition {condition_id}")
@@ -102,7 +116,7 @@ def export_trial_wavs(
     return rel_paths
 
 
-def trial_page_content(trial: dict) -> str:
+def trial_page_content(trial: dict, scale: str) -> str:
     trial_type = trial.get("type") or "stem"
     if trial_type == "mixture":
         label = f"Mixture — {trial.get('song_id', trial['id'])}"
@@ -111,21 +125,28 @@ def trial_page_content(trial: dict) -> str:
         label = f"Stem ({category}) — track {trial.get('track')}"
     note = trial.get("note")
     note_html = f"<p><em>{note}</em></p>" if note else ""
+    scale_label = SCALE_LABELS.get(scale, scale)
+    scale_help = SCALE_HELP.get(scale, "")
     return (
-        f"<p><strong>{label}</strong></p>"
+        f"<p><strong>{label}</strong> — rate <strong>{scale_label}</strong></p>"
         f"{note_html}"
+        f"<p>{scale_help}</p>"
         "<p>Rate each blind condition vs the Reference (A1). "
         "One blind condition matches the Reference.</p>"
     )
 
 
-def build_mushra_trial_page(trial: dict, wav_paths: dict[str, str]) -> dict:
+def build_mushra_trial_page(trial: dict, wav_paths: dict[str, str], *, scale: str) -> dict:
+    if scale not in RATING_SCALES:
+        raise ValueError(f"Unknown rating scale: {scale!r}")
     reference = wav_paths[REFERENCE_CONDITION]
+    page_id = mushra_page_id(trial["id"], scale)
+    scale_label = SCALE_LABELS[scale]
     return {
         "type": "mushra",
-        "id": trial["id"],
-        "name": trial["id"].replace("_", " ").title(),
-        "content": trial_page_content(trial),
+        "id": page_id,
+        "name": f"{trial['id'].replace('_', ' ').title()} — {scale_label}",
+        "content": trial_page_content(trial, scale),
         "showWaveform": True,
         "enableLooping": True,
         "switchBack": True,
@@ -135,7 +156,10 @@ def build_mushra_trial_page(trial: dict, wav_paths: dict[str, str]) -> dict:
         "createAnchor35": False,
         "createAnchor70": False,
         "reference": reference,
-        "stimuli": {condition_id: wav_paths[condition_id] for condition_id in CONDITION_ORDER},
+        "stimuli": {
+            condition_id: wav_paths[condition_id]
+            for condition_id in ABLATION_MUSHRA_CONDITIONS
+        },
     }
 
 
@@ -144,7 +168,7 @@ def build_webmushra_config(
     *,
     volume_stimulus: str,
     test_id: str = WEBMUSHRA_TEST_ID,
-    test_name: str = "sPDMX Ablation Listening Test",
+    test_name: str = "sPDMX Ablation Listening Test (8 conditions)",
 ) -> dict:
     trials = list(manifest.get("trials") or [])
     mushra_pages = []
@@ -152,7 +176,10 @@ def build_webmushra_config(
         wav_paths = trial.get("webmushra_wav_paths")
         if not wav_paths:
             raise ValueError(f"Trial {trial['id']} missing webmushra_wav_paths")
-        mushra_pages.append(build_mushra_trial_page(trial, wav_paths))
+        for scale in RATING_SCALES:
+            mushra_pages.append(
+                build_mushra_trial_page(trial, wav_paths, scale=scale)
+            )
 
     pages: list = [
         {
@@ -248,6 +275,7 @@ def prepare_webmushra(
                 **manifest,
                 "webmushra_root": str(webmushra_root),
                 "webmushra_config": config_name,
+                "rating_scales": list(RATING_SCALES),
                 "trials": trials,
             },
             f,

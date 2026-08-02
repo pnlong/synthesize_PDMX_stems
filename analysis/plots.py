@@ -10,6 +10,22 @@ import pandas as pd
 from shared.config import SA3_MEDIUM_MAX_DURATION, SA3_SMALL_MUSIC_MAX_DURATION
 
 
+def _savefig(
+    fig: plt.Figure,
+    output_path: str | Path,
+    *,
+    dpi: int = 150,
+    pad_inches: float = 0.1,
+) -> None:
+    """Save a figure; PDFs use a transparent background for paper inclusion."""
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    kwargs: dict = {"dpi": dpi, "bbox_inches": "tight", "pad_inches": pad_inches}
+    if output_path.suffix.lower() == ".pdf":
+        kwargs.update(transparent=True, facecolor="none", edgecolor="none")
+    fig.savefig(output_path, **kwargs)
+
+
 def _add_sa3_limits(ax: plt.Axes):
     ax.axvline(
         SA3_SMALL_MUSIC_MAX_DURATION,
@@ -48,7 +64,7 @@ def plot_histogram(
     ax.set_xlim(0, max_seconds)
     ax.legend(loc="upper right")
     fig.tight_layout()
-    fig.savefig(output_path, dpi=150)
+    _savefig(fig, output_path)
     plt.close(fig)
 
 
@@ -76,7 +92,7 @@ def plot_percentiles(
     ax.grid(True, alpha=0.3)
     ax.legend(loc="lower right")
     fig.tight_layout()
-    fig.savefig(output_path, dpi=150)
+    _savefig(fig, output_path)
     plt.close(fig)
 
 
@@ -178,7 +194,7 @@ def plot_gm_program_bar(
     ax.set_ylabel("GM program id")
     ax.set_title(title)
     fig.tight_layout()
-    fig.savefig(output_path, dpi=150)
+    _savefig(fig, output_path)
     plt.close(fig)
 
 
@@ -187,82 +203,104 @@ def plot_gm_program_compare(
     stems_corrected: pd.DataFrame,
     output_path: str | Path,
     *,
-    top_n: int = 40,
-    title: str = "GM program usage: original vs corrected",
+    top_n: int = 10,
+    rank_by: str = "corrected",
+    show_percentages: bool = False,
+    figsize: tuple[float, float] = (8.0, 4.0),
 ):
-    """Two-panel horizontal bar chart with a shared GM-id y-axis.
+    """Grouped horizontal bar chart: original vs register-corrected GM usage.
 
-    Left = raw MIDI programs; right = register ``program_corrected``.
-    Y-order follows corrected counts (ascending). Each panel has its own x-scale.
+    Selects the top ``top_n`` programs by ``rank_by`` (``corrected`` or
+    ``original``) stem count and plots each program's share under both
+    inventories. The long tail is omitted (no ``Other`` bucket). Rows are
+    ordered by the ranking inventory (most → least). Default figsize is 2:1
+    (wide). No figure title.
     """
-    from analysis.gm_programs import DRUM_GM_ID, gm_id_label
+    import seaborn as sns
+
+    from analysis.gm_programs import gm_program_paper_label
 
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    xlabel = "Percentage of Stems (%)"
+    if rank_by not in {"corrected", "original"}:
+        raise ValueError("rank_by must be 'corrected' or 'original'")
 
     left_counts = _gm_count_series(stems_original)
     right_counts = _gm_count_series(stems_corrected)
     left_total = int(left_counts.sum())
     right_total = int(right_counts.sum())
+    rank_counts = right_counts if rank_by == "corrected" else left_counts
+    rank_total = right_total if rank_by == "corrected" else left_total
 
-    left_ids = set(_select_gm_ids_for_plot(left_counts, top_n=top_n, drum_id=DRUM_GM_ID))
-    right_ids = set(_select_gm_ids_for_plot(right_counts, top_n=top_n, drum_id=DRUM_GM_ID))
-    shared_ids = left_ids | right_ids
-    if not shared_ids:
-        fig, ax = plt.subplots(figsize=(20, 4))
-        ax.set_title(title)
-        fig.savefig(output_path, dpi=150)
+    if rank_counts.empty or rank_total <= 0:
+        fig, ax = plt.subplots(figsize=figsize)
+        ax.set_ylabel("General MIDI Program")
+        ax.set_xlabel(xlabel)
+        _savefig(fig, output_path)
         plt.close(fig)
         return
 
-    # Sort by corrected count so the right panel defines the row order.
-    ordered = sorted(shared_ids, key=lambda g: int(right_counts.get(g, 0)))
-    labels = [gm_id_label(int(g)) for g in ordered]
-    left_vals = [int(left_counts.get(g, 0)) for g in ordered]
-    right_vals = [int(right_counts.get(g, 0)) for g in ordered]
+    if top_n <= 0 or len(rank_counts) <= top_n:
+        ordered = list(rank_counts.sort_values(ascending=False).index)
+    else:
+        ordered = list(rank_counts.sort_values(ascending=False).head(top_n).index)
 
-    y = range(len(ordered))
-    fig_height = max(6, 0.28 * len(ordered))
-    fig, (ax_l, ax_r) = plt.subplots(
-        1,
-        2,
-        figsize=(22, fig_height),
-        sharey=True,
-        constrained_layout=True,
-    )
+    # PDMX = raw MIDI program_change inventory; sPDMX = register-corrected inventory.
+    hue_order = ["PDMX", "sPDMX"]
+    rank_rows: list[tuple[str, float, float, float]] = []
+    for gm_id in ordered:
+        label = gm_program_paper_label(int(gm_id))
+        left_n = int(left_counts.get(gm_id, 0))
+        right_n = int(right_counts.get(gm_id, 0))
+        left_pct = 100.0 * left_n / left_total if left_total else 0.0
+        right_pct = 100.0 * right_n / right_total if right_total else 0.0
+        rank_pct = right_pct if rank_by == "corrected" else left_pct
+        rank_rows.append((label, left_pct, right_pct, rank_pct))
 
-    bars_l = ax_l.barh(y, left_vals, color="C0", alpha=0.9)
-    bars_r = ax_r.barh(y, right_vals, color="C0", alpha=0.9)
-    ax_l.bar_label(
-        bars_l,
-        labels=_count_labels_with_pct(left_vals, left_total),
-        padding=3,
-        fontsize=7,
-    )
-    ax_r.bar_label(
-        bars_r,
-        labels=_count_labels_with_pct(right_vals, right_total),
-        padding=3,
-        fontsize=7,
-    )
+    rank_rows.sort(key=lambda row: (-row[3], row[0]))
+    labels = [label for label, _, _, _ in rank_rows]
 
-    ax_l.set_yticks(list(y))
-    ax_l.set_yticklabels(labels)
-    ax_l.set_xlabel("Stem count")
-    ax_r.set_xlabel("Stem count")
-    ax_l.set_title("Original (MIDI program_change)")
-    ax_r.set_title("Corrected (GM register)")
-    ax_l.set_ylabel("GM program id")
+    rows: list[dict] = []
+    for label, left_pct, right_pct, _rank_pct in rank_rows:
+        rows.append({"label": label, "source": "PDMX", "pct": left_pct})
+        rows.append({"label": label, "source": "sPDMX", "pct": right_pct})
+    plot_df = pd.DataFrame(rows)
 
-    # Independent x-scales (only y is shared); room for ``count (pct%)`` labels.
-    ax_l.set_xlim(0, max(left_vals, default=0) * 1.28 + 1)
-    ax_r.set_xlim(0, max(right_vals, default=0) * 1.28 + 1)
-    _style_gm_count_axis(ax_l)
-    _style_gm_count_axis(ax_r)
+    sns.set_theme(style="ticks", context="paper")
+    try:
+        fig, ax = plt.subplots(figsize=figsize)
+        sns.barplot(
+            data=plot_df,
+            y="label",
+            x="pct",
+            hue="source",
+            order=labels,
+            hue_order=hue_order,
+            orient="h",
+            ax=ax,
+            palette={"PDMX": "C0", "sPDMX": "C1"},
+            saturation=0.9,
+        )
+        ax.set_xlabel(xlabel)
+        ax.set_ylabel("General MIDI Program")
+        ax.set_title("")
+        ax.legend(loc="lower right", frameon=True, fontsize=8, title=None)
+        ax.set_xlim(0, max(float(plot_df["pct"].max()) * 1.12, 1.0))
+        _style_gm_count_axis(ax)
+        sns.despine(ax=ax)
+        ax.tick_params(axis="y", labelsize=8)
+        ax.tick_params(axis="x", labelsize=8)
 
-    fig.suptitle(title)
-    fig.savefig(output_path, dpi=150)
-    plt.close(fig)
+        if show_percentages:
+            for container in ax.containers:
+                ax.bar_label(container, fmt="%.0f%%", padding=2, fontsize=7)
+
+        fig.tight_layout()
+        _savefig(fig, output_path, pad_inches=0.02)
+        plt.close(fig)
+    finally:
+        sns.reset_defaults()
 
 
 def plot_track_name_bar(
@@ -308,5 +346,5 @@ def plot_track_name_bar(
         idx = labels.index(UNNAMED_TRACK)
         bars[idx].set_color("C3")
     fig.tight_layout()
-    fig.savefig(output_path, dpi=150)
+    _savefig(fig, output_path)
     plt.close(fig)

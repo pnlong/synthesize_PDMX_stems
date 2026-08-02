@@ -58,11 +58,15 @@ def _write_piano_and_drums(path: Path):
 
 
 def test_gm_id_labels():
+    from analysis.gm_programs import gm_program_paper_label
+
     assert gm_program_name(0) == "Acoustic Grand Piano"
     assert gm_program_name(56) == "Trumpet"
     assert gm_id_label(0).startswith("0:")
     assert gm_id_label(56) == "56: Trumpet"
     assert "Drums" in gm_id_label(DRUM_GM_ID)
+    assert gm_program_paper_label(0) == "Acoustic Grand Piano (0)"
+    assert gm_program_paper_label(DRUM_GM_ID) == "Drums"
 
 
 def test_parse_tracks_cell():

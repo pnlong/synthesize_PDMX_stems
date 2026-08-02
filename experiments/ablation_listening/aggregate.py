@@ -21,18 +21,28 @@ from experiments.listening_shared.scale import (
 )
 from synthesis.listening.catalog import CONDITION_LABELS, CONDITION_ORDER
 
+# 4×2: render family × realify (covers A/B/CA/CB).
 FACTORIAL_ROWS = {
     "basic": "basic",
     "basic_realify": "basic",
     "slakh": "slakh",
     "slakh_realify": "slakh",
+    "ddsp_basic": "ddsp_basic",
+    "ddsp_basic_realify": "ddsp_basic",
+    "ddsp_slakh": "ddsp_slakh",
+    "ddsp_slakh_realify": "ddsp_slakh",
 }
 FACTORIAL_COLS = {
     "basic": "synthetic",
     "slakh": "synthetic",
+    "ddsp_basic": "synthetic",
+    "ddsp_slakh": "synthetic",
     "basic_realify": "realified",
     "slakh_realify": "realified",
+    "ddsp_basic_realify": "realified",
+    "ddsp_slakh_realify": "realified",
 }
+FACTORIAL_ROW_ORDER = ("basic", "slakh", "ddsp_basic", "ddsp_slakh")
 
 
 def load_responses(path: Path) -> dict:
@@ -119,13 +129,15 @@ def band_breakdown(df: pd.DataFrame, field: str) -> pd.DataFrame:
 
 def factorial_table(means: pd.DataFrame, field: str) -> pd.DataFrame:
     table = pd.DataFrame(
-        index=["basic", "slakh"],
+        index=list(FACTORIAL_ROW_ORDER),
         columns=["synthetic", "realified"],
         dtype=float,
     )
     for condition_id, row in means.iterrows():
         value = row[field]
         if pd.isna(value):
+            continue
+        if condition_id not in FACTORIAL_ROWS:
             continue
         r = FACTORIAL_ROWS[condition_id]
         c = FACTORIAL_COLS[condition_id]
@@ -156,7 +168,9 @@ def summarize(df: pd.DataFrame) -> dict:
     means["content_likert"] = means["content"].apply(
         lambda v: likert_equivalent(v) if pd.notna(v) else None
     )
-    means["realism_likert"] = means["realism"].map(likert_equivalent)
+    means["realism_likert"] = means["realism"].apply(
+        lambda v: likert_equivalent(v) if pd.notna(v) else None
+    )
 
     means_by_condition = {}
     for cond, row in means.iterrows():
@@ -226,21 +240,21 @@ def render_markdown(summary: dict, *, responses_path: Path) -> str:
             f"{content_band} | {stats['realism_band']} |"
         )
 
-    lines.extend(["", "## 2×2 factorial (content)", ""])
+    lines.extend(["", "## 4×2 factorial (content)", ""])
     fc = summary.get("factorial_content", {})
     lines.append("| | Synthetic | Realified |")
     lines.append("|--|-----------|-----------|")
-    for row in ("basic", "slakh"):
+    for row in FACTORIAL_ROW_ORDER:
         lines.append(
             f"| {row} | {fc.get(row, {}).get('synthetic', '—')} | "
             f"{fc.get(row, {}).get('realified', '—')} |"
         )
 
-    lines.extend(["", "## 2×2 factorial (realism)", ""])
+    lines.extend(["", "## 4×2 factorial (realism)", ""])
     fr = summary.get("factorial_realism", {})
     lines.append("| | Synthetic | Realified |")
     lines.append("|--|-----------|-----------|")
-    for row in ("basic", "slakh"):
+    for row in FACTORIAL_ROW_ORDER:
         lines.append(
             f"| {row} | {fr.get(row, {}).get('synthetic', '—')} | "
             f"{fr.get(row, {}).get('realified', '—')} |"

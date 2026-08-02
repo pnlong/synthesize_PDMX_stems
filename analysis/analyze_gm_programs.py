@@ -209,7 +209,6 @@ def write_gm_program_outputs(
             stems,
             compare_path,
             top_n=top_n,
-            title="GM program usage: original vs corrected",
         )
         written.append(compare_path)
 
