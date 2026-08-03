@@ -143,6 +143,47 @@ def stem_listening_category(stem_row: pd.Series) -> str:
     )
 
 
+def _row_original_track(stem_row: pd.Series) -> int:
+    track = int(stem_row["track"])
+    if "original_track" not in stem_row.index:
+        return track
+    value = stem_row.get("original_track")
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return track
+    try:
+        if pd.isna(value):
+            return track
+    except TypeError:
+        pass
+    return int(value)
+
+
+def _stem_file_track_for_condition(
+    *,
+    condition_stems: pd.DataFrame | None,
+    song_path: str,
+    original_track: int,
+    fallback_track: int,
+) -> int:
+    """On-disk stem index in ``condition`` for a logical ``original_track``."""
+    if condition_stems is None or condition_stems.empty:
+        return fallback_track
+    rows = condition_stems[condition_stems["path"].astype(str) == str(song_path)]
+    if rows.empty:
+        return fallback_track
+    if "original_track" in rows.columns:
+        matched = rows[rows["original_track"].fillna(rows["track"]).astype(int) == original_track]
+        if not matched.empty:
+            return int(matched.iloc[0]["track"])
+    matched = rows[rows["track"].astype(int) == original_track]
+    if not matched.empty:
+        return int(matched.iloc[0]["track"])
+    matched = rows[rows["track"].astype(int) == fallback_track]
+    if not matched.empty:
+        return int(matched.iloc[0]["track"])
+    return fallback_track
+
+
 class AblationCatalog:
     def __init__(
         self,
@@ -160,6 +201,9 @@ class AblationCatalog:
         self.include_mixtures = include_mixtures
         self._songs_df = self._load_songs()
         self._stems_df = self._load_stems()
+        self._stems_by_condition: dict[str, pd.DataFrame] = {
+            self.reference_condition: self._stems_df,
+        }
         self._captions_df = self._build_captions()
         self._categories_by_path = self._index_song_categories()
 
@@ -178,8 +222,23 @@ class AblationCatalog:
     def _load_stems(self) -> pd.DataFrame:
         path = self.ablations_dir / self.reference_condition / f"{STEMS_FILE_NAME}.csv"
         if not path.is_file():
-            return pd.DataFrame(columns=["path", "track", "program", "is_drum", "name", "has_lyrics"])
+            return pd.DataFrame(
+                columns=[
+                    "path", "track", "original_track", "program", "is_drum", "name", "has_lyrics",
+                ]
+            )
         return pd.read_csv(path)
+
+    def _condition_stems(self, condition: str) -> pd.DataFrame | None:
+        if condition in self._stems_by_condition:
+            return self._stems_by_condition[condition]
+        path = self.ablations_dir / condition / f"{STEMS_FILE_NAME}.csv"
+        if not path.is_file():
+            self._stems_by_condition[condition] = pd.DataFrame()
+            return self._stems_by_condition[condition]
+        df = pd.read_csv(path)
+        self._stems_by_condition[condition] = df
+        return df
 
     def _build_captions(self) -> pd.DataFrame:
         if self._stems_df.empty or self._songs_df.empty:
@@ -268,17 +327,23 @@ class AblationCatalog:
         stems = []
         for _, stem_row in stems_rows.iterrows():
             track = int(stem_row["track"])
-            stem_filename_str = stem_filename(track, audio_format)
-            conditions = {
-                condition: _audio_cell(
+            original_track = _row_original_track(stem_row)
+            conditions = {}
+            for condition in CONDITION_ORDER:
+                file_track = _stem_file_track_for_condition(
+                    condition_stems=self._condition_stems(condition),
+                    song_path=str(song_path),
+                    original_track=original_track,
+                    fallback_track=track,
+                )
+                stem_filename_str = stem_filename(file_track, audio_format)
+                conditions[condition] = _audio_cell(
                     self.ablations_dir,
                     self.reference_condition,
                     song_path,
                     condition,
                     stem_filename_str,
                 )
-                for condition in CONDITION_ORDER
-            }
             caption = None
             if not self._captions_df.empty:
                 cap_rows = self._captions_df[
@@ -290,6 +355,7 @@ class AblationCatalog:
 
             stems.append({
                 "track": track,
+                "original_track": original_track,
                 "name": _na_to_none(stem_row.get("name")) or f"Track {track}",
                 "program": int(stem_row["program"]) if pd.notna(stem_row.get("program")) else None,
                 "is_drum": bool(stem_row.get("is_drum", False)),

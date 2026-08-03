@@ -22,6 +22,7 @@ REASON_DRUM = "soundfont_drum"
 REASON_BASS_GUITAR = "soundfont_bass_guitar"
 REASON_VOCAL = "soundfont_vocal"
 REASON_GUITAR = "soundfont_guitar"
+REASON_EMPTY = "empty_track"
 
 # Canonical MIDI-DDSP / URMP names → GM program (0-indexed), matching magenta midi-ddsp.
 MIDI_DDSP_NAME_TO_PROGRAM: dict[str, int] = {
@@ -292,6 +293,15 @@ def is_monophonic_track(track, *, ticks_per_beat: int = 480) -> bool:
     return is_monophonic_messages(track, ticks_per_beat=ticks_per_beat)
 
 
+def _note_on_count(messages) -> int:
+    return sum(
+        1
+        for message in messages
+        if getattr(message, "type", None) == "note_on"
+        and getattr(message, "velocity", 0) > 0
+    )
+
+
 def route_stem(
     *,
     program: int,
@@ -309,6 +319,15 @@ def route_stem(
     """
     if is_drum:
         return StemRoute(BACKEND_SOUNDFONT, None, REASON_DRUM)
+
+    # Grand-staff / conductor stubs often have a name + program default 0 but no notes.
+    # Sending those to DDSP-Piano yields a zero-length file that fails finalize.
+    if track is not None and _note_on_count(track) == 0:
+        return StemRoute(BACKEND_SOUNDFONT, None, REASON_EMPTY)
+    if track is None and midi_path is not None:
+        midi = mido.MidiFile(filename=str(midi_path), charset="utf8")
+        if sum(_note_on_count(t) for t in midi.tracks) == 0:
+            return StemRoute(BACKEND_SOUNDFONT, None, REASON_EMPTY)
 
     if is_vocal_stem(program=program, is_drum=is_drum, track_name=track_name):
         return StemRoute(BACKEND_SOUNDFONT, None, REASON_VOCAL)

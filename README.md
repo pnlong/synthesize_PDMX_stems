@@ -4,7 +4,7 @@ Turn the [PDMX](https://zenodo.org/records/13763756) symbolic music dataset into
 
 ## Pipeline
 
-1. **GM register** — `python -m analysis.analyze_gm_register` (correct track-name ↔ GM id mismatches; **required before any ablation**)
+1. **Synthesis setup** — `python -m analysis.prepare_synthesis` (GM register + dense corrected MIDIs; **required before any ablation**)
 2. **Synthesis** — `python -m synthesis.synthesize` with `--render-mode {basic,slakh,ddsp_basic,ddsp_slakh}`
 3. **Realify** (optional) — same command with `--realify`
 4. **Full dataset** — `python -m synthesis.build_spdmx` (planned; calls `synthesize --full` internally)
@@ -36,7 +36,7 @@ Default behavior: random sample from `subset:rated_deduplicated` (N=100, seed=42
 
 ```bash
 # Step 0 — correct GM ids from track names (once; re-run after alias YAML edits)
-uv run python -m analysis.analyze_gm_register --subset all_valid -j 8
+uv run python -m analysis.prepare_synthesis --subset all_valid -j 8
 # → {OUTPUT_DIR}/dev/analysis/instruments/all_valid/register.csv
 
 # A1 / B1 — raw stems (loads register by default)
@@ -65,11 +65,16 @@ Output:
 ### Full PDMX (after listening test)
 
 ```bash
-uv run python -m synthesis.synthesize --render-mode basic --full
-uv run python -m synthesis.synthesize --render-mode basic --full --realify
+# Step 0 (if not already): register + dense corrected MIDIs (default)
+uv run python -m analysis.prepare_synthesis --subset all_valid -j 8
+
+# Engineered full stems (feature flag until legacy path is dropped)
+SPDMX_DENSE_MIDI=1 uv run python -m synthesis.synthesize --render-mode basic --full
+SPDMX_DENSE_MIDI=1 uv run python -m synthesis.synthesize --render-mode basic --full --realify
 ```
 
 Output: `{OUTPUT_DIR}/dev/stems/` and `{OUTPUT_DIR}/dev/stems_realify/`.
+`stems.csv` uses contiguous `track` plus `original_track` (PDMX index). Leave the dense flag off for current listening ablations.
 
 ### Assembled sPDMX dataset (planned)
 
@@ -95,9 +100,9 @@ Will populate `{OUTPUT_DIR}/SPDMX/` with PDMX metadata plus synthesized stems in
 **GM register (prerequisite for synthesis):** corrects mismatched GM program ids from MIDI track names:
 
 ```bash
-uv run python -m analysis.analyze_gm_register --subset all_valid -j 8
+uv run python -m analysis.prepare_synthesis --subset all_valid -j 8
 # Re-print stats without re-parsing MIDI:
-uv run python -m analysis.analyze_gm_register --from-csv .../register.csv
+uv run python -m analysis.prepare_synthesis --from-csv .../register.csv --no-write-corrected-midi
 ```
 
 Writes to `{OUTPUT_DIR}/dev/analysis/instruments/all_valid/`: `register.csv`, `register_corrections.csv`, `register_summary.json`, `register_report.txt`, `register_top_corrections.csv`.

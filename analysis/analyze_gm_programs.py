@@ -235,7 +235,7 @@ def main():
         if not register_path.is_file():
             raise SystemExit(
                 f"GM register not found: {register_path}\n"
-                "Run: uv run python -m analysis.analyze_gm_register --subset all_valid -j 8"
+                "Run: uv run python -m analysis.prepare_synthesis --subset all_valid -j 8"
             )
         register = pd.read_csv(register_path)
         report, stems = analyze_gm_programs_from_register(register, subset=args.subset)

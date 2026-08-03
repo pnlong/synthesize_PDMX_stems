@@ -34,7 +34,9 @@ def test_serves_static_assets(tmp_path, monkeypatch):
     ablations.mkdir()
     (ablations / "basic").mkdir()
     (ablations / "basic" / "data.csv").write_text("path,n_tracks,title\n")
-    (ablations / "basic" / "stems.csv").write_text("path,track,program,is_drum,name,has_lyrics\n")
+    (ablations / "basic" / "stems.csv").write_text(
+        "path,track,original_track,program,is_drum,name,has_lyrics\n"
+    )
 
     monkeypatch.setattr(
         "synthesis.listening.catalog.default_ablations_dir",

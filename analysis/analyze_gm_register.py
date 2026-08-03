@@ -24,7 +24,7 @@ from analysis.pdmx_subset import subset_output_dir
 from analysis.track_names import load_pdmx_mid_paths, mid_path_for_row
 from shared.config import CHUNK_SIZE, OUTPUT_DIR, PDMX_FILEPATH
 from shared.repo_symlinks import link_analysis_in_repo
-from synthesis.paths import instruments_dir
+from synthesis.paths import instruments_dir, mid_corrected_dir
 
 _WORKER_CONFIG = None
 
@@ -32,8 +32,10 @@ _WORKER_CONFIG = None
 def parse_args(args=None, namespace=None):
     parser = argparse.ArgumentParser(
         description=(
-            "Correct GM program ids from MIDI track names and write a per-track "
-            "register CSV for synthesize (step 0 before any ablation)."
+            "Step-0 synthesis setup: correct GM program ids from MIDI track names, "
+            "write register.csv, and (by default) write dense corrected MIDI copies "
+            "under dev/mid_corrected/ (empty tracks dropped). "
+            "Prefer: python -m analysis.prepare_synthesis"
         ),
     )
     parser.add_argument("-df", "--dataset_filepath", default=PDMX_FILEPATH, type=str)
@@ -75,6 +77,29 @@ def parse_args(args=None, namespace=None):
         default=20,
         type=int,
         help="How many top corrections / keys to include in the report.",
+    )
+    midi_group = parser.add_mutually_exclusive_group()
+    midi_group.add_argument(
+        "--write-corrected-midi",
+        dest="write_corrected_midi",
+        action="store_true",
+        default=True,
+        help=(
+            "Write dense corrected MIDI copies under --corrected-midi-dir "
+            "(default: on). Empty tracks dropped; register programs applied."
+        ),
+    )
+    midi_group.add_argument(
+        "--no-write-corrected-midi",
+        dest="write_corrected_midi",
+        action="store_false",
+        help="Skip dense corrected MIDI copies (register CSV / reports only).",
+    )
+    parser.add_argument(
+        "--corrected-midi-dir",
+        default=None,
+        type=str,
+        help="Output root for corrected MIDIs (default: {OUTPUT_DIR}/dev/mid_corrected/).",
     )
     return parser.parse_args(args=args, namespace=namespace)
 
@@ -217,6 +242,19 @@ def main():
             top_n=args.top_n,
             write_tables=False,
         )
+        if args.write_corrected_midi:
+            from analysis.corrected_midi import write_corrected_midis_from_register
+            from analysis.track_names import load_pdmx_mid_paths
+
+            _, pdmx_root = load_pdmx_mid_paths(args.dataset_filepath, subset=args.subset)
+            corrected_root = Path(args.corrected_midi_dir or mid_corrected_dir(OUTPUT_DIR))
+            ok, failed = write_corrected_midis_from_register(
+                register,
+                pdmx_root=pdmx_root,
+                corrected_midi_dir=corrected_root,
+                jobs=args.jobs,
+            )
+            print(f"Corrected MIDI: wrote {ok}, failed {failed} → {corrected_root}")
         return
 
     output_dir = subset_output_dir(args.output_dir, args.subset)
@@ -259,6 +297,20 @@ def main():
     print_gm_report(gm_report)
     for path in gm_paths:
         print(f"Wrote {path}")
+
+    if args.write_corrected_midi:
+        from analysis.corrected_midi import write_corrected_midis_from_register
+        from analysis.track_names import load_pdmx_mid_paths
+
+        _, pdmx_root = load_pdmx_mid_paths(args.dataset_filepath, subset=args.subset)
+        corrected_root = Path(args.corrected_midi_dir or mid_corrected_dir(OUTPUT_DIR))
+        ok, failed = write_corrected_midis_from_register(
+            register,
+            pdmx_root=pdmx_root,
+            corrected_midi_dir=corrected_root,
+            jobs=args.jobs,
+        )
+        print(f"Corrected MIDI: wrote {ok}, failed {failed} → {corrected_root}")
 
     link, target = link_analysis_in_repo(OUTPUT_DIR)
     print(f"Symlinked {link} -> {target}")

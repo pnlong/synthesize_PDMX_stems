@@ -8,14 +8,15 @@ Output symlinked in-repo at [`analysis/output/`](output/) → `{OUTPUT_DIR}/dev/
 
 | Tool | Input | Measures | When to use |
 |------|-------|----------|-------------|
-| **`analyze_gm_register`** | PDMX MIDI + [`gm_register_aliases.yaml`](gm_register_aliases.yaml) | Per-track GM corrections + stats | **Step 0 before any synthesize ablation.** Required so stems use corrected programs. |
+| **`prepare_synthesis`** | PDMX MIDI + [`gm_register_aliases.yaml`](gm_register_aliases.yaml) | GM register + dense corrected MIDIs | **Step 0 before synthesize.** Preferred name; `analyze_gm_register` is an alias. |
+| **`analyze_gm_register`** | (same) | (same) | Thin alias of `prepare_synthesis`. |
 | **`analyze_song_lengths`** | PDMX.csv (`song_length.seconds`) | Song duration (seconds), all valid rows | **Default for SA3 model choice.** Fast, no synthesis required. |
 | **`analyze_durations`** | Synthesized dataset dir (`stems.csv` + FLACs) | Per-stem audio duration (seconds) | Validate that rendered stems match metadata; analyze a specific ablation/full run. |
 | **`report`** | `duration_analysis.csv` from above | Aggregated stats + breakdowns | Summarize FLAC-based durations (program, genre, drum). Secondary to `analyze_song_lengths` for model choice. |
 | **`analyze_stems`** | PDMX MIDI files | Note count per track (symbolic) | Explore synthesis load / `MAX_N_NOTES_IN_STEM` limits. Not a duration analysis. |
 | **`analyze_gm_programs`** | PDMX MIDI, or `--from-register` | GM program usage counts + bar chart | Raw MIDI inventory, or **corrected** inventory from `register.csv` (`gm_program_*_corrected.*`). |
 
-**`analyze_gm_register` is a synthesis prerequisite**, not optional exploration: run it (or refresh it after editing the alias YAML) before `synthesis.synthesize`.
+**`prepare_synthesis` is a synthesis prerequisite**, not optional exploration: run it (or refresh it after editing the alias YAML) before `synthesis.synthesize`. By default it also writes dense corrected MIDIs under `{OUTPUT_DIR}/dev/mid_corrected/` (use `--no-write-corrected-midi` to skip). Enable those midis at synthesize time with `SPDMX_DENSE_MIDI=1` / `--dense-midi` (default off until listening ablations are done).
 
 **`analyze_song_lengths` vs `analyze_durations`:** both concern time in seconds, but song lengths reads symbolic metadata for the full dataset; analyze durations reads actual audio files from whatever subset you synthesized (e.g. 100-song ablation).
 
@@ -25,8 +26,10 @@ Output symlinked in-repo at [`analysis/output/`](output/) → `{OUTPUT_DIR}/dev/
 
 | File | Purpose |
 |------|---------|
-| `analyze_gm_register.py` | CLI: build GM register CSV + correction stats |
+| `prepare_synthesis.py` | Preferred CLI: GM register + dense corrected MIDI tree |
+| `analyze_gm_register.py` | Same CLI (alias); register report builders live here |
 | `gm_register.py` | Name→program matcher, report builders, synthesize lookup helpers |
+| `corrected_midi.py` | Dense corrected MIDI writer + track_map sidecars |
 | `gm_register_aliases.yaml` | Curated mislabeling needles (SATB→voice, harpsichord, …) |
 | `analyze_song_lengths.py` | CLI: PDMX song-length analysis, plots, JSON report, repo symlink |
 | `analyze_durations.py` | CLI: measure FLAC stem durations in a synthesized dataset |
@@ -40,11 +43,14 @@ Output symlinked in-repo at [`analysis/output/`](output/) → `{OUTPUT_DIR}/dev/
 ## Commands
 
 ```bash
-# Step 0 — GM register (required before any ablation)
+# Step 0 — synthesis setup (register + dense corrected MIDIs by default)
+python -m analysis.prepare_synthesis --subset all_valid -j 8
+# → register.csv under instruments/<subset>/
+# → {OUTPUT_DIR}/dev/mid_corrected/…
+# Alias (same CLI):
 python -m analysis.analyze_gm_register --subset all_valid -j 8
-# → {OUTPUT_DIR}/dev/analysis/instruments/all_valid/register.csv
-# Re-print stats from an existing register:
-python -m analysis.analyze_gm_register --from-csv .../register.csv
+# Register/stats only:
+python -m analysis.prepare_synthesis --from-csv .../register.csv --no-write-corrected-midi
 
 # SA3 model selection (recommended)
 python -m analysis.analyze_song_lengths

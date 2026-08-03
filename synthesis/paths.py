@@ -7,6 +7,7 @@ from shared.config import (
     ANALYSIS_DIR_NAME,
     DEV_DIR_NAME,
     INSTRUMENTS_DIR_NAME,
+    MID_CORRECTED_DIR_NAME,
     SONG_LENGTHS_DIR_NAME,
     SPDMX_DATASET_DIR_NAME,
     STEMS_DIR_NAME,
@@ -49,6 +50,10 @@ def full_stems_realify_dir(output_dir: str) -> str:
 
 def analysis_root(output_dir: str) -> str:
     return f"{dev_root(output_dir)}/{ANALYSIS_DIR_NAME}"
+
+
+def mid_corrected_dir(output_dir: str) -> str:
+    return f"{dev_root(output_dir)}/{MID_CORRECTED_DIR_NAME}"
 
 
 def song_lengths_dir(output_dir: str) -> str:

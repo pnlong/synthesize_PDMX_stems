@@ -92,6 +92,11 @@ def _inventory_stems(output_dir: str, reference_dir: Path) -> list[dict]:
         stems.append({
             "song_id": song_id_from_path(song_path),
             "track": int(row["track"]),
+            "original_track": (
+                int(row["original_track"])
+                if "original_track" in row.index and pd.notna(row.get("original_track"))
+                else int(row["track"])
+            ),
             "program": int(row["program"]) if pd.notna(row.get("program")) else 0,
             "is_drum": bool(row.get("is_drum", False)),
             "name": None if pd.isna(row.get("name")) else str(row.get("name")),
@@ -316,6 +321,7 @@ def _write_clip_condition_tables(
         stem_rows.append({
             "path": None,  # filled per condition
             "track": w["track"],
+            "original_track": w.get("original_track", w["track"]),
             "program": w.get("program", 0),
             "is_drum": w.get("is_drum", False),
             "name": w.get("name"),
@@ -345,6 +351,7 @@ def _write_clip_condition_tables(
             stems_out.append({
                 "path": str(cond_dir / DATA_DIR_NAME / stem["song_id"]),
                 "track": stem["track"],
+                "original_track": stem.get("original_track", stem["track"]),
                 "program": stem["program"],
                 "is_drum": stem["is_drum"],
                 "name": stem["name"],

@@ -12,7 +12,7 @@ Run **GM register correction** first (track-name ↔ GM id fixes). Synthesize lo
 `{OUTPUT_DIR}/dev/analysis/instruments/all_valid/register.csv` by default and errors if it is missing.
 
 ```bash
-uv run python -m analysis.analyze_gm_register --subset all_valid -j 8
+uv run python -m analysis.prepare_synthesis --subset all_valid -j 8
 ```
 
 Flags: `--register PATH` to point at another CSV; `--no-register` to use raw MIDI programs.

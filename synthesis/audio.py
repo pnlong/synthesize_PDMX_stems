@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import contextlib
+import os
 import subprocess
 from pathlib import Path
 
@@ -26,6 +28,26 @@ SUPPORTED_AUDIO_FORMATS = frozenset({DEFAULT_AUDIO_FORMAT, FLAC_AUDIO_FORMAT})
 
 # fluidsynth raw output: stereo int16 = 4 bytes per frame
 _MAX_RAW_PCM_BYTES = MAX_N_SAMPLES_IN_STEM * 4
+
+
+@contextlib.contextmanager
+def _suppress_native_stderr():
+    """Silence C-library stderr (e.g. libmpg123 one-frame MP3 warnings)."""
+    try:
+        devnull_fd = os.open(os.devnull, os.O_WRONLY)
+        saved_fd = os.dup(2)
+    except OSError:
+        yield
+        return
+    try:
+        os.dup2(devnull_fd, 2)
+        yield
+    finally:
+        try:
+            os.dup2(saved_fd, 2)
+        finally:
+            os.close(saved_fd)
+            os.close(devnull_fd)
 
 
 def truncate_waveform(
@@ -235,7 +257,8 @@ def mixture_path(song_dir: Path, audio_format: str = DEFAULT_AUDIO_FORMAT) -> Pa
 
 
 def _stem_frame_count(path: Path) -> tuple[int, int]:
-    info = sf.info(str(path))
+    with _suppress_native_stderr():
+        info = sf.info(str(path))
     return int(info.frames), int(info.samplerate)
 
 
@@ -271,7 +294,8 @@ def load_stem(path: Path) -> torch.Tensor:
     frames = min(frames, MAX_N_SAMPLES_IN_STEM)
     if frames <= 0:
         return torch.zeros((STEM_CHANNELS, 0))
-    audio, _ = sf.read(str(path), frames=frames, dtype="float32", always_2d=True)
+    with _suppress_native_stderr():
+        audio, _ = sf.read(str(path), frames=frames, dtype="float32", always_2d=True)
     if audio.ndim == 1:
         audio = audio[:, np.newaxis]
     tensor = torch.from_numpy(np.asarray(audio.T, dtype=np.float32))
@@ -287,7 +311,8 @@ def write_mp3(waveform: torch.Tensor, path: Path) -> Path:
 
     path.parent.mkdir(parents=True, exist_ok=True)
     tensor = ensure_stem_channels(waveform)
-    torchaudio.save(str(path), tensor, SAMPLE_RATE, format=DEFAULT_AUDIO_FORMAT)
+    with _suppress_native_stderr():
+        torchaudio.save(str(path), tensor, SAMPLE_RATE, format=DEFAULT_AUDIO_FORMAT)
     return path
 
 

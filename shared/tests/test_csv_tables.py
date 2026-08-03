@@ -17,8 +17,8 @@ def test_append_rows_deduped_replaces_path(tmp_path):
     csv_path = tmp_path / "stems.csv"
     path = "/songs/a"
     rows_a = [
-        {"path": path, "track": 0, "program": 0, "is_drum": False, "name": sanitize_track_name("Piano\x00"), "has_lyrics": False},
-        {"path": path, "track": 1, "program": 1, "is_drum": False, "name": "Bass", "has_lyrics": False},
+        {"path": path, "track": 0, "original_track": 0, "program": 0, "is_drum": False, "name": sanitize_track_name("Piano\x00"), "has_lyrics": False},
+        {"path": path, "track": 1, "original_track": 1, "program": 1, "is_drum": False, "name": "Bass", "has_lyrics": False},
     ]
     append_rows_deduped(str(csv_path), STEMS_TABLE_COLUMNS, rows_a)
     append_rows_deduped(

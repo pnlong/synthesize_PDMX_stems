@@ -21,7 +21,7 @@ from synthesis.paths import instruments_dir
 
 
 def default_gm_register_path(output_dir: str = OUTPUT_DIR) -> str:
-    """Default register written by ``analysis.analyze_gm_register --subset all_valid``."""
+    """Default register written by ``analysis.prepare_synthesis --subset all_valid``."""
     return f"{instruments_dir(output_dir)}/all_valid/register.csv"
 
 
@@ -129,7 +129,7 @@ def add_synthesis_args(parser: argparse.ArgumentParser):
         default=None,
         type=str,
         help=(
-            "GM register CSV from analysis.analyze_gm_register "
+            "GM register CSV from analysis.prepare_synthesis "
             f"(default: {default_gm_register_path()}). "
             "Corrects per-track program ids before rendering."
         ),
@@ -138,4 +138,31 @@ def add_synthesis_args(parser: argparse.ArgumentParser):
         "--no-register",
         action="store_true",
         help="Do not apply GM register corrections (use MIDI program_change as-is).",
+    )
+    dense = parser.add_mutually_exclusive_group()
+    dense.add_argument(
+        "--dense-midi",
+        dest="dense_midi",
+        action="store_true",
+        default=None,
+        help=(
+            "Use dense corrected MIDIs under dev/mid_corrected/ "
+            "(empty tracks dropped, register programs baked in). "
+            "Also set via SPDMX_DENSE_MIDI=1."
+        ),
+    )
+    dense.add_argument(
+        "--no-dense-midi",
+        dest="dense_midi",
+        action="store_false",
+        help="Force legacy PDMX MIDI indexing even if SPDMX_DENSE_MIDI is set.",
+    )
+    parser.add_argument(
+        "--corrected-midi-dir",
+        default=None,
+        type=str,
+        help=(
+            "Root of dense corrected MIDI copies "
+            "(default: {output_dir}/dev/mid_corrected/)."
+        ),
     )

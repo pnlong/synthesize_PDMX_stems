@@ -91,28 +91,132 @@ def _load_midi_ddsp_models(weights_dir: str):
     return synthesis_generator, expression_generator
 
 
-def _run_midi_ddsp(args: argparse.Namespace | SimpleNamespace) -> dict:
-    import numpy as np
+def _resolve_chunk_params(args: argparse.Namespace | SimpleNamespace) -> tuple[float, float]:
+    """Shared chunk_sec / overlap_sec for MIDI-DDSP and DDSP-Piano."""
+    chunk_sec = float(
+        getattr(args, "chunk_sec", None)
+        or os.environ.get("SPDMX_DDSP_CHUNK_SEC", "12")
+    )
+    overlap_raw = getattr(args, "overlap_sec", None)
+    overlap_sec = float(
+        overlap_raw
+        if overlap_raw is not None
+        else os.environ.get("SPDMX_DDSP_CHUNK_OVERLAP_SEC", "2.0")
+    )
+    if overlap_sec < 0:
+        raise ValueError("overlap_sec must be >= 0")
+    if overlap_sec >= chunk_sec:
+        raise ValueError(
+            f"overlap_sec ({overlap_sec}) must be smaller than chunk_sec ({chunk_sec})"
+        )
+    return chunk_sec, overlap_sec
 
+
+def _slice_midi_time_window(
+    midi_path: str | Path,
+    start_sec: float,
+    end_sec: float,
+    out_path: Path,
+) -> bool:
+    """Write a PrettyMIDI slice for [start_sec, end_sec). Return False if empty."""
+    import pretty_midi
+
+    src = pretty_midi.PrettyMIDI(str(midi_path))
+    dst = pretty_midi.PrettyMIDI()
+    has_notes = False
+    for inst in src.instruments:
+        new_inst = pretty_midi.Instrument(
+            program=inst.program,
+            is_drum=inst.is_drum,
+            name=inst.name,
+        )
+        for note in inst.notes:
+            if note.end <= start_sec or note.start >= end_sec:
+                continue
+            clipped = pretty_midi.Note(
+                velocity=note.velocity,
+                pitch=note.pitch,
+                start=max(0.0, note.start - start_sec),
+                end=min(end_sec - start_sec, note.end - start_sec),
+            )
+            if clipped.end > clipped.start + 1e-4:
+                new_inst.notes.append(clipped)
+                has_notes = True
+        dst.instruments.append(new_inst)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    dst.write(str(out_path))
+    return has_notes
+
+
+def _run_midi_ddsp(args: argparse.Namespace | SimpleNamespace) -> dict:
+    """Run MIDI-DDSP in fixed-duration chunks with the same stitch logic as piano."""
+    import tempfile
+
+    import numpy as np
+    import pretty_midi
     from midi_ddsp.data_handling.instrument_name_utils import INST_NAME_TO_ID_DICT
     from midi_ddsp.utils.midi_synthesis_utils import synthesize_mono_midi
+
+    from synthesis.ddsp.chunking import plan_chunk_spans, stitch_audio_chunks
 
     synthesis_generator, expression_generator = _load_midi_ddsp_models(
         getattr(args, "weights_dir", "") or ""
     )
     instrument_id = INST_NAME_TO_ID_DICT[args.instrument]
-    midi_audio, *_rest = synthesize_mono_midi(
-        synthesis_generator,
-        expression_generator,
-        args.midi,
-        instrument_id,
-        output_dir=None,
-    )
-    audio = np.asarray(midi_audio)
-    if hasattr(audio, "numpy"):
-        audio = audio.numpy()
-    audio = np.squeeze(audio)
+    chunk_sec, overlap_sec = _resolve_chunk_params(args)
     sample_rate = 16000
+
+    pm = pretty_midi.PrettyMIDI(str(args.midi))
+    total_sec = float(pm.get_end_time())
+    if total_sec <= 0:
+        _write_wav(Path(args.out), np.zeros(0, dtype=np.float32), sample_rate)
+        return {
+            "ok": True,
+            "backend": "midi_ddsp",
+            "instrument": args.instrument,
+            "sample_rate": sample_rate,
+            "out": args.out,
+        }
+
+    total_samples = max(1, int(round(total_sec * sample_rate)))
+    chunk_samples = max(1, int(round(chunk_sec * sample_rate)))
+    overlap_samples = max(0, int(round(overlap_sec * sample_rate)))
+    sample_spans = plan_chunk_spans(total_samples, chunk_samples, overlap_samples)
+
+    audio_chunks: list[np.ndarray] = []
+    with tempfile.TemporaryDirectory(prefix="midi_ddsp_chunk_") as tmp:
+        tmp_dir = Path(tmp)
+        for i, (start_sample, end_sample) in enumerate(sample_spans):
+            keep = end_sample - start_sample
+            start_sec = start_sample / sample_rate
+            end_sec = end_sample / sample_rate
+            chunk_midi = tmp_dir / f"chunk_{i}.mid"
+            has_notes = _slice_midi_time_window(
+                args.midi, start_sec, end_sec, chunk_midi
+            )
+            if not has_notes:
+                audio_chunks.append(np.zeros(keep, dtype=np.float32))
+                continue
+            midi_audio, *_rest = synthesize_mono_midi(
+                synthesis_generator,
+                expression_generator,
+                str(chunk_midi),
+                instrument_id,
+                output_dir=None,
+                display_progressbar=False,
+            )
+            audio = np.asarray(midi_audio)
+            if hasattr(audio, "numpy"):
+                audio = audio.numpy()
+            audio = np.squeeze(audio).astype(np.float32, copy=False)
+            # Upstream may append ~1s of trailing rest; keep only this window.
+            if audio.shape[0] >= keep:
+                audio = audio[:keep]
+            else:
+                audio = np.pad(audio, (0, keep - audio.shape[0]))
+            audio_chunks.append(audio)
+
+    audio = stitch_audio_chunks(audio_chunks, sample_spans, overlap_samples)
     _write_wav(Path(args.out), audio, sample_rate)
     return {
         "ok": True,
@@ -223,26 +327,11 @@ def _run_ddsp_piano(args: argparse.Namespace | SimpleNamespace) -> dict:
     piano_root = Path(args.piano_root)
     warm_up_raw = getattr(args, "warm_up", None)
     warm_up = float(warm_up_raw) if warm_up_raw is not None else 0.5
-    chunk_sec = float(
-        getattr(args, "chunk_sec", None)
-        or os.environ.get("SPDMX_DDSP_PIANO_CHUNK_SEC", "12")
-    )
-    overlap_sec_raw = getattr(args, "overlap_sec", None)
-    overlap_sec = float(
-        overlap_sec_raw
-        if overlap_sec_raw is not None
-        else os.environ.get("SPDMX_DDSP_PIANO_CHUNK_OVERLAP_SEC", "2.0")
-    )
-    if overlap_sec < 0:
-        raise ValueError("overlap_sec must be >= 0")
-    if overlap_sec >= chunk_sec:
-        raise ValueError(
-            f"overlap_sec ({overlap_sec}) must be smaller than chunk_sec ({chunk_sec})"
-        )
+    chunk_sec, overlap_sec = _resolve_chunk_params(args)
 
     from synthesis.ddsp.chunking import (
         frames_to_samples,
-        plan_chunk_frame_spans,
+        plan_chunk_spans,
         stitch_audio_chunks,
     )
 
@@ -272,7 +361,7 @@ def _run_ddsp_piano(args: argparse.Namespace | SimpleNamespace) -> dict:
     overlap_frames = int(overlap_sec * frame_rate)
     warm_frames = int(warm_up * frame_rate)
     n_frames = cond.shape[1]
-    frame_spans = plan_chunk_frame_spans(n_frames, chunk_frames, overlap_frames)
+    frame_spans = plan_chunk_spans(n_frames, chunk_frames, overlap_frames)
 
     audio_chunks: list[np.ndarray] = []
     sample_spans: list[tuple[int, int]] = []

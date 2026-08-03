@@ -83,12 +83,11 @@ def parse_ddsp_gpu_ids(
     *,
     force_cpu: bool | None = None,
     cuda_visible: str | None = None,
-    spdmx_cuda_visible: str | None = None,
 ) -> list[str]:
     """Return logical GPU id strings for one serve worker each.
 
     - ``SPDMX_DDSP_FORCE_CPU=1`` → ``["-1"]`` (single CPU worker)
-    - Else prefer ``SPDMX_DDSP_CUDA_VISIBLE_DEVICES``, then ``CUDA_VISIBLE_DEVICES``
+    - Else ``CUDA_VISIBLE_DEVICES`` (comma-separated; one worker per id)
     - Default ``["0"]``
     """
     if force_cpu is None:
@@ -96,15 +95,12 @@ def parse_ddsp_gpu_ids(
     if force_cpu:
         return ["-1"]
 
-    if spdmx_cuda_visible is None:
-        spdmx_cuda_visible = os.environ.get("SPDMX_DDSP_CUDA_VISIBLE_DEVICES")
     if cuda_visible is None:
         cuda_visible = os.environ.get("CUDA_VISIBLE_DEVICES")
 
-    raw = spdmx_cuda_visible if spdmx_cuda_visible is not None else cuda_visible
-    if raw is None or str(raw).strip() == "":
+    if cuda_visible is None or str(cuda_visible).strip() == "":
         return ["0"]
-    raw = str(raw).strip()
+    raw = str(cuda_visible).strip()
     if raw == "-1":
         return ["-1"]
     ids = [part.strip() for part in raw.split(",") if part.strip() != ""]
@@ -119,7 +115,7 @@ def ddsp_worker_env(
     """Environment for the TF worker: CUDA 12 pip libs on LD_LIBRARY_PATH.
 
     GPU is on by default. Set ``SPDMX_DDSP_FORCE_CPU=1`` to hide devices.
-    Optional ``SPDMX_DDSP_CUDA_VISIBLE_DEVICES`` (default ``0``) picks a GPU.
+    ``CUDA_VISIBLE_DEVICES`` (default ``0``) picks GPU(s).
     Pass ``cuda_visible_devices`` to pin a single pool worker to one device.
     """
     env = dict(base if base is not None else os.environ)
@@ -137,12 +133,8 @@ def ddsp_worker_env(
     elif os.environ.get("SPDMX_DDSP_FORCE_CPU") == "1":
         env["CUDA_VISIBLE_DEVICES"] = "-1"
     else:
-        # Prefer an explicit picker; default to first GPU so we don't claim all cards.
-        picker = os.environ.get("SPDMX_DDSP_CUDA_VISIBLE_DEVICES")
-        if picker is not None:
-            env["CUDA_VISIBLE_DEVICES"] = picker
-        else:
-            env.setdefault("CUDA_VISIBLE_DEVICES", "0")
+        # Default to first GPU so we don't claim all cards.
+        env.setdefault("CUDA_VISIBLE_DEVICES", "0")
     return env
 
 

@@ -55,7 +55,7 @@ Create both after clone: `uv run python -m shared.setup_symlinks`
 Before any ablation or `--full` run, build the per-track GM correction table:
 
 ```bash
-uv run python -m analysis.analyze_gm_register --subset all_valid -j 8
+uv run python -m analysis.prepare_synthesis --subset all_valid -j 8
 ```
 
 - **Aliases:** [`analysis/gm_register_aliases.yaml`](../analysis/gm_register_aliases.yaml) (SATB→choir, harpsichord, sax vs alto, …)
@@ -109,7 +109,7 @@ Use `CUDA_VISIBLE_DEVICES` to select GPU(s). `medium` requires a visible GPU. `s
 
 ```bash
 # Prerequisite — GM register (once; re-run after alias YAML edits)
-python -m analysis.analyze_gm_register --subset all_valid -j 8
+python -m analysis.prepare_synthesis --subset all_valid -j 8
 
 # Pass 1 — CPU multiprocessing (required first)
 python -m synthesis.synthesize --render-mode basic -j 8
@@ -139,7 +139,7 @@ All synthesis flows go through `synthesis.synthesize` (expects GM `register.csv`
 COMMON="--sample-seed 43 --no-mixture -j 8"
 
 # Step 0
-python -m analysis.analyze_gm_register --subset all_valid -j 8
+python -m analysis.prepare_synthesis --subset all_valid -j 8
 
 # Donors (stratified sample written on first run → listening_sample.yaml)
 python -m synthesis.synthesize --render-mode basic $COMMON          # A1
@@ -157,10 +157,13 @@ python -m synthesis.synthesize --render-mode ddsp_slakh --realify $COMMON  # CB2
 python -m synthesis.listening.make_clips --clip-seconds 10
 python -m synthesis.listening.serve
 
-# Full PDMX after listening test
-python -m synthesis.synthesize --render-mode basic --full
-python -m synthesis.synthesize --render-mode basic --full --realify
+# Full PDMX after listening test (dense corrected MIDI)
+python -m analysis.prepare_synthesis --subset all_valid -j 8
+SPDMX_DENSE_MIDI=1 python -m synthesis.synthesize --render-mode basic --full
+SPDMX_DENSE_MIDI=1 python -m synthesis.synthesize --render-mode basic --full --realify
 ```
+
+Listening ablations keep the default (**dense MIDI off** / legacy PDMX track indices) until you flip `SPDMX_DENSE_MIDI` or pass `--dense-midi`. After cutover, drop the legacy path so dense is always on and `prepare_synthesis` is the only setup step needed.
 
 Song-length analysis (no synthesis required):
 
@@ -251,7 +254,7 @@ Routing details live in [`synthesis/ddsp/routing.py`](ddsp/routing.py) (`DDSP_PI
 
 - CA2/CB2 SA3 only neural stems; fallback stems copy from A2/B2.
 - Neural models run in an isolated TF venv (`.venv-ddsp`); see SETUP Track C. Linux x86_64 only.
-- **Persistent multi-GPU pool** (default): one long-lived `worker serve` process per id in `SPDMX_DDSP_CUDA_VISIBLE_DEVICES`. Synthesis runs **three global passes** — (1) all `ddsp_piano` stems, (2) all `midi_ddsp` stems, (3) donor/soundfont + mixtures — restarting the pool between neural passes so only one TF model is hot. Within a pass, same-backend stems in a song fan out across GPUs. Song-level jobs stay at `-j 1`. `SPDMX_DDSP_ONESHOT=1` = legacy per-stem subprocesses; `SPDMX_DDSP_FORCE_CPU=1` → CPU worker.
+- **Persistent multi-GPU pool** (default): one long-lived `worker serve` process per id in `CUDA_VISIBLE_DEVICES`. Synthesis runs **three global passes** — (1) all `ddsp_piano` stems, (2) all `midi_ddsp` stems, (3) donor/soundfont + mixtures — restarting the pool between neural passes so only one TF model is hot. Within a pass, same-backend stems in a song fan out across GPUs. Song-level jobs stay at `-j 1`. `SPDMX_DDSP_ONESHOT=1` = legacy per-stem subprocesses; `SPDMX_DDSP_FORCE_CPU=1` → CPU worker.
 - Routing decisions are written to `ddsp_routing.csv` beside the ablation tables.
 - Provenance: [`THIRD_PARTY.md`](../THIRD_PARTY.md). Vocals deliberately stay on soundfont(+SA3); lyric SVS is out of scope.
 

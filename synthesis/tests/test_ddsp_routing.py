@@ -14,6 +14,7 @@ from synthesis.ddsp.routing import (
     DDSP_PIANO_PROGRAMS,
     REASON_BASS_GUITAR,
     REASON_DRUM,
+    REASON_EMPTY,
     REASON_GUITAR,
     REASON_MIDI_DDSP,
     REASON_PIANO,
@@ -37,6 +38,23 @@ def test_route_piano_by_program():
     route = route_stem(program=0, is_drum=False, check_monophony=False)
     assert route.backend == BACKEND_DDSP_PIANO
     assert route.reason == REASON_PIANO
+
+
+def test_empty_track_not_routed_to_piano():
+    """Metadata-only grand-staff stubs default to program 0 but have no notes."""
+    track = _track(
+        mido.MetaMessage("track_name", name="Marimba (Grand Staff)", time=0),
+        mido.MetaMessage("end_of_track", time=1),
+    )
+    route = route_stem(
+        program=0,
+        is_drum=False,
+        track_name="Marimba (Grand Staff)",
+        track=track,
+        check_monophony=True,
+    )
+    assert route.backend == BACKEND_SOUNDFONT
+    assert route.reason == REASON_EMPTY
 
 
 def test_route_piano_by_name():

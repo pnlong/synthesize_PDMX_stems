@@ -308,11 +308,11 @@ Optional override: `export SPDMX_DDSP_VENV=/path/to/venv` or
 
 | Variable | Meaning |
 |---|---|
-| `SPDMX_DDSP_CUDA_VISIBLE_DEVICES` | GPU id(s); one serve worker each (default `0`; e.g. `0,1`) |
+| `CUDA_VISIBLE_DEVICES` | GPU id(s); one serve worker each (default `0`; e.g. `0,1`) |
 | `SPDMX_DDSP_FORCE_CPU=1` | Single CPU serve worker (`CUDA_VISIBLE_DEVICES=-1`) |
 | `SPDMX_DDSP_ONESHOT=1` | Legacy per-stem subprocess + flock (debug) |
-| `SPDMX_DDSP_PIANO_CHUNK_SEC` | Piano inference chunk length (default `12`) |
-| `SPDMX_DDSP_PIANO_CHUNK_OVERLAP_SEC` | Piano chunk crossfade overlap (default `2.0`) |
+| `SPDMX_DDSP_CHUNK_SEC` | MIDI-DDSP + piano chunk length in seconds (default `12`) |
+| `SPDMX_DDSP_CHUNK_OVERLAP_SEC` | Chunk crossfade overlap in seconds (default `2.0`) |
 
 TF 2.15 needs CUDA **12.x** + cuDNN **8**; a host driver advertising CUDA 13 is fine
 as long as the pip CUDA-12 libs are on `LD_LIBRARY_PATH` (handled automatically).
@@ -355,7 +355,7 @@ Listen before large B3 batches. Provenance notes: [`THIRD_PARTY.md`](THIRD_PARTY
 # B3 — neural DDSP + slakh soundfont fallback (no SA3)
 # Song-level -j stays 1; neural stems within a song fan out across the GPU pool.
 SPDMX_DDSP_PYTHON=$PWD/.venv-ddsp/bin/python \
-  SPDMX_DDSP_CUDA_VISIBLE_DEVICES=0,1 \
+  CUDA_VISIBLE_DEVICES=0,1 \
   uv run python -m synthesis.synthesize --render-mode ddsp_slakh
 
 # B4 — optional SA3 after B3 (requires completed B3 stems)

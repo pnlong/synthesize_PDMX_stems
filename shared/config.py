@@ -37,6 +37,9 @@ SONG_LENGTHS_DIR_NAME = "song_lengths"
 INSTRUMENTS_DIR_NAME = "instruments"
 TRACK_NAMES_DIR_NAME = "track_names"
 
+# {OUTPUT_DIR}/dev/mid_corrected/ — dense register-corrected MIDI copies (empty tracks dropped)
+MID_CORRECTED_DIR_NAME = "mid_corrected"
+
 # {OUTPUT_DIR}/dev/experiments/ — experiment outputs (preset sweep, etc.)
 EXPERIMENTS_DIR_NAME = "experiments"
 PRESET_SWEEP_DIR_NAME = "preset_sweep"
@@ -53,7 +56,7 @@ ABLATION_MIN_STEMS_PER_CATEGORY = 50
 LISTENING_SAMPLE_FILE_NAME = "listening_sample.yaml"
 
 STEMS_TABLE_COLUMNS = [
-    "path", "track", "program", "is_drum", "name", "has_lyrics",
+    "path", "track", "original_track", "program", "is_drum", "name", "has_lyrics",
 ]
 
 SONGS_TABLE_COLUMNS = [

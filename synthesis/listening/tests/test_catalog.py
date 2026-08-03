@@ -43,6 +43,7 @@ def _write_ablation_tree(
         stems_rows.append({
             "path": str(song_path),
             "track": track,
+            "original_track": track,
             "program": 0,
             "is_drum": False,
             "name": f"Stem {track}",

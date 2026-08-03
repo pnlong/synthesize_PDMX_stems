@@ -1,35 +1,52 @@
-"""Overlap-and-stitch helpers for DDSP-Piano chunked inference."""
+"""Overlap-and-stitch helpers for chunked DDSP inference (piano + MIDI-DDSP)."""
 
 from __future__ import annotations
 
 import numpy as np
 
 
-def plan_chunk_frame_spans(
-    total_frames: int,
-    chunk_frames: int,
-    overlap_frames: int,
+def plan_chunk_spans(
+    total: int,
+    chunk: int | None = None,
+    overlap: int | None = None,
+    *,
+    chunk_frames: int | None = None,
+    overlap_frames: int | None = None,
 ) -> list[tuple[int, int]]:
-    """Return [start, end) frame spans covering the MIDI with overlap."""
-    if total_frames <= 0:
+    """Return [start, end) integer spans covering ``total`` with overlap.
+
+    Used for piano conditioning frames and for MIDI-DDSP sample/time grids.
+    Accepts either ``chunk``/``overlap`` or legacy ``chunk_frames``/``overlap_frames``.
+    """
+    if chunk is None:
+        chunk = chunk_frames
+    if overlap is None:
+        overlap = overlap_frames
+    if chunk is None or overlap is None:
+        raise TypeError("plan_chunk_spans requires chunk and overlap sizes")
+    if total <= 0:
         return []
-    if total_frames <= chunk_frames:
-        return [(0, total_frames)]
-    if overlap_frames < 0:
-        raise ValueError("overlap_frames must be >= 0")
-    if overlap_frames >= chunk_frames:
+    if total <= chunk:
+        return [(0, total)]
+    if overlap < 0:
+        raise ValueError("overlap must be >= 0")
+    if overlap >= chunk:
         raise ValueError("overlap must be smaller than chunk size")
 
-    hop = chunk_frames - overlap_frames
+    hop = chunk - overlap
     spans: list[tuple[int, int]] = []
     start = 0
-    while start < total_frames:
-        end = min(start + chunk_frames, total_frames)
+    while start < total:
+        end = min(start + chunk, total)
         spans.append((start, end))
-        if end >= total_frames:
+        if end >= total:
             break
         start += hop
     return spans
+
+
+# Back-compat alias used by older tests / piano path.
+plan_chunk_frame_spans = plan_chunk_spans
 
 
 def frames_to_samples(n_frames: int, frame_rate: int, sample_rate: int) -> int:

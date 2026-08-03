@@ -94,14 +94,24 @@ def synthesize_song_at_index(
     ``ddsp_piano`` / ``midi_ddsp`` only render that neural backend; ``finalize``
     fills donor/soundfont stems, mixtures, and CSV rows.
     """
+    from synthesis.dense_midi import resolve_synthesis_midi
+
     path_output = dataset.at[i, "path_output"]
     song_dir = Path(path_output)
     audio_format = synthesis_audio_format(args.flac)
     require_mixture = _require_mixture(args)
     ddsp_pass = getattr(args, "ddsp_pass", None)
 
-    midi = mido.MidiFile(filename=dataset.at[i, "mid"], charset="utf8")
+    pdmx_mid = dataset.at[i, "mid_pdmx"] if "mid_pdmx" in dataset.columns else dataset.at[i, "mid"]
+    pdmx_root = dirname(args.dataset_filepath)
+    midi_path, track_map = resolve_synthesis_midi(
+        pdmx_mid, args=args, pdmx_root=pdmx_root,
+    )
+    midi = mido.MidiFile(filename=str(midi_path), charset="utf8")
     n_tracks = len(midi.tracks)
+    # Dense corrected midis omit empty tracks; prefer sidecar length when present.
+    if track_map is not None:
+        n_tracks = len(track_map)
 
     if (
         path_output in completed_paths
@@ -122,10 +132,19 @@ def synthesize_song_at_index(
 
     if need_to_synthesize:
         temp_dir = tempfile.TemporaryDirectory()
-        track_paths = [f"{temp_dir.name}/{j}.mid" for j in range(len(midi.tracks))]
+        track_paths = [f"{temp_dir.name}/{j}.mid" for j in range(n_tracks)]
         track_render_meta: list[dict] = []
 
-    for j, track in enumerate(midi.tracks):
+    if track_map is not None:
+        tracks_to_render = [
+            (j, midi.tracks[j])
+            for j in sorted(track_map.keys())
+            if j < len(midi.tracks)
+        ]
+    else:
+        tracks_to_render = list(enumerate(midi.tracks))
+
+    for j, track in tracks_to_render:
         if need_to_synthesize:
             track_midi = mido.MidiFile(ticks_per_beat=midi.ticks_per_beat, charset="utf8")
             track_midi_track = mido.MidiTrack()
@@ -136,6 +155,9 @@ def synthesize_song_at_index(
         has_lyrics = False
         n_notes = 0
         determined_whether_track_is_drum = False
+        original_track = (
+            int(track_map[j]["original_track"]) if track_map is not None else j
+        )
 
         for message in track:
             if message.type == "note_on" and message.velocity > 0:
@@ -155,11 +177,12 @@ def synthesize_song_at_index(
                 track_midi_track.append(message)
 
         # Apply GM register correction (track-name → program) before render routing.
+        # Dense corrected midis already bake register programs — skip re-apply.
         register_lookup = getattr(args, "gm_register_lookup", None)
-        if register_lookup is not None:
+        if register_lookup is not None and track_map is None:
             from analysis.gm_register import lookup_corrected_program
 
-            mid_key = dataset.at[i, "mid"]
+            mid_key = pdmx_mid
             corrected = lookup_corrected_program(
                 register_lookup,
                 mid=mid_key,
@@ -173,6 +196,8 @@ def synthesize_song_at_index(
                         track_midi_track,
                         PatchAssignment(program=program, is_drum=is_drum),
                     )
+        elif track_map is not None:
+            program = int(track_map[j].get("program", program))
 
         if need_to_synthesize:
             track_midi.tracks.append(track_midi_track)
@@ -215,16 +240,18 @@ def synthesize_song_at_index(
                     "ddsp_instrument_key": route.instrument_key,
                     "ddsp_reason": route.reason,
                     "n_notes": n_notes,
+                    "original_track": original_track,
                 }
             track_render_meta.append({
                 "soundfont_filepath": args.soundfont_filepath,
                 "fx_profile": None,
+                "original_track": original_track,
                 **slakh_cfg,
                 **route_meta,
             })
 
         stem_rows.append(dict(zip(STEMS_TABLE_COLUMNS, (
-            path_output, j, program, is_drum,
+            path_output, j, original_track, program, is_drum,
             track_name if track_name and len(track_name) > 0 else None,
             has_lyrics,
         ))))
@@ -318,6 +345,17 @@ def synthesize_song_at_index(
                         j,
                         audio_format,
                     )
+                    orig_track = int(meta.get("original_track", j))
+                    if not stem_is_valid(donor_stem) and orig_track != j:
+                        alt = donor_raw_stem_path(
+                            args.output_dir,
+                            donor_mode,
+                            song_rel,
+                            orig_track,
+                            audio_format,
+                        )
+                        if stem_is_valid(alt):
+                            donor_stem = alt
                     if stem_is_valid(donor_stem):
                         copy_stem(donor_stem, out_stem)
                         source = reused_source_label(donor_mode)
@@ -349,6 +387,7 @@ def synthesize_song_at_index(
                 routing_rows.append({
                     "path": path_output,
                     "track": j,
+                    "original_track": meta.get("original_track", j),
                     "program": stem_rows[j]["program"],
                     "is_drum": stem_rows[j]["is_drum"],
                     "name": stem_rows[j]["name"],
@@ -386,7 +425,11 @@ def synthesize_song_at_index(
 
     song_info = dataset.loc[i].to_dict()
     song_info["path"] = path_output
-    del song_info["path_output"], song_info["mid"]
+    song_info.pop("path_output", None)
+    song_info.pop("mid", None)
+    song_info.pop("mid_pdmx", None)
+    # Dense path may have rewritten n_tracks to the cleaned count.
+    song_info["n_tracks"] = n_tracks
     return song_info, stem_rows, routing_rows
 
 
@@ -545,8 +588,8 @@ def run_synthesis(args, output_dir: str):
         if not exists(register_path):
             raise RuntimeError(
                 f"GM register not found at {register_path}\n"
-                "Run register correction before any ablation:\n"
-                "  uv run python -m analysis.analyze_gm_register --subset all_valid -j 8\n"
+                "Run synthesis setup before any ablation:\n"
+                "  uv run python -m analysis.prepare_synthesis --subset all_valid -j 8\n"
                 "Or pass --no-register to synthesize with raw MIDI programs."
             )
         pdmx_root = dirname(args.dataset_filepath)
@@ -578,10 +621,45 @@ def run_synthesis(args, output_dir: str):
     original_dataset_dir = dirname(args.dataset_filepath)
     dataset["path"] = [original_dataset_dir + p[1:] for p in dataset["path"]]
     dataset["mid"] = [original_dataset_dir + p[1:] for p in dataset["mid"]]
+    dataset["mid_pdmx"] = dataset["mid"]
     dataset["path_output"] = [
         song_output_dir(output_dir, original_dataset_dir, p) for p in dataset["path"]
     ]
     dataset = dataset.reset_index(drop=True)
+
+    from synthesis.dense_midi import dense_midi_enabled, default_corrected_midi_dir
+
+    if dense_midi_enabled(args):
+        from analysis.corrected_midi import load_track_map, resolve_corrected_midi_path
+
+        corrected_root = Path(
+            getattr(args, "corrected_midi_dir", None)
+            or default_corrected_midi_dir(args.output_dir)
+        )
+        print(f"Dense MIDI enabled — using corrected midis under {corrected_root}")
+        new_mids = []
+        new_n_tracks = []
+        for mid in dataset["mid_pdmx"]:
+            corrected = resolve_corrected_midi_path(
+                mid,
+                pdmx_root=original_dataset_dir,
+                corrected_midi_dir=corrected_root,
+            )
+            if not corrected.is_file():
+                raise FileNotFoundError(
+                    f"Dense MIDI enabled but corrected MIDI missing: {corrected}\n"
+                    "Generate corrected midis first:\n"
+                    "  uv run python -m analysis.prepare_synthesis --subset all_valid "
+                    "-j 8\n"
+                    "Or disable with --no-dense-midi / unset SPDMX_DENSE_MIDI."
+                )
+            tmap = load_track_map(corrected)
+            new_mids.append(str(corrected))
+            new_n_tracks.append(len(tmap))
+        dataset["mid"] = new_mids
+        dataset["n_tracks"] = new_n_tracks
+    else:
+        print("Dense MIDI off (legacy PDMX track indices). Enable with --dense-midi or SPDMX_DENSE_MIDI=1.")
 
     for song_dir in set(dataset["path_output"]):
         makedirs(song_dir, exist_ok=True)
