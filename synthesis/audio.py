@@ -212,8 +212,12 @@ def pad_and_loudness_normalize(
 def build_mixture(
     waveforms: list[torch.Tensor],
     peak_limit: float = MIXTURE_PEAK_LIMIT,
-) -> torch.Tensor:
-    """Sum loudness-normalized stems and apply uniform anti-clip gain (Slakh-style)."""
+) -> tuple[torch.Tensor, float]:
+    """Sum loudness-normalized stems and apply uniform anti-clip gain (Slakh-style).
+
+    Returns ``(mixture, peak_gain)``. ``peak_gain`` is the same factor applied to the
+    sum; callers should multiply released stems by it so ``sum(stems) == mixture``.
+    """
     if not waveforms:
         raise ValueError("need at least one stem to build a mixture")
     max_length = max(w.shape[-1] for w in waveforms)
@@ -231,9 +235,20 @@ def build_mixture(
     summed = torch.stack(aligned).sum(dim=0)
     audio = summed.numpy()
     peak = float(np.max(np.abs(audio))) if audio.size else 0.0
-    if peak > peak_limit:
-        audio = audio * (peak_limit / peak)
-    return torch.from_numpy(audio.astype(np.float32))
+    peak_gain = (peak_limit / peak) if peak > peak_limit else 1.0
+    if peak_gain != 1.0:
+        audio = audio * peak_gain
+    return torch.from_numpy(audio.astype(np.float32)), float(peak_gain)
+
+
+def apply_peak_gain(
+    waveforms: list[torch.Tensor],
+    peak_gain: float,
+) -> list[torch.Tensor]:
+    """Apply the mixture anti-clip factor to each stem (identity when gain is 1)."""
+    if peak_gain == 1.0:
+        return waveforms
+    return [waveform * peak_gain for waveform in waveforms]
 
 
 def synthesis_audio_format(use_flac: bool = False) -> str:
@@ -364,12 +379,97 @@ def save_mixture_flac(waveform: torch.Tensor, song_dir: Path) -> Path:
     return save_mixture(waveform, song_dir, FLAC_AUDIO_FORMAT)
 
 
+def normalize_stems_for_sum(
+    waveforms: list[torch.Tensor],
+    song_dir: Path,
+    track_indices: list[int],
+    audio_format: str = DEFAULT_AUDIO_FORMAT,
+    *,
+    write_mixture: bool = False,
+) -> tuple[list[torch.Tensor], float, Path | None]:
+    """Peak-scale loudness-normalized stems so they remain linearly summable.
+
+    Computes the Slakh-style anti-clip gain from the stem sum, applies that
+    same factor to every stem, and writes stem files under ``song_dir``.
+    Optionally also writes ``mixture.*`` (the mix is still just ``sum(stems)``).
+
+    Returns ``(scaled_stems, peak_gain, mixture_path_or_none)``.
+    """
+    if len(waveforms) != len(track_indices):
+        raise ValueError("waveforms and track_indices must have the same length")
+    mixture, peak_gain = build_mixture(waveforms)
+    scaled = apply_peak_gain(waveforms, peak_gain)
+    for track, waveform in zip(track_indices, scaled):
+        save_stem(waveform, song_dir, track, audio_format)
+    mix_path = save_mixture(mixture, song_dir, audio_format) if write_mixture else None
+    return scaled, peak_gain, mix_path
+
+
+def write_stems_and_mixture(
+    waveforms: list[torch.Tensor],
+    song_dir: Path,
+    track_indices: list[int],
+    audio_format: str = DEFAULT_AUDIO_FORMAT,
+    *,
+    write_mixture: bool = False,
+) -> tuple[list[torch.Tensor], Path | None]:
+    """Normalize stems for summability; optionally also write ``mixture.*``."""
+    scaled, _peak_gain, mix_path = normalize_stems_for_sum(
+        waveforms,
+        song_dir,
+        track_indices,
+        audio_format,
+        write_mixture=write_mixture,
+    )
+    return scaled, mix_path
+
+
+def normalize_stems_in_song_dir(
+    song_dir: Path,
+    track_indices: list[int],
+    audio_format: str = DEFAULT_AUDIO_FORMAT,
+    *,
+    dest_song_dir: Path | None = None,
+    write_mixture: bool = False,
+) -> float | None:
+    """LUFS-normalize + peak-scale stems so ``sum(stems)`` is the mix.
+
+    Loads from ``song_dir``, writes scaled stems to ``dest_song_dir`` (default:
+    ``song_dir``, i.e. overwrite in place). Optionally writes ``mixture.*``.
+    Returns the anti-clip ``peak_gain``, or ``None`` if any stem is missing/invalid.
+    """
+    stem_paths = [stem_path(song_dir, track, audio_format) for track in track_indices]
+    if not all(stem_is_valid(path) for path in stem_paths):
+        return None
+    dest = dest_song_dir if dest_song_dir is not None else song_dir
+    dest.mkdir(parents=True, exist_ok=True)
+    waveforms = pad_and_loudness_normalize([load_stem(path) for path in stem_paths])
+    _scaled, peak_gain, _mix_path = normalize_stems_for_sum(
+        waveforms,
+        dest,
+        track_indices,
+        audio_format,
+        write_mixture=write_mixture,
+    )
+    return peak_gain
+
+
 def write_mixture_from_waveforms(
     waveforms: list[torch.Tensor],
     song_dir: Path,
     audio_format: str = DEFAULT_AUDIO_FORMAT,
+    *,
+    track_indices: list[int] | None = None,
 ) -> Path:
-    return save_mixture(build_mixture(waveforms), song_dir, audio_format)
+    """Write ``mixture.*``. When ``track_indices`` is set, also rewrite stems."""
+    if track_indices is None:
+        mixture, _peak_gain = build_mixture(waveforms)
+        return save_mixture(mixture, song_dir, audio_format)
+    _scaled, mix_path = write_stems_and_mixture(
+        waveforms, song_dir, track_indices, audio_format, write_mixture=True,
+    )
+    assert mix_path is not None
+    return mix_path
 
 
 def write_mixture_from_song_dir(
@@ -377,12 +477,13 @@ def write_mixture_from_song_dir(
     track_indices: list[int],
     audio_format: str = DEFAULT_AUDIO_FORMAT,
 ) -> Path | None:
-    """Build mixture from existing stems. Returns None if any stem is missing/invalid."""
-    stem_paths = [stem_path(song_dir, track, audio_format) for track in track_indices]
-    if not all(stem_is_valid(path) for path in stem_paths):
-        return None
-    waveforms = pad_and_loudness_normalize([load_stem(path) for path in stem_paths])
-    return write_mixture_from_waveforms(waveforms, song_dir, audio_format)
+    """Normalize stems in place for summability (no mixture file written).
+
+    Kept for callers that historically built a mixture; prefer
+    ``normalize_stems_in_song_dir``. Returns ``song_dir`` on success, else None.
+    """
+    peak_gain = normalize_stems_in_song_dir(song_dir, track_indices, audio_format)
+    return song_dir if peak_gain is not None else None
 
 
 def stem_flac_path(song_dir: Path, track: int) -> Path:
@@ -398,9 +499,9 @@ def song_is_complete(
     n_tracks: int,
     audio_format: str = DEFAULT_AUDIO_FORMAT,
     *,
-    require_mixture: bool = True,
+    require_mixture: bool = False,
 ) -> bool:
-    """Return True if all expected valid stems exist (and mixture, unless disabled)."""
+    """Return True if all expected valid stems exist (and mixture, if required)."""
     if not song_dir.is_dir():
         return False
     stems_ok = all(

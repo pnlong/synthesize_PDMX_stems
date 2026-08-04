@@ -1,4 +1,4 @@
-"""Rebuild realified ablation mixtures and optionally resume realify."""
+"""Rebuild summable stems for realified ablations and optionally resume realify."""
 
 from __future__ import annotations
 
@@ -7,8 +7,8 @@ import subprocess
 from pathlib import Path
 
 from shared.config import OUTPUT_DIR
+from synthesis.mix import normalize_stems_for_dataset
 from synthesis.paths import ablation_raw_dir, ablation_realify_dir
-from synthesis.realify.realify import write_mixtures_for_dataset
 
 
 def rebuild_mixtures(*, jobs: int = 8, audio_format: str = "mp3") -> None:
@@ -18,10 +18,9 @@ def rebuild_mixtures(*, jobs: int = 8, audio_format: str = "mp3") -> None:
         if not output.is_dir():
             print(f"skip {mode}_realify: missing {output}")
             continue
-        print(f"Writing mixtures for {mode}_realify …")
-        write_mixtures_for_dataset(source, output, jobs=jobs, audio_format=audio_format)
-        count = len(list(output.glob("data/**/mixture.mp3")))
-        print(f"  {count} mixtures")
+        print(f"Normalizing stems for summability in {mode}_realify …")
+        normalize_stems_for_dataset(source, output, jobs=jobs, audio_format=audio_format)
+        print(f"  done: {output}")
 
 
 def run_realify(mode: str) -> None:
@@ -36,7 +35,7 @@ def run_realify(mode: str) -> None:
 
 def parse_args(args=None):
     parser = argparse.ArgumentParser(
-        description="Finish A2/B2 ablations: realify + mixture rebuild.",
+        description="Finish A2/B2 ablations: realify + stem summability normalize.",
     )
     parser.add_argument(
         "--realify",
@@ -46,7 +45,7 @@ def parse_args(args=None):
     parser.add_argument(
         "--mixtures-only",
         action="store_true",
-        help="Only rebuild mixtures from existing realified stems.",
+        help="Only peak-normalize existing realified stems for summability.",
     )
     parser.add_argument("-j", "--jobs", default=8, type=int)
     return parser.parse_args(args)

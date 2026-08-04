@@ -92,7 +92,8 @@ Will populate `{OUTPUT_DIR}/SPDMX/` with PDMX metadata plus synthesized stems in
 ├── stems.csv
 └── data/<mirrored-path>/
     ├── stem_0.flac
-    └── mixture.flac   # sum of stems with uniform anti-clip gain (Slakh-style)
+    ├── stem_1.flac
+    └── …              # mix = sum(stems); no mixture file on disk
 ```
 
 ### Analysis

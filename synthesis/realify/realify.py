@@ -34,7 +34,6 @@ from shared.config import (
     REALIFY_SILENCE_ENFORCE,
     REALIFY_STEPS,
     SAMPLE_RATE,
-    STEMS_FILE_NAME,
 )
 from synthesis.audio import (
     ensure_stem_channels,
@@ -44,9 +43,8 @@ from synthesis.audio import (
     stem_n_samples,
     stem_path,
     write_audio,
-    write_mixture_from_song_dir,
 )
-from synthesis.paths import full_stems_dir
+from synthesis.paths import full_stems_dir, resolve_output_song_dir
 from synthesis.realify.captions.generate import generate_captions
 from synthesis.realify.chunking import (
     max_realify_chunk_samples,
@@ -176,7 +174,7 @@ def task_category(task: dict, presets: dict) -> str:
 
 
 def sort_realify_tasks_for_batching(tasks: list[dict], presets: dict) -> list[dict]:
-    """Order stems category-first, then by length, so adjacent tasks share batch keys."""
+    """Order stems category-first, then by length (minimizes pad within batches)."""
 
     def sort_key(task: dict):
         row = task.get("row") or {}
@@ -235,7 +233,13 @@ def iter_realify_batches(
     presets: dict,
     batch_size: int,
 ):
-    """Yield task groups that can share one SA3 forward pass."""
+    """Yield task groups that can share one SA3 forward pass.
+
+    Groups by preset only (not length). Callers should category-sort then
+    length-sort so neighbors share a preset and pad waste stays small;
+    ``realify_stems_batch`` pads to the batch max length and trims after.
+    Chunked stems stay singleton batches.
+    """
     if batch_size <= 1:
         for task in tasks:
             yield [task]
@@ -255,7 +259,7 @@ def iter_realify_batches(
 
     for task in tasks:
         preset = task_preset(task, presets)
-        key = (*preset_key(preset), task_n_samples(task))
+        key = preset_key(preset)
         if task_needs_chunking(task, model):
             pending = flush()
             if pending is not None:
@@ -425,8 +429,7 @@ def log_realify_plan(
     print(f"Realify stems queued: {n_tasks} of {n_captions}")
     if n_tasks == 0:
         print(
-            "Realify: all stems already exist in the output tree; "
-            "skipping SA3 and rebuilding mixtures only."
+            "Realify: all stems already exist in the output tree; skipping SA3."
         )
 
 
@@ -832,11 +835,14 @@ def realify_stems_batch(
     preset = task_preset(tasks[0], presets)
     waveforms = [load_stem(Path(task["stem_path"])) for task in tasks]
     waveforms, original_lengths = _pad_waveforms_to_common_length(waveforms)
+    # Match SA3 duration to the padded waveform length so shorter stems
+    # get enough samples before trim.
+    max_duration = max(original_lengths) / float(SAMPLE_RATE)
     audio = _generate_realify_audio(
         preset=preset,
         model=model,
         prompt=[row["prompt"] for row in rows],
-        duration_seconds=[task["duration"] for task in tasks],
+        duration_seconds=[max_duration] * len(tasks),
         init_audio=[(SAMPLE_RATE, waveform) for waveform in waveforms],
         seed=[task["seed"] for task in tasks],
         batch_size=len(tasks),
@@ -1433,7 +1439,6 @@ def run_realify(
     silence_enforce: bool = REALIFY_SILENCE_ENFORCE,
     content_fidelity_enforce: bool = REALIFY_CONTENT_FIDELITY_ENFORCE,
     backend: str = REALIFY_BACKEND,
-    no_mixture: bool = False,
     output_root: str | None = None,
     render_mode: str | None = None,
 ):
@@ -1480,10 +1485,6 @@ def run_realify(
         batch_size=batch_size,
     )
     if not tasks:
-        if not no_mixture:
-            write_mixtures_for_dataset(
-                source_dir, output_dir, audio_format, jobs=jobs,
-            )
         return
 
     if use_gpu:
@@ -1510,85 +1511,6 @@ def run_realify(
             backend=backend,
         )
 
-    if not no_mixture:
-        write_mixtures_for_dataset(
-            source_dir, output_dir, audio_format, jobs=jobs,
-        )
-
-
-def resolve_output_song_dir(song_dir: Path, source_dir: Path, output_dir: Path) -> Path:
-    if output_dir == source_dir:
-        return song_dir
-    song_dir_str = str(song_dir)
-    source_prefix = str(source_dir)
-    if not song_dir_str.startswith(source_prefix):
-        raise ValueError(f"Song path {song_dir} is not under source dir {source_dir}")
-    return Path(str(output_dir) + song_dir_str[len(source_prefix):])
-
-
-def write_mixtures_for_dataset(
-    source_dir: Path,
-    output_dir: Path,
-    audio_format: str = DEFAULT_AUDIO_FORMAT,
-    jobs: int = 1,
-):
-    """Build mixture per song from stems in the output tree (same procedure as synthesis)."""
-    stems_csv = output_dir / f"{STEMS_FILE_NAME}.csv"
-    if not stems_csv.exists():
-        stems_csv = source_dir / f"{STEMS_FILE_NAME}.csv"
-    if not stems_csv.exists():
-        return
-
-    stems = pd.read_csv(stems_csv)
-    tasks = build_mixture_tasks(stems, source_dir, output_dir, audio_format)
-    if not tasks:
-        return
-
-    n_workers = min(max(jobs, 1), len(tasks))
-    desc = "Writing mixtures" if n_workers == 1 else f"Writing mixtures ({n_workers} workers)"
-    if n_workers == 1:
-        for task in tqdm(tasks, desc=desc, unit="song"):
-            write_mixture_task(task)
-        return
-
-    pool = multiprocessing.Pool(processes=n_workers)
-    try:
-        for _ in tqdm(
-            pool.imap(write_mixture_task, tasks, chunksize=1),
-            total=len(tasks),
-            desc=desc,
-            unit="song",
-        ):
-            pass
-    finally:
-        _shutdown_pool(pool)
-
-
-def build_mixture_tasks(
-    stems: pd.DataFrame,
-    source_dir: Path,
-    output_dir: Path,
-    audio_format: str,
-) -> list[dict]:
-    tasks = []
-    for song_path, group in stems.groupby("path"):
-        out_song_dir = resolve_output_song_dir(Path(song_path), source_dir, output_dir)
-        tasks.append({
-            "out_song_dir": str(out_song_dir),
-            "tracks": sorted(int(t) for t in group["track"]),
-            "audio_format": audio_format,
-        })
-    return tasks
-
-
-def write_mixture_task(task: dict) -> str | None:
-    out_path = write_mixture_from_song_dir(
-        Path(task["out_song_dir"]),
-        task["tracks"],
-        task["audio_format"],
-    )
-    return str(out_path) if out_path is not None else None
-
 
 def parse_args(args=None, namespace=None):
     import multiprocessing
@@ -1604,7 +1526,7 @@ def parse_args(args=None, namespace=None):
         "--workers",
         default=int(multiprocessing.cpu_count() / 4),
         type=int,
-        help="CPU workers for synthesis, CPU realify (small-music), and realify mixture writes.",
+        help="CPU workers for CPU realify (small-music).",
     )
     parser.add_argument(
         "--realify-batch-size",
@@ -1623,7 +1545,7 @@ def parse_args(args=None, namespace=None):
     parser.add_argument(
         "--flac",
         action="store_true",
-        help="Read/write FLAC stems and mixtures instead of the default MP3.",
+        help="Read/write FLAC stems instead of the default MP3.",
     )
     parser.add_argument(
         "--no-silence-enforce",
@@ -1650,6 +1572,8 @@ def parse_args(args=None, namespace=None):
 
 
 def main():
+    from synthesis.mix import print_mix_hint
+
     args = parse_args()
     source_dir = args.source_dir or full_stems_dir(OUTPUT_DIR)
     output_dir = args.output_dir or source_dir
@@ -1661,6 +1585,7 @@ def main():
     if args.no_content_fidelity_enforce:
         content_fidelity_enforce = False
 
+    audio_format = synthesis_audio_format(args.flac)
     run_realify(
         source_dir,
         output_dir,
@@ -1668,12 +1593,13 @@ def main():
         limit=args.limit,
         jobs=args.jobs,
         batch_size=args.realify_batch_size,
-        audio_format=synthesis_audio_format(args.flac),
+        audio_format=audio_format,
         reset=args.reset,
         silence_enforce=not args.no_silence_enforce,
         content_fidelity_enforce=content_fidelity_enforce,
         backend=args.backend,
     )
+    print_mix_hint(output_dir, jobs=args.jobs, flac=bool(args.flac))
 
 
 if __name__ == "__main__":

@@ -48,7 +48,7 @@ def add_synthesis_args(parser: argparse.ArgumentParser):
         "--workers",
         default=int(multiprocessing.cpu_count() / 4),
         type=int,
-        help="CPU workers for synthesis, CPU realify (small-music), and realify mixture writes.",
+        help="CPU workers for synthesis and CPU realify (small-music).",
     )
     parser.add_argument(
         "--render-mode",
@@ -94,11 +94,6 @@ def add_synthesis_args(parser: argparse.ArgumentParser):
         default=ABLATION_MIN_STEMS_PER_CATEGORY,
         type=int,
         help="Stratified ablation: keep songs until each listening category has this many stems.",
-    )
-    parser.add_argument(
-        "--no-mixture",
-        action="store_true",
-        help="Skip writing mixture files; song completeness is stems-only.",
     )
     parser.add_argument(
         "--allow-fallback-render",

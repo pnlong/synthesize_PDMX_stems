@@ -14,8 +14,10 @@ from shared.config import (
     SAMPLE_RATE,
 )
 from synthesis.audio import (
+    apply_peak_gain,
     build_mixture,
     ensure_stem_channels,
+    load_stem,
     load_stem_flac,
     loudness_normalize,
     pad_and_loudness_normalize,
@@ -28,6 +30,7 @@ from synthesis.audio import (
     write_mixture_from_song_dir,
     write_mp3,
     write_audio,
+    write_stems_and_mixture,
 )
 
 
@@ -163,23 +166,60 @@ def test_pad_and_loudness_equal_length():
 def test_build_mixture_scales_when_clipping():
     w1 = torch.ones(1, 4) * 0.8
     w2 = torch.ones(1, 4) * 0.8
-    mixture = build_mixture([w1, w2], peak_limit=1.0)
+    mixture, peak_gain = build_mixture([w1, w2], peak_limit=1.0)
     assert mixture.abs().max().item() <= 1.0 + 1e-6
+    np.testing.assert_allclose(peak_gain, 1.0 / 1.6, rtol=1e-5)
     np.testing.assert_allclose(to_mono_numpy(mixture), [1.0, 1.0, 1.0, 1.0], rtol=1e-5)
 
 
 def test_build_mixture_single_stem():
     w = torch.linspace(0, 1, 100).unsqueeze(0)
-    mixture = build_mixture([w])
+    mixture, peak_gain = build_mixture([w])
+    assert peak_gain == 1.0
     np.testing.assert_allclose(to_mono_numpy(mixture), to_mono_numpy(w))
 
 
 def test_build_mixture_pads_mismatched_lengths():
     w1 = torch.ones(1, 5) * 0.4
     w2 = torch.ones(1, 4) * 0.4
-    mixture = build_mixture([w1, w2])
+    mixture, peak_gain = build_mixture([w1, w2])
+    assert peak_gain == 1.0
     assert mixture.shape[-1] == 5
     np.testing.assert_allclose(to_mono_numpy(mixture), [0.8, 0.8, 0.8, 0.8, 0.4], rtol=1e-5)
+
+
+def test_apply_peak_gain_identity():
+    w = torch.ones(1, 4) * 0.5
+    out = apply_peak_gain([w], 1.0)
+    assert out[0] is w
+
+
+def test_stems_sum_to_mixture_after_peak_scale():
+    w1 = torch.ones(1, 4) * 0.8
+    w2 = torch.ones(1, 4) * 0.8
+    mixture, peak_gain = build_mixture([w1, w2], peak_limit=1.0)
+    scaled = apply_peak_gain([w1, w2], peak_gain)
+    summed = scaled[0] + scaled[1]
+    np.testing.assert_allclose(to_mono_numpy(summed), to_mono_numpy(mixture), rtol=1e-5)
+
+
+def test_write_stems_and_mixture_rewrites_peak_scaled_stems(tmp_path: Path):
+    song_dir = tmp_path / "song"
+    song_dir.mkdir()
+    w1 = torch.ones(1, SAMPLE_RATE) * 0.8
+    w2 = torch.ones(1, SAMPLE_RATE) * 0.8
+    scaled, mix_path = write_stems_and_mixture(
+        [w1, w2], song_dir, [0, 1], FLAC_AUDIO_FORMAT,
+    )
+    assert mix_path is None  # mixture not written by default
+    assert not (song_dir / "mixture.flac").exists()
+    stem0 = load_stem(song_dir / "stem_0.flac")
+    stem1 = load_stem(song_dir / "stem_1.flac")
+    summed = stem0 + stem1
+    assert summed.abs().max().item() <= 1.0 + 1e-4
+    np.testing.assert_allclose(
+        to_mono_numpy(stem0), to_mono_numpy(scaled[0]), rtol=1e-4, atol=1e-4,
+    )
 
 
 def test_write_mixture_from_song_dir(tmp_path: Path):
@@ -190,8 +230,34 @@ def test_write_mixture_from_song_dir(tmp_path: Path):
     sf.write(str(song_dir / "stem_1.mp3"), np.full(sr, 0.5, dtype=np.float32), sr, format="MP3")
     out = write_mixture_from_song_dir(song_dir, [0, 1])
     assert out is not None
-    assert out.name == "mixture.mp3"
-    assert out.exists()
+    assert out == song_dir
+    assert not (song_dir / "mixture.mp3").exists()
+
+
+def test_write_mixture_from_song_dir_makes_stems_summable(tmp_path: Path):
+    song_dir = tmp_path / "song"
+    song_dir.mkdir()
+    # Loud constant stems: after LUFS they still sum above 1.0 and need anti-clip.
+    sr = SAMPLE_RATE
+    sf.write(
+        str(song_dir / "stem_0.flac"),
+        np.full(sr, 0.9, dtype=np.float32),
+        sr,
+        format="FLAC",
+    )
+    sf.write(
+        str(song_dir / "stem_1.flac"),
+        np.full(sr, 0.9, dtype=np.float32),
+        sr,
+        format="FLAC",
+    )
+    out = write_mixture_from_song_dir(song_dir, [0, 1], FLAC_AUDIO_FORMAT)
+    assert out is not None
+    assert not (song_dir / "mixture.flac").exists()
+    stem0 = load_stem(song_dir / "stem_0.flac")
+    stem1 = load_stem(song_dir / "stem_1.flac")
+    summed = stem0 + stem1
+    assert summed.abs().max().item() <= 1.0 + 1e-5
 
 
 def test_song_is_complete_requires_mixture(tmp_path: Path):
@@ -199,10 +265,12 @@ def test_song_is_complete_requires_mixture(tmp_path: Path):
     song_dir.mkdir()
     sr = 44100
     sf.write(str(song_dir / "stem_0.mp3"), np.zeros(sr, dtype=np.float32), sr, format="MP3")
-    assert not song_is_complete(song_dir, 1)
-    assert song_is_complete(song_dir, 1, require_mixture=False)
-    write_mixture_from_song_dir(song_dir, [0])
     assert song_is_complete(song_dir, 1)
+    assert not song_is_complete(song_dir, 1, require_mixture=True)
+    write_stems_and_mixture(
+        [torch.zeros(1, sr)], song_dir, [0], write_mixture=True,
+    )
+    assert song_is_complete(song_dir, 1, require_mixture=True)
 
 
 def test_loudness_normalize_silent_passthrough():

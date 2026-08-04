@@ -10,12 +10,15 @@ import pandas as pd
 import pytest
 import soundfile as sf
 
+from synthesis.mix import (
+    build_mixture_tasks,
+    write_mixtures_for_dataset,
+)
 from synthesis.realify.captions.generate import generate_captions
 from synthesis.realify.preset_config import select_preset
 from synthesis.realify.realify import (
     build_realify_tasks,
     build_generate_kwargs,
-    build_mixture_tasks,
     configure_sa3_runtime,
     copy_metadata_tables,
     iter_realify_batches,
@@ -32,8 +35,6 @@ from synthesis.realify.realify import (
     sort_realify_tasks_for_batching,
     stem_seed,
     suggest_realify_batch_size,
-    write_mixture_task,
-    write_mixtures_for_dataset,
     _normalize_generated_audio,
     _run_realify_gpu,
 )
@@ -557,9 +558,10 @@ def test_iter_realify_batches_groups_by_preset_and_size(monkeypatch):
         model = type("M", (), {"sample_rate": 44100})()
 
     presets = _batching_presets()
+    # Different n_samples under the same piano preset still batch together (pad later).
     tasks = [
         {"row": {"prompt": "a", "is_drum": False, "name": "Piano"}, "duration": 10.0, "n_samples": 441000},
-        {"row": {"prompt": "b", "is_drum": False, "name": "Piano"}, "duration": 12.0, "n_samples": 441000},
+        {"row": {"prompt": "b", "is_drum": False, "name": "Piano"}, "duration": 12.0, "n_samples": 529200},
         {"row": {"prompt": "c", "is_drum": True, "name": "Kick"}, "duration": 8.0, "n_samples": 352800},
         {"row": {"prompt": "d", "is_drum": False, "name": "Piano"}, "duration": 400.0, "n_samples": 441000},
     ]
@@ -570,6 +572,32 @@ def test_iter_realify_batches_groups_by_preset_and_size(monkeypatch):
 
     batches = list(iter_realify_batches(tasks, FakeModel(), presets, batch_size=2))
     assert [len(batch) for batch in batches] == [2, 1, 1]
+    assert batches[0][0]["n_samples"] == 441000
+    assert batches[0][1]["n_samples"] == 529200
+    assert batches[2][0]["duration"] == 400.0
+
+
+def test_iter_realify_batches_chunked_flushes_buffer(monkeypatch):
+    class FakeModel:
+        model_config = {"sample_size": 44100 * 120}
+        model = type("M", (), {"sample_rate": 44100})()
+
+    presets = _batching_presets()
+    tasks = [
+        {"row": {"prompt": "a", "is_drum": False, "name": "Piano"}, "duration": 10.0, "n_samples": 100},
+        {"row": {"prompt": "b", "is_drum": False, "name": "Piano"}, "duration": 400.0, "n_samples": 200},
+        {"row": {"prompt": "c", "is_drum": False, "name": "Piano"}, "duration": 11.0, "n_samples": 300},
+    ]
+    monkeypatch.setattr(
+        "synthesis.realify.realify.task_needs_chunking",
+        lambda task, model: task["duration"] > 120,
+    )
+
+    batches = list(iter_realify_batches(tasks, FakeModel(), presets, batch_size=3))
+    assert [len(batch) for batch in batches] == [1, 1, 1]
+    assert batches[0][0]["n_samples"] == 100
+    assert batches[1][0]["duration"] == 400.0
+    assert batches[2][0]["n_samples"] == 300
 
 
 def test_sort_realify_tasks_category_first_improves_batching(monkeypatch):
@@ -693,6 +721,8 @@ def test_realify_stems_batch_calls_generate_once(tmp_path: Path, monkeypatch):
 def test_realify_stems_batch_pads_mismatched_lengths(tmp_path: Path, monkeypatch):
     import torch
 
+    from shared.config import SAMPLE_RATE
+
     calls = []
 
     class FakeModel:
@@ -738,6 +768,7 @@ def test_realify_stems_batch_pads_mismatched_lengths(tmp_path: Path, monkeypatch
     realify_stems_batch(tasks, model=FakeModel(), presets=presets, audio_format="flac")
     assert calls[0]["init_audio"][0][1].shape[-1] == 40
     assert calls[0]["init_audio"][1][1].shape[-1] == 40
+    assert calls[0]["duration"] == [40 / float(SAMPLE_RATE)] * 2
     assert written[0][0] == 30
     assert written[1][0] == 40
 
@@ -760,9 +791,9 @@ def test_write_mixtures_for_dataset_uses_pool(tmp_path: Path, monkeypatch):
         def join(self):
             captured["joined"] = True
 
-    monkeypatch.setattr("synthesis.realify.realify.multiprocessing.Pool", FakePool)
+    monkeypatch.setattr("synthesis.mix.multiprocessing.Pool", FakePool)
     monkeypatch.setattr(
-        "synthesis.realify.realify.write_mixture_task",
+        "synthesis.mix.normalize_song_task",
         lambda task: task["out_song_dir"],
     )
 
@@ -800,7 +831,9 @@ def test_build_mixture_tasks_resolves_output_dirs(tmp_path: Path):
     tasks = build_mixture_tasks(stems, source_dir, output_dir, "flac")
     assert len(tasks) == 1
     assert tasks[0]["tracks"] == [0, 1]
+    assert tasks[0]["song_dir"] == str(song_dir)
     assert tasks[0]["out_song_dir"].endswith("basic_realify/data/song")
+    assert tasks[0]["write_mixture"] is False
 
 
 def test_normalize_generated_audio_respects_stem_channels(monkeypatch):

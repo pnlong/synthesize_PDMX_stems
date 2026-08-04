@@ -32,14 +32,11 @@ from shared.config import (
 from synthesis.audio import (
     get_waveform_tensor,
     pad_and_loudness_normalize,
-    mixture_path,
     save_stem,
     song_is_complete,
     stem_is_valid,
     stem_path,
     synthesis_audio_format,
-    write_mixture_from_song_dir,
-    write_mixture_from_waveforms,
 )
 from synthesis.cli_common import add_synthesis_args, default_gm_register_path
 from synthesis.dataset import listening_sample_path, prepare_ablation_dataset, prepare_full_dataset
@@ -78,10 +75,6 @@ def song_output_dir(output_dir: str, original_dataset_dir: str, json_path: str) 
     return f"{output_dir}{rel_no_ext}"
 
 
-def _require_mixture(args) -> bool:
-    return not bool(getattr(args, "no_mixture", False))
-
-
 def synthesize_song_at_index(
     i: int,
     dataset: pd.DataFrame,
@@ -92,14 +85,14 @@ def synthesize_song_at_index(
 
     For DDSP render modes, ``args.ddsp_pass`` selects a global phase:
     ``ddsp_piano`` / ``midi_ddsp`` only render that neural backend; ``finalize``
-    fills donor/soundfont stems, mixtures, and CSV rows.
+    fills donor/soundfont stems and CSV rows. Mixtures are a separate
+    ``synthesis.mix`` pass.
     """
     from synthesis.dense_midi import resolve_synthesis_midi
 
     path_output = dataset.at[i, "path_output"]
     song_dir = Path(path_output)
     audio_format = synthesis_audio_format(args.flac)
-    require_mixture = _require_mixture(args)
     ddsp_pass = getattr(args, "ddsp_pass", None)
 
     pdmx_mid = dataset.at[i, "mid_pdmx"] if "mid_pdmx" in dataset.columns else dataset.at[i, "mid"]
@@ -115,7 +108,7 @@ def synthesize_song_at_index(
 
     if (
         path_output in completed_paths
-        and song_is_complete(song_dir, n_tracks, audio_format, require_mixture=require_mixture)
+        and song_is_complete(song_dir, n_tracks, audio_format, require_mixture=False)
         and not args.reset
     ):
         del midi
@@ -314,10 +307,10 @@ def synthesize_song_at_index(
                     if exists(path):
                         remove(path)
                 temp_dir.cleanup()
-                # CSV / mixtures only on finalize pass.
+                # CSV rows only on finalize pass.
                 return None, [], []
 
-            # Finalize (default when ddsp_pass is None or "finalize"): non-neural stems + mix.
+            # Finalize (default when ddsp_pass is None or "finalize"): non-neural stems.
             for j, track_path in enumerate(track_paths):
                 meta = track_render_meta[j]
                 backend = meta.get("ddsp_backend")
@@ -400,8 +393,6 @@ def synthesize_song_at_index(
                 })
                 remove(track_path)
             temp_dir.cleanup()
-            if require_mixture:
-                write_mixture_from_song_dir(song_dir, list(range(n_tracks)), audio_format)
         else:
             waveforms = []
             for j, track_path in enumerate(track_paths):
@@ -414,14 +405,6 @@ def synthesize_song_at_index(
             waveforms = pad_and_loudness_normalize(waveforms)
             for j, waveform in enumerate(waveforms):
                 save_stem(waveform, song_dir, j, audio_format)
-            if require_mixture:
-                write_mixture_from_waveforms(waveforms, song_dir, audio_format)
-    elif (
-        require_mixture
-        and stems_complete
-        and not mixture_path(song_dir, audio_format).exists()
-    ):
-        write_mixture_from_song_dir(song_dir, list(range(n_tracks)), audio_format)
 
     song_info = dataset.loc[i].to_dict()
     song_info["path"] = path_output
@@ -694,7 +677,6 @@ def run_synthesis(args, output_dir: str):
             "CUDA-after-fork kills (exit -9)."
         )
 
-    require_mixture = _require_mixture(args)
     work_indices = []
     for i in dataset.index:
         if args.reset:
@@ -707,7 +689,7 @@ def run_synthesis(args, output_dir: str):
         n_tracks = int(dataset.at[i, "n_tracks"])
         audio_format = synthesis_audio_format(args.flac)
         if not song_is_complete(
-            Path(path_output), n_tracks, audio_format, require_mixture=require_mixture,
+            Path(path_output), n_tracks, audio_format, require_mixture=False,
         ):
             work_indices.append(i)
 
@@ -720,7 +702,7 @@ def run_synthesis(args, output_dir: str):
         # Global two-pass: keep one neural backend hot per phase, then finalize.
         print(
             "DDSP schedule: pass1=ddsp_piano, pass2=midi_ddsp, "
-            "pass3=donors/soundfont+mixtures (pool restarts between neural passes).",
+            "pass3=donors/soundfont (pool restarts between neural passes).",
             flush=True,
         )
         ddsp_passes = (
@@ -768,7 +750,7 @@ def synthesis_is_complete(
     source_dir: str,
     audio_format: str,
     *,
-    require_mixture: bool = True,
+    require_mixture: bool = False,
 ) -> bool:
     """True when data/stems tables exist and every listed song has stem files on disk."""
     source = Path(source_dir)
@@ -797,10 +779,9 @@ def require_raw_synthesis(
     *,
     run_command: str,
     audio_format: str = DEFAULT_AUDIO_FORMAT,
-    require_mixture: bool = True,
 ) -> None:
     """Raise if the non-realify synthesis pass has not completed successfully."""
-    if synthesis_is_complete(source_dir, audio_format, require_mixture=require_mixture):
+    if synthesis_is_complete(source_dir, audio_format, require_mixture=False):
         return
     raise RuntimeError(
         "Cannot realify: raw stems are missing or incomplete at "
@@ -816,7 +797,6 @@ def require_donor_ablation(args, *, realify: bool) -> None:
     if donor_mode is None:
         return
     audio_format = synthesis_audio_format(args.flac)
-    require_mixture = _require_mixture(args)
     if realify:
         donor_dir = ablation_realify_dir(args.output_dir, donor_mode)
         cmd = (
@@ -825,11 +805,9 @@ def require_donor_ablation(args, *, realify: bool) -> None:
     else:
         donor_dir = ablation_raw_dir(args.output_dir, donor_mode)
         cmd = f"uv run python -m synthesis.synthesize --render-mode {donor_mode}"
-    if getattr(args, "no_mixture", False):
-        cmd += " --no-mixture"
     if args.flac:
         cmd += " --flac"
-    if synthesis_is_complete(donor_dir, audio_format, require_mixture=require_mixture):
+    if synthesis_is_complete(donor_dir, audio_format, require_mixture=False):
         return
     if getattr(args, "allow_fallback_render", False) and not realify:
         print(
@@ -851,8 +829,6 @@ def raw_synthesis_command(args) -> str:
         cmd += " --full"
     if args.flac:
         cmd += " --flac"
-    if getattr(args, "no_mixture", False):
-        cmd += " --no-mixture"
     return cmd
 
 
@@ -882,13 +858,14 @@ def run_realify_pass(args, source_dir: str, dest_dir: str):
         reset=args.reset,
         silence_enforce=REALIFY_SILENCE_ENFORCE and not args.no_silence_enforce,
         content_fidelity_enforce=content_fidelity_enforce,
-        no_mixture=bool(getattr(args, "no_mixture", False)),
         output_root=args.output_dir,
         render_mode=args.render_mode,
     )
 
 
 def main():
+    from synthesis.mix import print_mix_hint
+
     args = parse_args()
     if args.full:
         source_dir = full_stems_dir(args.output_dir)
@@ -897,13 +874,13 @@ def main():
         source_dir = ablation_raw_dir(args.output_dir, args.render_mode)
         dest_dir = ablation_realify_dir(args.output_dir, args.render_mode)
 
+    stems_dir = dest_dir if args.realify else source_dir
     if args.realify:
         audio_format = synthesis_audio_format(args.flac)
         require_raw_synthesis(
             source_dir,
             run_command=raw_synthesis_command(args),
             audio_format=audio_format,
-            require_mixture=_require_mixture(args),
         )
         if uses_ddsp(args.render_mode) and not args.full:
             require_donor_ablation(args, realify=True)
@@ -912,6 +889,7 @@ def main():
         run_synthesis(args, source_dir)
 
     link_ablations_in_repo(args.output_dir)
+    print_mix_hint(stems_dir, jobs=args.jobs, flac=bool(args.flac))
 
 
 if __name__ == "__main__":

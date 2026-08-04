@@ -82,9 +82,10 @@ def test_synthesis_is_complete_stems_only_without_mixture(tmp_path: Path):
     pd.DataFrame({"path": [str(song_dir)], "track": [0]}).to_csv(
         ablation_dir / f"{STEMS_FILE_NAME}.csv", index=False
     )
-    assert not synthesis_is_complete(str(ablation_dir), DEFAULT_AUDIO_FORMAT)
-    assert synthesis_is_complete(
-        str(ablation_dir), DEFAULT_AUDIO_FORMAT, require_mixture=False,
+    # Synthesis completeness is stems-only; mixtures are a separate mix pass.
+    assert synthesis_is_complete(str(ablation_dir), DEFAULT_AUDIO_FORMAT)
+    assert not synthesis_is_complete(
+        str(ablation_dir), DEFAULT_AUDIO_FORMAT, require_mixture=True,
     )
 
 

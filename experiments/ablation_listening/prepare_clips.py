@@ -182,7 +182,7 @@ def select_mixture_trials(
     if len(paths) < count:
         raise RuntimeError(
             f"Need {count} mixture trials but only {len(paths)} songs have mixtures "
-            f"under all conditions (ablations may have used --no-mixture)."
+            f"under all conditions (mixtures are optional via synthesis.mix)."
         )
     rng = random.Random(seed)
     rng.shuffle(paths)

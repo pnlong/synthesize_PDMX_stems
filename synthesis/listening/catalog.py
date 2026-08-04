@@ -19,7 +19,7 @@ from synthesis.audio import mixture_filename, stem_filename
 from synthesis.patches import LISTENING_CATEGORY_GM_CLASSES, resolve_probe_category
 from synthesis.paths import ablations_root
 from synthesis.realify.captions.generate import generate_captions_from_tables
-from synthesis.realify.realify import resolve_output_song_dir
+from synthesis.paths import resolve_output_song_dir
 
 # Stable order for sidebar filters (probe / slakh listening categories).
 LISTENING_CATEGORY_ORDER: tuple[str, ...] = tuple(LISTENING_CATEGORY_GM_CLASSES.keys())
@@ -90,7 +90,7 @@ def detect_audio_format(song_dir: Path) -> str | None:
     from shared.config import FLAC_AUDIO_FORMAT
 
     for fmt in (DEFAULT_AUDIO_FORMAT, FLAC_AUDIO_FORMAT):
-        # Prefer stems (mixtures may be absent with --no-mixture).
+        # Prefer stems (mixtures are written separately via synthesis.mix).
         if any(song_dir.glob(f"stem_*.{fmt}")):
             return fmt
         if (song_dir / mixture_filename(fmt)).exists():

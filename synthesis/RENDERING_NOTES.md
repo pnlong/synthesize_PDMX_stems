@@ -71,11 +71,10 @@ Then run A1/B1/… as usual.
 data/<mirrored-song-path>/
 ├── stem_0.mp3    # or stem_0.flac with --flac
 ├── stem_1.mp3
-├── ...
-└── mixture.mp3   # or mixture.flac with --flac
+└── ...           # mix = sum(stems); no mixture.* on disk
 ```
 
-Default on-disk format is **MP3**. Pass `--flac` to write FLAC stems and mixtures (PCM_16). Use the same `--flac` flag for realify so it reads and writes the matching format.
+Default on-disk format is **MP3**. Pass `--flac` to write FLAC stems (PCM_16). Use the same `--flac` flag for realify / mix so they read and write the matching format.
 
 ## Mixture procedure
 
@@ -88,11 +87,20 @@ Constant across all ablations (A1–B2), basic and slakh, synthesis and realify:
 | Loudness | −23 LUFS integrated (BS.1770-4), peak-limited to 1.0 |
 
 1. Stems are loudness-normalized toward −23 LUFS (BS.1770) with per-stem peak limiting at 1.0, then padded to equal length.
-2. Sum stems sample-wise.
-3. If mixture peak > `MIXTURE_PEAK_LIMIT` (1.0), apply uniform gain `limit / peak`.
-4. Write `mixture.mp3` (or `mixture.flac` with `--flac`; stem files on disk unchanged).
+2. Sum stems sample-wise (in memory).
+3. If mixture peak > `MIXTURE_PEAK_LIMIT` (1.0), apply uniform gain `limit / peak` to every stem (same factor), so released stems remain linearly summable.
+4. Overwrite `stem_*.mp3` / `stem_*.flac` with the peak-scaled waveforms. **No `mixture.*` is written** — the mix is just `sum(stems)`.
 
-Implemented in [`audio.py`](audio.py). Called from `synthesize.py` after stems and from `realify.py` after realify completes.
+**Synthesis and realify write stems only** (per-stem LUFS). Summability normalization is a separate pass:
+
+```bash
+uv run python -m synthesis.mix --stems-dir /path/to/ablation -j 8
+# or:
+uv run python -m synthesis.mix --render-mode basic -j 8
+uv run python -m synthesis.mix --render-mode basic --realify -j 8
+```
+
+Implemented in [`audio.py`](audio.py) / [`mix.py`](mix.py). `synthesize` / `realify` print the suggested mix command when they finish.
 
 ## Two-pass pipeline (synthesis + realify)
 
@@ -103,7 +111,7 @@ Synthesis and realify are intentionally separate passes with different hardware 
 | 1 — Synthesis | Fluidsynth render (basic or slakh) | `-j` / `--jobs` multiprocessing pool | CPU |
 | 2 — Realify | SA3 audio-to-audio per stem | One process per visible GPU; stems sorted category→length; batch size auto from per-GPU VRAM (`REALIFY_BATCH_SIZE=0`, or `--realify-batch-size N`) | GPU / CPU |
 
-Pass 1 writes raw stems under `dev/ablations/{basic,slakh}/` or `dev/stems/`. Pass 2 reads those stems, runs captions + SA3, and writes to `{mode}_realify/` (or `stems_realify/`). **Pass 2 never re-synthesizes** — it errors if the raw ablation is incomplete. Mixture rebuild at the end uses `-j` / `--jobs` CPU workers (same flag as synthesis).
+Pass 1 writes raw stems under `dev/ablations/{basic,slakh}/` or `dev/stems/`. Pass 2 reads those stems, runs captions + SA3, and writes to `{mode}_realify/` (or `stems_realify/`). **Pass 2 never re-synthesizes** — it errors if the raw ablation is incomplete. Mixtures are a separate `synthesis.mix` pass afterward.
 
 Use `CUDA_VISIBLE_DEVICES` to select GPU(s). `medium` requires a visible GPU. `small-music` uses GPU when available, otherwise CPU multiprocessing with `-j`.
 
@@ -136,7 +144,7 @@ python -m synthesis.realify.realify \
 All synthesis flows go through `synthesis.synthesize` (expects GM `register.csv` unless `--no-register`):
 
 ```bash
-COMMON="--sample-seed 43 --no-mixture -j 8"
+COMMON="--sample-seed 43 -j 8"
 
 # Step 0
 python -m analysis.prepare_synthesis --subset all_valid -j 8
@@ -153,6 +161,10 @@ python -m synthesis.synthesize --render-mode ddsp_slakh $COMMON          # CB1
 python -m synthesis.synthesize --render-mode ddsp_basic --realify $COMMON  # CA2
 python -m synthesis.synthesize --render-mode ddsp_slakh --realify $COMMON  # CB2
 
+# Optional: peak-normalize stems so mix = sum(stems)
+python -m synthesis.mix --render-mode basic -j 8
+python -m synthesis.mix --render-mode basic --realify -j 8
+
 # Aligned 10s clips (windows from A1) + listening viewer
 python -m synthesis.listening.make_clips --clip-seconds 10
 python -m synthesis.listening.serve
@@ -161,6 +173,7 @@ python -m synthesis.listening.serve
 python -m analysis.prepare_synthesis --subset all_valid -j 8
 SPDMX_DENSE_MIDI=1 python -m synthesis.synthesize --render-mode basic --full
 SPDMX_DENSE_MIDI=1 python -m synthesis.synthesize --render-mode basic --full --realify
+SPDMX_DENSE_MIDI=1 python -m synthesis.mix --full -j 8
 ```
 
 Listening ablations keep the default (**dense MIDI off** / legacy PDMX track indices) until you flip `SPDMX_DENSE_MIDI` or pass `--dense-midi`. After cutover, drop the legacy path so dense is always on and `prepare_synthesis` is the only setup step needed.
@@ -254,7 +267,7 @@ Routing details live in [`synthesis/ddsp/routing.py`](ddsp/routing.py) (`DDSP_PI
 
 - CA2/CB2 SA3 only neural stems; fallback stems copy from A2/B2.
 - Neural models run in an isolated TF venv (`.venv-ddsp`); see SETUP Track C. Linux x86_64 only.
-- **Persistent multi-GPU pool** (default): one long-lived `worker serve` process per id in `CUDA_VISIBLE_DEVICES`. Synthesis runs **three global passes** — (1) all `ddsp_piano` stems, (2) all `midi_ddsp` stems, (3) donor/soundfont + mixtures — restarting the pool between neural passes so only one TF model is hot. Within a pass, same-backend stems in a song fan out across GPUs. Song-level jobs stay at `-j 1`. `SPDMX_DDSP_ONESHOT=1` = legacy per-stem subprocesses; `SPDMX_DDSP_FORCE_CPU=1` → CPU worker.
+- **Persistent multi-GPU pool** (default): one long-lived `worker serve` process per id in `CUDA_VISIBLE_DEVICES`. Synthesis runs **three global passes** — (1) all `ddsp_piano` stems, (2) all `midi_ddsp` stems, (3) donor/soundfont — restarting the pool between neural passes so only one TF model is hot. Within a pass, same-backend stems in a song fan out across GPUs. Song-level jobs stay at `-j 1`. `SPDMX_DDSP_ONESHOT=1` = legacy per-stem subprocesses; `SPDMX_DDSP_FORCE_CPU=1` → CPU worker.
 - Routing decisions are written to `ddsp_routing.csv` beside the ablation tables.
 - Provenance: [`THIRD_PARTY.md`](../THIRD_PARTY.md). Vocals deliberately stay on soundfont(+SA3); lyric SVS is out of scope.
 
@@ -280,7 +293,7 @@ See [`listening/README.md`](listening/README.md).
 | `--full` for all valid PDMX | Done |
 | `build_spdmx.py` | Stub |
 | Patch pools (Slakh) | Stub |
-| `mixture` per song | Done (optional via `--no-mixture`) |
+| `mixture` per song | Not stored; `synthesis.mix` peak-scales stems so mix = sum(stems) |
 | Listening test | Viewer available (`python -m synthesis.listening.serve`) |
 | Song-length analysis (PDMX metadata + plots) | Done |
 | Neural-DDSP coverage (`analysis.ddsp_coverage`) | Done |
