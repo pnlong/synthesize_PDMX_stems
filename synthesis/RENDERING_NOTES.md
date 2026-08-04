@@ -86,15 +86,15 @@ Constant across all ablations (A1–B2), basic and slakh, synthesis and realify:
 |---|---|
 | Sample rate | 44.1 kHz |
 | Stem channels | `STEM_CHANNELS` in `shared/config.py` (default `1` mono; `2` keeps fluidsynth/SA3 stereo) |
-| Loudness | −23 LUFS integrated (BS.1770-4), peak-limited to 1.0 |
+| Loudness | Applied in `synthesis.mix` (−23 LUFS BS.1770-4, peak-limited to 1.0) |
 
-1. Stems are loudness-normalized toward −23 LUFS (BS.1770) with per-stem peak limiting at 1.0, then padded to equal length.
+1. Load raw stems; loudness-normalize toward −23 LUFS (BS.1770) with per-stem peak limiting at 1.0, then pad to equal length.
 2. Multiply each stem by MIDI velocity dynamics \(s_i = v_i^{\max} / v_{\mathrm{song}}^{\max}\) (note-ons with velocity \(> 0\)).
 3. Sum stems sample-wise (in memory).
 4. If mixture peak > `MIXTURE_PEAK_LIMIT` (1.0), apply uniform gain `limit / peak` to every stem (same factor), so released stems remain linearly summable.
 5. Overwrite `stem_*.mp3` / `stem_*.flac` with the scaled waveforms. **No `mixture.*` is written by default** — the mix is just `sum(stems)` (`--write-mixture` to also write it).
 
-**Synthesis and realify write stems only** (per-stem LUFS). Summability normalization is a separate pass:
+**Synthesis and realify write raw stems** (no LUFS). Summability normalization is a separate pass:
 
 ```bash
 uv run python -m synthesis.mix --stems-dir /path/to/ablation -j 8

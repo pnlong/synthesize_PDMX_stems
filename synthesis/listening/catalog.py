@@ -201,7 +201,11 @@ def _stem_file_track_for_condition(
     """On-disk stem index in ``condition`` for a logical ``original_track``."""
     if condition_stems is None or condition_stems.empty:
         return fallback_track
-    rows = condition_stems[condition_stems["path"].astype(str) == str(song_path)]
+    # Realify CSVs remap ``path`` into their own tree; match by song id.
+    song_id = song_id_from_path(song_path)
+    rows = condition_stems[
+        condition_stems["path"].astype(str).map(song_id_from_path) == song_id
+    ]
     if rows.empty:
         return fallback_track
     if "original_track" in rows.columns:

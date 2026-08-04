@@ -44,7 +44,7 @@ from synthesis.audio import (
     stem_path,
     write_audio,
 )
-from synthesis.paths import full_stems_dir, resolve_output_song_dir
+from synthesis.paths import full_stems_dir, remap_path_prefix, resolve_output_song_dir
 from synthesis.realify.captions.generate import generate_captions
 from synthesis.realify.chunking import (
     max_realify_chunk_samples,
@@ -916,13 +916,22 @@ def resolve_stem_output_path(
 
 
 def copy_metadata_tables(source_dir: Path, output_dir: Path):
+    """Copy data/stems/routing CSVs into ``output_dir``, remapping absolute song paths."""
     from synthesis.ddsp.config import DDSP_ROUTING_FILE_NAME
 
+    if source_dir.resolve() == output_dir.resolve():
+        return
     output_dir.mkdir(parents=True, exist_ok=True)
     for name in ("data.csv", "stems.csv", DDSP_ROUTING_FILE_NAME):
         src = source_dir / name
-        if src.exists():
-            shutil.copy2(src, output_dir / name)
+        if not src.exists():
+            continue
+        table = pd.read_csv(src)
+        if "path" in table.columns:
+            table["path"] = table["path"].map(
+                lambda p: remap_path_prefix(str(p), source_dir, output_dir)
+            )
+        table.to_csv(output_dir / name, index=False)
 
 
 def _stem_metadata_row(
@@ -1012,8 +1021,9 @@ def build_realify_tasks(
                 )
                 if stem_is_valid(donor_stem):
                     copy_stem(donor_stem, out_path)
+                    out_song = resolve_output_song_dir(song_dir, source_dir, output_dir)
                     original_path_updates.append(
-                        (str(song_dir), track, str(donor_stem.resolve()))
+                        (str(out_song), track, str(donor_stem.resolve()))
                     )
                     continue
                 raise RuntimeError(
@@ -1028,8 +1038,9 @@ def build_realify_tasks(
             if not realify_enabled(preset):
                 out_path.parent.mkdir(parents=True, exist_ok=True)
                 copy_stem(source_stem_path, out_path)
+                out_song = resolve_output_song_dir(song_dir, source_dir, output_dir)
                 original_path_updates.append(
-                    (str(song_dir), track, str(source_stem_path.resolve()))
+                    (str(out_song), track, str(source_stem_path.resolve()))
                 )
                 continue
         tasks.append({

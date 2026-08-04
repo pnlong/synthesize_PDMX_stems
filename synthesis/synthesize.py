@@ -31,7 +31,6 @@ from shared.config import (
 )
 from synthesis.audio import (
     get_waveform_tensor,
-    pad_and_loudness_normalize,
     save_stem,
     song_is_complete,
     stem_is_valid,
@@ -75,6 +74,51 @@ def song_output_dir(output_dir: str, original_dataset_dir: str, json_path: str) 
     return f"{output_dir}{rel_no_ext}"
 
 
+def songs_missing_routing(songs: pd.DataFrame, routing: pd.DataFrame) -> set[str]:
+    """Return song paths lacking routing coverage for tracks ``0..n_tracks-1``.
+
+    Uses subset checks so a larger routing track set than ``n_tracks`` (e.g. dense
+    vs legacy metadata mismatch) still counts as complete.
+    """
+    if songs.empty:
+        return set()
+    if routing is None or routing.empty or "path" not in routing.columns:
+        return set(songs["path"].astype(str))
+    by_path: dict[str, set[int]] = {}
+    for path, group in routing.groupby(routing["path"].astype(str), sort=False):
+        by_path[str(path)] = {int(t) for t in group["track"]}
+    missing: set[str] = set()
+    for _, row in songs.iterrows():
+        path = str(row["path"])
+        n_tracks = int(row["n_tracks"])
+        if not set(range(n_tracks)).issubset(by_path.get(path, set())):
+            missing.add(path)
+    return missing
+
+
+def load_completed_song_paths(
+    data_csv: str | Path,
+    *,
+    routing_csv: str | Path | None = None,
+) -> set[str]:
+    """Paths listed in ``data.csv``, excluding DDSP songs with incomplete routing coverage."""
+    data_csv = Path(data_csv)
+    if not data_csv.is_file():
+        return set()
+    songs = pd.read_csv(data_csv, sep=",", header=0, index_col=False)
+    if songs.empty or "path" not in songs.columns:
+        return set()
+    completed = set(songs["path"].astype(str))
+    if routing_csv is None:
+        return completed
+    routing_path = Path(routing_csv)
+    if not routing_path.is_file():
+        # DDSP mode expects routing; treat all as incomplete until the file exists.
+        return set()
+    routing = pd.read_csv(routing_path, sep=",", header=0, index_col=False)
+    return completed - songs_missing_routing(songs, routing)
+
+
 def synthesize_song_at_index(
     i: int,
     dataset: pd.DataFrame,
@@ -116,9 +160,12 @@ def synthesize_song_at_index(
     stems_complete = all(
         stem_is_valid(stem_path(song_dir, j, audio_format)) for j in range(n_tracks)
     )
-    # Neural-only passes still run when some stems exist (render missing neural).
+    # Neural / finalize passes must enter the render block even when stems exist:
+    # neural phases skip valid stems; finalize still emits ddsp_routing rows.
     need_to_synthesize = args.reset or not stems_complete
-    if uses_ddsp(args.render_mode) and ddsp_pass in ("ddsp_piano", "midi_ddsp"):
+    if uses_ddsp(args.render_mode) and ddsp_pass in (
+        "ddsp_piano", "midi_ddsp", "finalize",
+    ):
         need_to_synthesize = True
     stem_rows: list[dict] = []
     routing_rows: list[dict] = []
@@ -315,7 +362,6 @@ def synthesize_song_at_index(
                         ]
                         for fut in as_completed(futures):
                             idx, waveform = fut.result()
-                            waveform = pad_and_loudness_normalize([waveform])[0]
                             save_stem(waveform, song_dir, idx, audio_format)
 
                 for path in track_paths:
@@ -372,7 +418,6 @@ def synthesize_song_at_index(
                         waveform = _render_soundfont_stem(
                             track_path, meta, args, path_output,
                         )
-                        waveform = pad_and_loudness_normalize([waveform])[0]
                         save_stem(waveform, song_dir, j, audio_format)
                     else:
                         for path in track_paths:
@@ -389,7 +434,6 @@ def synthesize_song_at_index(
                     waveform = _render_soundfont_stem(
                         track_path, meta, args, path_output,
                     )
-                    waveform = pad_and_loudness_normalize([waveform])[0]
                     save_stem(waveform, song_dir, j, audio_format)
 
                 routing_rows.append({
@@ -417,7 +461,6 @@ def synthesize_song_at_index(
                 )
                 remove(track_path)
             temp_dir.cleanup()
-            waveforms = pad_and_loudness_normalize(waveforms)
             for j, waveform in enumerate(waveforms):
                 save_stem(waveform, song_dir, j, audio_format)
 
@@ -666,11 +709,6 @@ def run_synthesis(args, output_dir: str):
         pd.DataFrame(columns=SONGS_TABLE_COLUMNS).to_csv(
             output_filepath, sep=",", na_rep=NA_STRING, header=True, index=False, mode="w",
         )
-    completed_paths = set()
-    if exists(output_filepath) and not args.reset:
-        completed_paths = set(
-            pd.read_csv(output_filepath, sep=",", header=0, index_col=False, usecols=["path"])["path"]
-        )
     if not exists(stems_output_filepath) or args.reset:
         pd.DataFrame(columns=STEMS_TABLE_COLUMNS).to_csv(
             stems_output_filepath, sep=",", na_rep=NA_STRING, header=True, index=False, mode="w",
@@ -681,6 +719,17 @@ def run_synthesis(args, output_dir: str):
     ):
         pd.DataFrame(columns=DDSP_ROUTING_COLUMNS).to_csv(
             routing_output_filepath, sep=",", na_rep=NA_STRING, header=True, index=False, mode="w",
+        )
+
+    completed_paths = set()
+    if exists(output_filepath) and not args.reset:
+        routing_for_completed = (
+            routing_output_filepath if uses_ddsp(args.render_mode) else None
+        )
+        # For DDSP, songs with stems/data but incomplete routing are not "done".
+        completed_paths = load_completed_song_paths(
+            output_filepath,
+            routing_csv=routing_for_completed,
         )
 
     # Neural DDSP needs Torch in workers for resample. Fork-after-CUDA causes
@@ -767,7 +816,11 @@ def synthesis_is_complete(
     *,
     require_mixture: bool = False,
 ) -> bool:
-    """True when data/stems tables exist and every listed song has stem files on disk."""
+    """True when data/stems tables exist and every listed song has stem files on disk.
+
+    When ``ddsp_routing.csv`` is present, every song must also have routing rows for
+    all tracks (DDSP ablations).
+    """
     source = Path(source_dir)
     data_csv = source / f"{DATA_DIR_NAME}.csv"
     stems_csv = source / f"{STEMS_FILE_NAME}.csv"
@@ -778,6 +831,12 @@ def synthesis_is_complete(
     stems = pd.read_csv(stems_csv, sep=",", header=0, index_col=False)
     if len(songs) == 0 or len(stems) == 0:
         return False
+
+    routing_csv = source / DDSP_ROUTING_FILE_NAME
+    if routing_csv.is_file():
+        routing = pd.read_csv(routing_csv, sep=",", header=0, index_col=False)
+        if songs_missing_routing(songs, routing):
+            return False
 
     for _, row in songs.iterrows():
         song_dir = Path(row["path"])

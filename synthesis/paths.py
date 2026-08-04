@@ -74,12 +74,19 @@ def spdmx_dataset_dir(output_dir: str) -> str:
     return f"{output_dir}/{SPDMX_DATASET_DIR_NAME}"
 
 
+def remap_path_prefix(value: str, source_dir: Path, output_dir: Path) -> str:
+    """Rewrite an absolute path under ``source_dir`` to the mirrored path under ``output_dir``."""
+    source_prefix = str(source_dir)
+    if value.startswith(source_prefix):
+        return str(output_dir) + value[len(source_prefix):]
+    return value
+
+
 def resolve_output_song_dir(song_dir: Path, source_dir: Path, output_dir: Path) -> Path:
     """Map a song directory under ``source_dir`` to the mirrored path under ``output_dir``."""
     if output_dir == source_dir:
         return song_dir
-    song_dir_str = str(song_dir)
-    source_prefix = str(source_dir)
-    if not song_dir_str.startswith(source_prefix):
+    remapped = remap_path_prefix(str(song_dir), source_dir, output_dir)
+    if remapped == str(song_dir):
         raise ValueError(f"Song path {song_dir} is not under source dir {source_dir}")
-    return Path(str(output_dir) + song_dir_str[len(source_prefix):])
+    return Path(remapped)

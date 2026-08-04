@@ -36,7 +36,7 @@ flowchart LR
 - Stems are zero-padded to a common length before later stages
 - Sample rate: **44.1 kHz**; channel layout: `STEM_CHANNELS` (default mono)
 
-Synthesis already writes LUFS-normalized stems for listening. The mix pass **re-applies** LUFS on load so realify (and other) stems that were not loudness-normalized still enter the same pipeline.
+Synthesis and realify write **raw** stems (no LUFS). Loudness, velocity dynamics, and summability normalization are a separate pass:
 
 ### 2. MIDI velocity dynamics
 

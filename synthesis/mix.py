@@ -1,6 +1,6 @@
 """Peak-normalize stems so they remain linearly summable.
 
-Synthesis / realify write stems (typically LUFS-normalized). Run this afterward to:
+Synthesis / realify write raw stems. Run this afterward to:
 
 1. Loudness-normalize stems (−23 LUFS)
 2. Apply MIDI velocity dynamics (track_max / song_max)
@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import argparse
 import multiprocessing
-import shutil
 from pathlib import Path
 
 import pandas as pd
@@ -35,6 +34,7 @@ from shared.config import (
     RENDER_MODES,
     STEMS_FILE_NAME,
 )
+from synthesis.paths import remap_path_prefix
 from synthesis.audio import (
     normalize_stems_in_song_dir,
     synthesis_audio_format,
@@ -181,41 +181,22 @@ def _shutdown_pool(pool) -> None:
     pool.join()
 
 
-def _remap_path_prefix(value: str, source_dir: Path, output_dir: Path) -> str:
-    source_prefix = str(source_dir)
-    if value.startswith(source_prefix):
-        return str(output_dir) + value[len(source_prefix):]
-    return value
-
-
 def copy_metadata_tables(source_dir: Path, output_dir: Path) -> None:
     """Copy data/stems CSVs into ``output_dir``, remapping absolute song paths."""
     if source_dir.resolve() == output_dir.resolve():
         return
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    stems_src = source_dir / f"{STEMS_FILE_NAME}.csv"
-    if stems_src.exists():
-        stems = pd.read_csv(stems_src)
-        if "path" in stems.columns:
-            stems["path"] = stems["path"].map(
-                lambda p: _remap_path_prefix(str(p), source_dir, output_dir)
-            )
-        stems.to_csv(output_dir / f"{STEMS_FILE_NAME}.csv", index=False)
-
-    data_src = source_dir / f"{DATA_DIR_NAME}.csv"
-    if data_src.exists():
-        data = pd.read_csv(data_src)
-        if "path" in data.columns:
-            data["path"] = data["path"].map(
-                lambda p: _remap_path_prefix(str(p), source_dir, output_dir)
-            )
-        data.to_csv(output_dir / f"{DATA_DIR_NAME}.csv", index=False)
-
-    for name in ("ddsp_routing.csv",):
+    for name in (f"{STEMS_FILE_NAME}.csv", f"{DATA_DIR_NAME}.csv", "ddsp_routing.csv"):
         src = source_dir / name
-        if src.exists():
-            shutil.copy2(src, output_dir / name)
+        if not src.exists():
+            continue
+        table = pd.read_csv(src)
+        if "path" in table.columns:
+            table["path"] = table["path"].map(
+                lambda p: remap_path_prefix(str(p), source_dir, output_dir)
+            )
+        table.to_csv(output_dir / name, index=False)
 
 
 def default_dest_dir(stems_dir: Path) -> Path:
@@ -348,9 +329,9 @@ def print_mix_hint(
     flac: bool = False,
 ) -> None:
     print(
-        "\nStems written with per-stem LUFS only. "
-        "To apply velocity dynamics + peak-normalize so they remain linearly summable "
-        "(mix = sum of stems by default), run:",
+        "\nStems written raw (no LUFS). "
+        "To apply LUFS + velocity dynamics + peak-normalize so they remain linearly "
+        "summable (mix = sum of stems by default), run:",
         flush=True,
     )
     print(f"  {mix_command(stems_dir, jobs=jobs, flac=flac)}", flush=True)

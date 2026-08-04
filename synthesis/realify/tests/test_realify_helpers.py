@@ -893,6 +893,9 @@ def test_run_realify_reset_clears_existing_outputs(tmp_path: Path, monkeypatch):
 
     reset_realify_output(output_dir)
     copy_metadata_tables(source_dir, output_dir)
+    remapped = pd.read_csv(output_dir / "stems.csv")
+    assert str(remapped.iloc[0]["path"]).startswith(str(output_dir))
+    assert not str(remapped.iloc[0]["path"]).startswith(str(source_dir) + "/")
     tasks_after_reset = build_realify_tasks(
         generate_captions(source_dir),
         source_dir,
@@ -900,6 +903,38 @@ def test_run_realify_reset_clears_existing_outputs(tmp_path: Path, monkeypatch):
         audio_format="flac",
     )
     assert len(tasks_after_reset) == 1
+
+
+def test_copy_metadata_tables_remaps_paths(tmp_path: Path):
+    source_dir = tmp_path / "basic"
+    output_dir = tmp_path / "basic_realify"
+    song = source_dir / "data" / "0" / "1" / "QmSong"
+    song.mkdir(parents=True)
+    pd.DataFrame({
+        "path": [str(song)],
+        "title": ["T"],
+        "n_tracks": [1],
+    }).to_csv(source_dir / "data.csv", index=False)
+    pd.DataFrame({
+        "path": [str(song)],
+        "track": [0],
+        "program": [0],
+        "is_drum": [False],
+        "name": ["Piano"],
+        "has_lyrics": [False],
+    }).to_csv(source_dir / "stems.csv", index=False)
+    pd.DataFrame({
+        "path": [str(song)],
+        "track": [0],
+        "backend": ["soundfont"],
+        "source": ["basic"],
+    }).to_csv(source_dir / "ddsp_routing.csv", index=False)
+
+    copy_metadata_tables(source_dir, output_dir)
+    for name in ("data.csv", "stems.csv", "ddsp_routing.csv"):
+        table = pd.read_csv(output_dir / name)
+        assert str(table.iloc[0]["path"]).startswith(str(output_dir))
+        assert str(table.iloc[0]["path"]).endswith("/data/0/1/QmSong")
 
 
 def test_log_realify_plan_reports_no_tasks(capsys):
