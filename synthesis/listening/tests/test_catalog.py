@@ -14,6 +14,14 @@ from synthesis.listening.catalog import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _listening_use_raw_stems(monkeypatch):
+    """Unit fixtures write raw trees; disable summable preference by default."""
+    monkeypatch.setattr(
+        "synthesis.listening.catalog.LISTENING_PREFER_SUMMABLE", False,
+    )
+
+
 def _write_ablation_tree(
     root: Path,
     *,
@@ -168,3 +176,76 @@ def test_get_song_unknown_returns_none(tmp_path: Path):
 def test_catalog_requires_data_csv(tmp_path: Path):
     with pytest.raises(FileNotFoundError, match="No ablation condition"):
         AblationCatalog(tmp_path)
+
+
+def test_condition_dir_prefers_summable(tmp_path: Path, monkeypatch):
+    from synthesis.listening import catalog as catalog_mod
+
+    monkeypatch.setattr(catalog_mod, "LISTENING_PREFER_SUMMABLE", True)
+    assert catalog_mod._condition_dir(tmp_path, "basic") == tmp_path / "basic_summable"
+
+
+def test_condition_dir_raw_when_prefer_disabled(tmp_path: Path, monkeypatch):
+    from synthesis.listening import catalog as catalog_mod
+
+    monkeypatch.setattr(catalog_mod, "LISTENING_PREFER_SUMMABLE", False)
+    assert catalog_mod._condition_dir(tmp_path, "basic") == tmp_path / "basic"
+
+
+def test_require_summable_errors_when_missing(tmp_path: Path, monkeypatch):
+    from synthesis.listening import catalog as catalog_mod
+
+    monkeypatch.setattr(catalog_mod, "LISTENING_PREFER_SUMMABLE", True)
+    (tmp_path / "basic_summable").mkdir()
+    (tmp_path / "basic_summable" / "data.csv").write_text("path\n")
+    with pytest.raises(FileNotFoundError, match="missing summable ablation"):
+        catalog_mod.require_summable_condition_trees(tmp_path)
+
+
+def test_require_summable_ok_when_all_present(tmp_path: Path, monkeypatch):
+    from synthesis.listening import catalog as catalog_mod
+
+    monkeypatch.setattr(catalog_mod, "LISTENING_PREFER_SUMMABLE", True)
+    for condition in CONDITION_ORDER:
+        d = tmp_path / f"{condition}_summable"
+        d.mkdir()
+        (d / "data.csv").write_text("path\n")
+    catalog_mod.require_summable_condition_trees(tmp_path)
+
+
+def test_get_song_uses_summable_audio(tmp_path: Path, monkeypatch):
+    from synthesis.listening import catalog as catalog_mod
+
+    monkeypatch.setattr(catalog_mod, "LISTENING_PREFER_SUMMABLE", True)
+    song_rel = "7/19/QmTestSong"
+    for condition in CONDITION_ORDER:
+        summable = tmp_path / f"{condition}_summable"
+        song_sum = summable / "data" / song_rel
+        song_sum.mkdir(parents=True)
+        (song_sum / "stem_0.mp3").write_bytes(b"x")
+        pd.DataFrame({
+            "path": [str(song_sum)],
+            "title": ["T"],
+            "song_name": ["s"],
+            "artist_name": ["a"],
+            "genres": ["classical"],
+            "n_tracks": [1],
+            "song_length.seconds": [10.0],
+        }).to_csv(summable / "data.csv", index=False)
+        pd.DataFrame({
+            "path": [str(song_sum)],
+            "track": [0],
+            "original_track": [0],
+            "program": [0],
+            "is_drum": [False],
+            "name": ["Piano"],
+            "has_lyrics": [False],
+        }).to_csv(summable / "stems.csv", index=False)
+
+    catalog = AblationCatalog(tmp_path)
+    detail = catalog.get_song(song_id_from_path(
+        str(tmp_path / "basic_summable" / "data" / song_rel)
+    ))
+    assert detail is not None
+    assert detail["song_dirs"]["basic"].endswith("basic_summable/data/7/19/QmTestSong")
+    assert detail["stems"][0]["conditions"]["basic"]["available"] is True

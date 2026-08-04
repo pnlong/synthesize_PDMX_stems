@@ -16,19 +16,33 @@ from experiments.preset_sweep.diverse_stems import DEFAULT_CLIP_SECONDS, clip_st
 from shared.config import (
     DATA_DIR_NAME,
     DEFAULT_AUDIO_FORMAT,
+    LISTENING_PREFER_SUMMABLE,
     LISTENING_SAMPLE_FILE_NAME,
     OUTPUT_DIR,
     STEMS_FILE_NAME,
 )
 from synthesis.audio import stem_is_valid, stem_path, write_audio
 from synthesis.dataset import load_listening_sample
-from synthesis.listening.catalog import CONDITION_ORDER, song_id_from_path
-from synthesis.paths import ablation_raw_dir, ablations_root
+from synthesis.listening.catalog import (
+    CONDITION_ORDER,
+    _condition_dir,
+    require_summable_condition_trees,
+    song_id_from_path,
+    summable_condition_name,
+)
+from synthesis.paths import ablations_root
 from synthesis.patches import resolve_probe_category
 
 
 CLIP_MANIFEST_CSV = "clip_manifest.csv"
 CLIPS_DIR_NAME = "clips"
+
+
+def _clip_condition_dirname(condition: str) -> str:
+    """Directory name under clips/ (summable when LISTENING_PREFER_SUMMABLE)."""
+    if LISTENING_PREFER_SUMMABLE:
+        return summable_condition_name(condition)
+    return condition
 
 
 def parse_args(args=None):
@@ -178,13 +192,15 @@ def _render_clip_task(args: tuple) -> dict | None:
     song_id = window["song_id"]
     track = int(window["track"])
     audio_format = str(window["audio_format"])
+    src_root = _condition_dir(Path(ablations_dir), condition)
+    out_root = Path(clips_dir) / _clip_condition_dirname(condition)
     src = stem_path(
-        Path(ablations_dir) / condition / DATA_DIR_NAME / song_id,
+        src_root / DATA_DIR_NAME / song_id,
         track,
         audio_format,
     )
     out = stem_path(
-        Path(clips_dir) / condition / DATA_DIR_NAME / song_id,
+        out_root / DATA_DIR_NAME / song_id,
         track,
         audio_format,
     )
@@ -221,11 +237,14 @@ def make_clips(
     jobs: int = 1,
 ) -> Path:
     ablations_dir = Path(ablations_root(output_dir))
-    reference_dir = Path(ablation_raw_dir(output_dir, reference_mode))
+    require_summable_condition_trees(ablations_dir)
+    reference_dir = _condition_dir(ablations_dir, reference_mode)
     if not (reference_dir / f"{DATA_DIR_NAME}.csv").is_file():
         raise FileNotFoundError(
             f"Reference ablation missing data.csv: {reference_dir}\n"
-            f"Run: uv run python -m synthesis.synthesize --render-mode {reference_mode}"
+            f"Run mix for summable stems, or synthesis for raw:\n"
+            f"  uv run python -m synthesis.mix --render-mode {reference_mode} --no-overwrite -j 8\n"
+            f"  uv run python -m synthesis.synthesize --render-mode {reference_mode}"
         )
 
     conditions = conditions or [c for c in CONDITION_ORDER]
@@ -249,6 +268,7 @@ def make_clips(
             {
                 "reference_mode": reference_mode,
                 "clip_seconds": clip_seconds,
+                "prefer_summable": LISTENING_PREFER_SUMMABLE,
                 "windows": windows,
             },
             f,
@@ -260,7 +280,7 @@ def make_clips(
         (window, condition, ablations_dir, out_root, force)
         for window in windows
         for condition in conditions
-        if (ablations_dir / condition / f"{DATA_DIR_NAME}.csv").is_file()
+        if (_condition_dir(ablations_dir, condition) / f"{DATA_DIR_NAME}.csv").is_file()
     ]
     manifest_rows: list[dict] = []
     if jobs <= 1:
@@ -296,12 +316,17 @@ def _write_clip_condition_tables(
 ) -> None:
     # Use reference condition songs table as template; rewrite paths into clips tree.
     ref_condition = next(
-        (c for c in conditions if (ablations_dir / c / f"{DATA_DIR_NAME}.csv").is_file()),
+        (
+            c for c in conditions
+            if (_condition_dir(ablations_dir, c) / f"{DATA_DIR_NAME}.csv").is_file()
+        ),
         None,
     )
     if ref_condition is None:
         return
-    songs = pd.read_csv(ablations_dir / ref_condition / f"{DATA_DIR_NAME}.csv")
+    songs = pd.read_csv(
+        _condition_dir(ablations_dir, ref_condition) / f"{DATA_DIR_NAME}.csv"
+    )
     song_ids = {w["song_id"] for w in windows}
     keep_paths = []
     path_map = {}
@@ -333,9 +358,9 @@ def _write_clip_condition_tables(
         })
 
     for condition in conditions:
-        if not (ablations_dir / condition / f"{DATA_DIR_NAME}.csv").is_file():
+        if not (_condition_dir(ablations_dir, condition) / f"{DATA_DIR_NAME}.csv").is_file():
             continue
-        cond_dir = clips_dir / condition
+        cond_dir = clips_dir / _clip_condition_dirname(condition)
         cond_dir.mkdir(parents=True, exist_ok=True)
         songs_out = songs.copy()
         songs_out["path"] = songs_out["path"].map(

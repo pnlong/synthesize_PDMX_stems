@@ -78,6 +78,8 @@ Default on-disk format is **MP3**. Pass `--flac` to write FLAC stems (PCM_16). U
 
 ## Mixture procedure
 
+Canonical description (equations, motivation, constants): **[`MIXING.md`](MIXING.md)**.
+
 Constant across all ablations (A1–B2), basic and slakh, synthesis and realify:
 
 | Setting | Value |
@@ -87,9 +89,10 @@ Constant across all ablations (A1–B2), basic and slakh, synthesis and realify:
 | Loudness | −23 LUFS integrated (BS.1770-4), peak-limited to 1.0 |
 
 1. Stems are loudness-normalized toward −23 LUFS (BS.1770) with per-stem peak limiting at 1.0, then padded to equal length.
-2. Sum stems sample-wise (in memory).
-3. If mixture peak > `MIXTURE_PEAK_LIMIT` (1.0), apply uniform gain `limit / peak` to every stem (same factor), so released stems remain linearly summable.
-4. Overwrite `stem_*.mp3` / `stem_*.flac` with the peak-scaled waveforms. **No `mixture.*` is written** — the mix is just `sum(stems)`.
+2. Multiply each stem by MIDI velocity dynamics \(s_i = v_i^{\max} / v_{\mathrm{song}}^{\max}\) (note-ons with velocity \(> 0\)).
+3. Sum stems sample-wise (in memory).
+4. If mixture peak > `MIXTURE_PEAK_LIMIT` (1.0), apply uniform gain `limit / peak` to every stem (same factor), so released stems remain linearly summable.
+5. Overwrite `stem_*.mp3` / `stem_*.flac` with the scaled waveforms. **No `mixture.*` is written by default** — the mix is just `sum(stems)` (`--write-mixture` to also write it).
 
 **Synthesis and realify write stems only** (per-stem LUFS). Summability normalization is a separate pass:
 
@@ -98,9 +101,11 @@ uv run python -m synthesis.mix --stems-dir /path/to/ablation -j 8
 # or:
 uv run python -m synthesis.mix --render-mode basic -j 8
 uv run python -m synthesis.mix --render-mode basic --realify -j 8
+# Preview without overwrite + write mixtures:
+uv run python -m synthesis.mix --render-mode basic --no-overwrite --write-mixture -j 8
 ```
 
-Implemented in [`audio.py`](audio.py) / [`mix.py`](mix.py). `synthesize` / `realify` print the suggested mix command when they finish.
+Implemented in [`audio.py`](audio.py), [`velocity.py`](velocity.py), [`mix.py`](mix.py). `synthesize` / `realify` print the suggested mix command when they finish.
 
 ## Two-pass pipeline (synthesis + realify)
 
@@ -293,7 +298,7 @@ See [`listening/README.md`](listening/README.md).
 | `--full` for all valid PDMX | Done |
 | `build_spdmx.py` | Stub |
 | Patch pools (Slakh) | Stub |
-| `mixture` per song | Not stored; `synthesis.mix` peak-scales stems so mix = sum(stems) |
+| `mixture` per song | Not stored by default; `synthesis.mix` applies LUFS × velocity × peak so mix = sum(stems). See [`MIXING.md`](MIXING.md). |
 | Listening test | Viewer available (`python -m synthesis.listening.serve`) |
 | Song-length analysis (PDMX metadata + plots) | Done |
 | Neural-DDSP coverage (`analysis.ddsp_coverage`) | Done |

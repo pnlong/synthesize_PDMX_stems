@@ -11,6 +11,7 @@ from shared.config import (
     ABLATION_SAMPLE_SEED,
     DATA_DIR_NAME,
     DEFAULT_AUDIO_FORMAT,
+    LISTENING_PREFER_SUMMABLE,
     OUTPUT_DIR,
     STEMS_FILE_NAME,
 )
@@ -70,7 +71,7 @@ def default_ablations_dir() -> Path:
         root = Path(ablations_root(OUTPUT_DIR))
     clips = root / "clips"
     if clips.is_dir() and any(
-        (clips / condition / f"{DATA_DIR_NAME}.csv").is_file()
+        (_condition_dir(clips, condition) / f"{DATA_DIR_NAME}.csv").is_file()
         for condition in CONDITION_ORDER
     ):
         return clips
@@ -98,8 +99,40 @@ def detect_audio_format(song_dir: Path) -> str | None:
     return None
 
 
-def _condition_dir(ablations_dir: Path, condition: str) -> Path:
+def summable_condition_name(condition: str) -> str:
+    return f"{condition}_summable"
+
+
+def _condition_dir(
+    ablations_dir: Path,
+    condition: str,
+    *,
+    prefer_summable: bool | None = None,
+) -> Path:
+    """Filesystem dir for a logical condition id (``basic`` → ``basic_summable`` when preferred)."""
+    prefer = LISTENING_PREFER_SUMMABLE if prefer_summable is None else prefer_summable
+    if prefer:
+        return ablations_dir / summable_condition_name(condition)
     return ablations_dir / condition
+
+
+def require_summable_condition_trees(ablations_dir: Path) -> None:
+    """Raise if any listening condition is missing its ``*_summable`` tree with data.csv."""
+    if not LISTENING_PREFER_SUMMABLE:
+        return
+    missing = []
+    for condition in CONDITION_ORDER:
+        cond_dir = ablations_dir / summable_condition_name(condition)
+        if not (cond_dir / f"{DATA_DIR_NAME}.csv").is_file():
+            missing.append(summable_condition_name(condition))
+    if missing:
+        joined = ", ".join(missing)
+        raise FileNotFoundError(
+            f"LISTENING_PREFER_SUMMABLE=True but missing summable ablation(s) under "
+            f"{ablations_dir}: {joined}\n"
+            "Run: bash synthesis/mix_ablations.sh\n"
+            "Or set LISTENING_PREFER_SUMMABLE=False in shared/config.py to use raw stems."
+        )
 
 
 def _song_dir_for_condition(
@@ -194,6 +227,7 @@ class AblationCatalog:
     ):
         self.ablations_dir = ablations_dir.resolve()
         self.caption_seed = caption_seed
+        require_summable_condition_trees(self.ablations_dir)
         self.reference_condition = self._pick_reference_condition()
         # Clips trees are stem-only; hide mixtures by default there.
         if include_mixtures is None:
@@ -209,18 +243,21 @@ class AblationCatalog:
 
     def _pick_reference_condition(self) -> str:
         for condition in CONDITION_ORDER:
-            if (self.ablations_dir / condition / f"{DATA_DIR_NAME}.csv").is_file():
+            if (_condition_dir(self.ablations_dir, condition) / f"{DATA_DIR_NAME}.csv").is_file():
                 return condition
         raise FileNotFoundError(
             f"No ablation condition with {DATA_DIR_NAME}.csv under {self.ablations_dir}"
         )
 
     def _load_songs(self) -> pd.DataFrame:
-        path = self.ablations_dir / self.reference_condition / f"{DATA_DIR_NAME}.csv"
+        path = _condition_dir(self.ablations_dir, self.reference_condition) / f"{DATA_DIR_NAME}.csv"
         return pd.read_csv(path)
 
     def _load_stems(self) -> pd.DataFrame:
-        path = self.ablations_dir / self.reference_condition / f"{STEMS_FILE_NAME}.csv"
+        path = (
+            _condition_dir(self.ablations_dir, self.reference_condition)
+            / f"{STEMS_FILE_NAME}.csv"
+        )
         if not path.is_file():
             return pd.DataFrame(
                 columns=[
@@ -232,7 +269,7 @@ class AblationCatalog:
     def _condition_stems(self, condition: str) -> pd.DataFrame | None:
         if condition in self._stems_by_condition:
             return self._stems_by_condition[condition]
-        path = self.ablations_dir / condition / f"{STEMS_FILE_NAME}.csv"
+        path = _condition_dir(self.ablations_dir, condition) / f"{STEMS_FILE_NAME}.csv"
         if not path.is_file():
             self._stems_by_condition[condition] = pd.DataFrame()
             return self._stems_by_condition[condition]
@@ -266,7 +303,7 @@ class AblationCatalog:
     def conditions(self) -> list[dict]:
         result = []
         for condition in CONDITION_ORDER:
-            cond_dir = self.ablations_dir / condition
+            cond_dir = _condition_dir(self.ablations_dir, condition)
             result.append(
                 ConditionInfo(
                     id=condition,

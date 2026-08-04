@@ -16,6 +16,14 @@ Open [http://127.0.0.1:8765](http://127.0.0.1:8765).
 
 The server prefers `{OUTPUT_DIR}/dev/ablations/clips/` when that tree has condition CSVs; otherwise it reads full ablations under [`../ablations_output/`](../ablations_output/).
 
+By default (`LISTENING_PREFER_SUMMABLE = True` in `shared/config.py`), each logical condition (`basic`, …) **requires** the sibling `{condition}_summable` tree from `synthesis.mix --no-overwrite` (no silent fallback to raw). If any of the eight are missing, the catalog/server errors. Set that constant to `False` to audition raw synthesis stems instead.
+
+```bash
+# Mix all 8 ablations into *_summable (keeps raw untouched; no mixture files)
+bash synthesis/mix_ablations.sh
+# or: JOBS=20 bash synthesis/mix_ablations.sh
+```
+
 ## Options
 
 ```bash

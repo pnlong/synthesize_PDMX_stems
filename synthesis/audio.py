@@ -431,19 +431,25 @@ def normalize_stems_in_song_dir(
     *,
     dest_song_dir: Path | None = None,
     write_mixture: bool = False,
+    velocity_scales: dict[int, float] | None = None,
 ) -> float | None:
-    """LUFS-normalize + peak-scale stems so ``sum(stems)`` is the mix.
+    """LUFS-normalize, apply velocity dynamics, peak-scale stems for summability.
 
     Loads from ``song_dir``, writes scaled stems to ``dest_song_dir`` (default:
     ``song_dir``, i.e. overwrite in place). Optionally writes ``mixture.*``.
+
+    Pipeline: LUFS → × velocity_scale[track] → sum → shared peak_gain → write.
     Returns the anti-clip ``peak_gain``, or ``None`` if any stem is missing/invalid.
     """
+    from synthesis.velocity import apply_velocity_scales
+
     stem_paths = [stem_path(song_dir, track, audio_format) for track in track_indices]
     if not all(stem_is_valid(path) for path in stem_paths):
         return None
     dest = dest_song_dir if dest_song_dir is not None else song_dir
     dest.mkdir(parents=True, exist_ok=True)
     waveforms = pad_and_loudness_normalize([load_stem(path) for path in stem_paths])
+    waveforms = apply_velocity_scales(waveforms, track_indices, velocity_scales)
     _scaled, peak_gain, _mix_path = normalize_stems_for_sum(
         waveforms,
         dest,

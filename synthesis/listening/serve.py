@@ -10,6 +10,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
+from shared.config import LISTENING_PREFER_SUMMABLE
 from synthesis.listening.catalog import (
     AblationCatalog,
     CONDITION_ORDER,
@@ -179,6 +180,8 @@ def main(args=None) -> None:
     url = f"http://{opts.host}:{opts.port}"
     print(f"Serving ablation listening viewer at {url}")
     print(f"Ablation root: {catalog.ablations_dir}")
+    prefer = "summable (*_summable)" if LISTENING_PREFER_SUMMABLE else "raw"
+    print(f"Stem trees: {prefer} (LISTENING_PREFER_SUMMABLE={LISTENING_PREFER_SUMMABLE})")
     print(f"Songs: {len(catalog.list_songs())}")
     print("Sweep listening tests: uv run python -m experiments.listening.serve (port 8766)")
     try:

@@ -100,6 +100,7 @@ def test_no_overwrite_writes_dest_and_mixture(tmp_path: Path):
         "--no-overwrite",
         "--dest-dir", str(dest),
         "--write-mixture",
+        "--no-velocity-dynamics",
         "--flac",
         "-j", "1",
     ])
@@ -130,7 +131,7 @@ def test_overwrite_with_yes_skips_prompt(tmp_path: Path, monkeypatch):
         return False
 
     monkeypatch.setattr("synthesis.mix.confirm_overwrite", boom)
-    main(["--stems-dir", str(source), "--flac", "--yes", "-j", "1"])
+    main(["--stems-dir", str(source), "--flac", "--yes", "--no-velocity-dynamics", "-j", "1"])
     assert called["n"] == 0
     stem0 = load_stem(song / "stem_0.flac")
     stem1 = load_stem(song / "stem_1.flac")

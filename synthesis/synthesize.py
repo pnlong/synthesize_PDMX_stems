@@ -147,6 +147,7 @@ def synthesize_song_at_index(
         track_name = None
         has_lyrics = False
         n_notes = 0
+        max_velocity = 0
         determined_whether_track_is_drum = False
         original_track = (
             int(track_map[j]["original_track"]) if track_map is not None else j
@@ -155,6 +156,7 @@ def synthesize_song_at_index(
         for message in track:
             if message.type == "note_on" and message.velocity > 0:
                 n_notes += 1
+                max_velocity = max(max_velocity, int(message.velocity))
             elif message.type == "program_change":
                 program = message.program
             elif message.type == "track_name":
@@ -243,11 +245,24 @@ def synthesize_song_at_index(
                 **route_meta,
             })
 
-        stem_rows.append(dict(zip(STEMS_TABLE_COLUMNS, (
-            path_output, j, original_track, program, is_drum,
-            track_name if track_name and len(track_name) > 0 else None,
-            has_lyrics,
-        ))))
+        stem_rows.append({
+            "path": path_output,
+            "track": j,
+            "original_track": original_track,
+            "program": program,
+            "is_drum": is_drum,
+            "name": track_name if track_name and len(track_name) > 0 else None,
+            "has_lyrics": has_lyrics,
+            "max_velocity": max_velocity,
+            "velocity_scale": None,  # filled after all tracks
+        })
+
+    from synthesis.velocity import velocity_scales_from_track_maxima
+
+    track_maxima = {int(row["track"]): int(row["max_velocity"]) for row in stem_rows}
+    scales = velocity_scales_from_track_maxima(track_maxima)
+    for row in stem_rows:
+        row["velocity_scale"] = scales.get(int(row["track"]), 1.0)
 
     del midi
 

@@ -57,6 +57,7 @@ LISTENING_SAMPLE_FILE_NAME = "listening_sample.yaml"
 
 STEMS_TABLE_COLUMNS = [
     "path", "track", "original_track", "program", "is_drum", "name", "has_lyrics",
+    "max_velocity", "velocity_scale",
 ]
 
 SONGS_TABLE_COLUMNS = [
@@ -97,6 +98,11 @@ FLAC_AUDIO_FORMAT = "flac"
 PROTOTYPE_AUDIO_FORMAT = DEFAULT_AUDIO_FORMAT
 
 TARGET_LOUDNESS_LUFS = -23.0
+
+# Ablation listening viewer / make_clips: require ``{condition}_summable`` trees
+# from ``synthesis.mix --no-overwrite`` (errors if any are missing; no raw fallback).
+# Set False to audition raw stems.
+LISTENING_PREFER_SUMMABLE = True
 
 RENDER_MODE_BASIC = "basic"
 RENDER_MODE_SLAKH = "slakh"

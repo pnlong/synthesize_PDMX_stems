@@ -3,11 +3,20 @@
 from http import HTTPStatus
 from io import BytesIO
 
+import pytest
+
 from synthesis.listening.serve import (
     STATIC_DIR,
     ListeningHandler,
     parse_audio_request,
 )
+
+
+@pytest.fixture(autouse=True)
+def _listening_use_raw_stems(monkeypatch):
+    monkeypatch.setattr(
+        "synthesis.listening.catalog.LISTENING_PREFER_SUMMABLE", False,
+    )
 
 
 def _handler(catalog) -> ListeningHandler:

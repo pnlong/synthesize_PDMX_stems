@@ -5,6 +5,7 @@ Turn PDMX symbolic MIDI into mono FLAC stems; optionally realify with Stable Aud
 Environment setup: **[`SETUP.md`](../SETUP.md)** at repo root.
 
 See also [`RENDERING_NOTES.md`](RENDERING_NOTES.md) for ablation design, Slakh alignment, and output layout.
+Paper-oriented mixing / stem-summability write-up: [`MIXING.md`](MIXING.md).
 
 ## Before you synthesize
 
@@ -22,6 +23,7 @@ Flags: `--register PATH` to point at another CSV; `--no-register` to use raw MID
 | Script | Purpose |
 |--------|---------|
 | `synthesize.py` | Main CLI: ablation sample (default) or `--full` PDMX, `--render-mode`, `--realify` |
+| `mix.py` | Post-hoc LUFS × velocity dynamics × peak gain so stems remain summable |
 | `listening/serve.py` | Localhost viewer for A1–CB2 ablation comparison |
 | `listening/make_clips.py` | Aligned 10s clips (windows from A1) for listening |
 | `build_spdmx.py` | Assemble final dataset at `{OUTPUT_DIR}/SPDMX/` (stub) |
@@ -33,6 +35,8 @@ Flags: `--register PATH` to point at another CSV; `--no-register` to use raw MID
 | `synthesize.py` | MIDI → fluidsynth → mono FLAC stems; optional SA3 realify pass |
 | `build_spdmx.py` | Planned: copy PDMX metadata + call `synthesize --full` → `{OUTPUT_DIR}/SPDMX/` |
 | `audio.py` | fluidsynth rendering, mono downmix, BS.1770-4 loudness, FLAC I/O, mixture build |
+| `velocity.py` | MIDI max-velocity → per-track dynamics scales for mix |
+| `mix.py` | Dataset-level stem normalization (summability) |
 | `dataset.py` | Ablation sampling vs full-dataset filtering |
 | `paths.py` | Output path helpers (`dev/ablations/`, `dev/stems/`, `dev/analysis/`, `SPDMX/`) |
 | `patches.py` | Slakh-style patch randomization (stub) |

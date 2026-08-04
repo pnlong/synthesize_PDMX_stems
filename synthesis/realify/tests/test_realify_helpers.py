@@ -812,7 +812,7 @@ def test_write_mixtures_for_dataset_uses_pool(tmp_path: Path, monkeypatch):
     })
     stems.to_csv(output_dir / "stems.csv", index=False)
 
-    write_mixtures_for_dataset(source_dir, output_dir, jobs=4)
+    write_mixtures_for_dataset(source_dir, output_dir, jobs=4, use_velocity_dynamics=False)
     assert captured["processes"] == 2
     assert captured["n_tasks"] == 2
     assert captured["chunksize"] == 1
@@ -828,7 +828,9 @@ def test_build_mixture_tasks_resolves_output_dirs(tmp_path: Path):
         "path": [str(song_dir), str(song_dir)],
         "track": [1, 0],
     })
-    tasks = build_mixture_tasks(stems, source_dir, output_dir, "flac")
+    tasks = build_mixture_tasks(
+        stems, source_dir, output_dir, "flac", use_velocity_dynamics=False,
+    )
     assert len(tasks) == 1
     assert tasks[0]["tracks"] == [0, 1]
     assert tasks[0]["song_dir"] == str(song_dir)
