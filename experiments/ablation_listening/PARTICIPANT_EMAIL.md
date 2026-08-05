@@ -6,7 +6,7 @@ Paste into email / Slack / Discord. Replace `LINK` with the live ngrok (or other
 
 **Subject:** quick listening test for my audio project?
 
-Hey — I'm running a short listening study for a music synthesis project and would love your ears if you have ~30–45 min.
+Hey, I'm running a short listening study for a music synthesis project and would love your ears if you have ~30–45 min.
 
 **Link:** LINK  
 (example: `https://….ngrok-free.dev/?config=spdmx_ablation.yaml`)
