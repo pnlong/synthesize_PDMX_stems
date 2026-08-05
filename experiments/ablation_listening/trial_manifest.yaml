@@ -82,6 +82,11 @@ trials:
     ddsp_basic_realify: stem_drums_01/ddsp_basic_realify.mp3
     ddsp_slakh: stem_drums_01/ddsp_slakh.mp3
     ddsp_slakh_realify: stem_drums_01/ddsp_slakh_realify.mp3
+  equivalences:
+    ddsp_basic: basic
+    ddsp_slakh: slakh
+    ddsp_basic_realify: basic_realify
+    ddsp_slakh_realify: slakh_realify
 - id: stem_drums_02
   type: stem
   song_id: 16/54/QmYyefmdPQwbisKcrBfMFMHUt3atnAZWkKsW8zCymqM3b4
@@ -101,6 +106,11 @@ trials:
     ddsp_basic_realify: stem_drums_02/ddsp_basic_realify.mp3
     ddsp_slakh: stem_drums_02/ddsp_slakh.mp3
     ddsp_slakh_realify: stem_drums_02/ddsp_slakh_realify.mp3
+  equivalences:
+    ddsp_basic: basic
+    ddsp_slakh: slakh
+    ddsp_basic_realify: basic_realify
+    ddsp_slakh_realify: slakh_realify
 - id: stem_strings_01
   type: stem
   song_id: 9/35/QmRodUVnHj4vsYKHXiG8rkfisegedxK6S2a5NiiPC3fEKW
@@ -196,6 +206,11 @@ trials:
     ddsp_basic_realify: stem_voice_01/ddsp_basic_realify.mp3
     ddsp_slakh: stem_voice_01/ddsp_slakh.mp3
     ddsp_slakh_realify: stem_voice_01/ddsp_slakh_realify.mp3
+  equivalences:
+    ddsp_basic: basic
+    ddsp_slakh: slakh
+    ddsp_basic_realify: basic_realify
+    ddsp_slakh_realify: slakh_realify
 - id: stem_voice_02
   type: stem
   song_id: 11/37/QmTPH2ovnmzzcLEh2WWPneAtfggqRRNoNC4RZoNJpCPvHU
@@ -215,6 +230,11 @@ trials:
     ddsp_basic_realify: stem_voice_02/ddsp_basic_realify.mp3
     ddsp_slakh: stem_voice_02/ddsp_slakh.mp3
     ddsp_slakh_realify: stem_voice_02/ddsp_slakh_realify.mp3
+  equivalences:
+    ddsp_basic: basic
+    ddsp_slakh: slakh
+    ddsp_basic_realify: basic_realify
+    ddsp_slakh_realify: slakh_realify
 - id: stem_mallet_01
   type: stem
   song_id: 8/44/QmQt11bci266XxFpztpSJmfH1ijHX8zRcmaVe1Y7akYZTZ
@@ -234,6 +254,11 @@ trials:
     ddsp_basic_realify: stem_mallet_01/ddsp_basic_realify.mp3
     ddsp_slakh: stem_mallet_01/ddsp_slakh.mp3
     ddsp_slakh_realify: stem_mallet_01/ddsp_slakh_realify.mp3
+  equivalences:
+    ddsp_basic: basic
+    ddsp_slakh: slakh
+    ddsp_basic_realify: basic_realify
+    ddsp_slakh_realify: slakh_realify
 - id: stem_mallet_02
   type: stem
   song_id: 10/21/QmSgCxd4aKeNxHDsBqkD7ojTkbeY7B5epzqHAvdE8jkBcG
@@ -253,6 +278,11 @@ trials:
     ddsp_basic_realify: stem_mallet_02/ddsp_basic_realify.mp3
     ddsp_slakh: stem_mallet_02/ddsp_slakh.mp3
     ddsp_slakh_realify: stem_mallet_02/ddsp_slakh_realify.mp3
+  equivalences:
+    ddsp_basic: basic
+    ddsp_slakh: slakh
+    ddsp_basic_realify: basic_realify
+    ddsp_slakh_realify: slakh_realify
 - id: stem_organ_01
   type: stem
   song_id: 11/37/QmTPVWjbMf6vCXCy7FYf2FMHRhHzgQrWjJ4JBNWZmTjK26
@@ -272,6 +302,11 @@ trials:
     ddsp_basic_realify: stem_organ_01/ddsp_basic_realify.mp3
     ddsp_slakh: stem_organ_01/ddsp_slakh.mp3
     ddsp_slakh_realify: stem_organ_01/ddsp_slakh_realify.mp3
+  equivalences:
+    ddsp_basic: basic
+    ddsp_slakh: slakh
+    ddsp_basic_realify: basic_realify
+    ddsp_slakh_realify: slakh_realify
 - id: stem_organ_02
   type: stem
   song_id: 12/3/QmU4pyFLT5FaRfm96EMmvz2Xdmv3wjnp4LXj3Uy86LnbqC
@@ -291,6 +326,11 @@ trials:
     ddsp_basic_realify: stem_organ_02/ddsp_basic_realify.mp3
     ddsp_slakh: stem_organ_02/ddsp_slakh.mp3
     ddsp_slakh_realify: stem_organ_02/ddsp_slakh_realify.mp3
+  equivalences:
+    ddsp_basic: basic
+    ddsp_slakh: slakh
+    ddsp_basic_realify: basic_realify
+    ddsp_slakh_realify: slakh_realify
 - id: stem_guitar_01
   type: stem
   song_id: 3/50/QmdwwkQVdZVZa73KC2kwmnK4REWK38Zb4mPEyopPAkb4vP
@@ -310,6 +350,11 @@ trials:
     ddsp_basic_realify: stem_guitar_01/ddsp_basic_realify.mp3
     ddsp_slakh: stem_guitar_01/ddsp_slakh.mp3
     ddsp_slakh_realify: stem_guitar_01/ddsp_slakh_realify.mp3
+  equivalences:
+    ddsp_basic: basic
+    ddsp_slakh: slakh
+    ddsp_basic_realify: basic_realify
+    ddsp_slakh_realify: slakh_realify
 - id: stem_guitar_02
   type: stem
   song_id: 6/25/QmNit8z6V7zsUyVoL373ZK52TGfGhJGz2DKTwyYZyzHEHk
@@ -329,6 +374,11 @@ trials:
     ddsp_basic_realify: stem_guitar_02/ddsp_basic_realify.mp3
     ddsp_slakh: stem_guitar_02/ddsp_slakh.mp3
     ddsp_slakh_realify: stem_guitar_02/ddsp_slakh_realify.mp3
+  equivalences:
+    ddsp_basic: basic
+    ddsp_slakh: slakh
+    ddsp_basic_realify: basic_realify
+    ddsp_slakh_realify: slakh_realify
 - id: stem_brass_01
   type: stem
   song_id: 10/21/QmSgCxd4aKeNxHDsBqkD7ojTkbeY7B5epzqHAvdE8jkBcG
@@ -348,6 +398,11 @@ trials:
     ddsp_basic_realify: stem_brass_01/ddsp_basic_realify.mp3
     ddsp_slakh: stem_brass_01/ddsp_slakh.mp3
     ddsp_slakh_realify: stem_brass_01/ddsp_slakh_realify.mp3
+  equivalences:
+    ddsp_basic: basic
+    ddsp_slakh: slakh
+    ddsp_basic_realify: basic_realify
+    ddsp_slakh_realify: slakh_realify
 - id: stem_brass_02
   type: stem
   song_id: 5/29/QmfKRZUhR4HaPEMtT13ySQKbqdVvP7iU8tGuv5fQwComBL
@@ -386,6 +441,11 @@ trials:
     ddsp_basic_realify: stem_polyphonic_01/ddsp_basic_realify.mp3
     ddsp_slakh: stem_polyphonic_01/ddsp_slakh.mp3
     ddsp_slakh_realify: stem_polyphonic_01/ddsp_slakh_realify.mp3
+  equivalences:
+    ddsp_basic: basic
+    ddsp_slakh: slakh
+    ddsp_basic_realify: basic_realify
+    ddsp_slakh_realify: slakh_realify
 - id: stem_polyphonic_02
   type: stem
   song_id: 17/13/QmZcmu9V1YFm7uS8heyAEkha4W97Lybobpt9bykkQn3erk
@@ -405,3 +465,8 @@ trials:
     ddsp_basic_realify: stem_polyphonic_02/ddsp_basic_realify.mp3
     ddsp_slakh: stem_polyphonic_02/ddsp_slakh.mp3
     ddsp_slakh_realify: stem_polyphonic_02/ddsp_slakh_realify.mp3
+  equivalences:
+    ddsp_basic: basic
+    ddsp_slakh: slakh
+    ddsp_basic_realify: basic_realify
+    ddsp_slakh_realify: slakh_realify

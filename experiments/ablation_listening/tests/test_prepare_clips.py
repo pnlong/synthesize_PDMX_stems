@@ -4,13 +4,15 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-import pytest
 import soundfile as sf
+import yaml
 
 from experiments.ablation_listening.conditions import ABLATION_MUSHRA_CONDITIONS
 from experiments.ablation_listening.prepare_clips import (
+    annotate_manifest_equivalences,
     reference_has_audible_clip,
     select_stem_trials,
+    write_trial_clips,
 )
 
 
@@ -89,3 +91,102 @@ def test_select_stem_trials_skips_silent_reference(tmp_path: Path, monkeypatch):
     )
     assert len(trials) == 1
     assert trials[0]["song_id"] == "0/0/QmAudible"
+
+
+def test_write_trial_clips_records_donor_equivalences(tmp_path: Path):
+    """Drums route to soundfont → all four DDSP↔donor equivalences."""
+    song_rel = "0/0/QmCopy"
+    for condition in ABLATION_MUSHRA_CONDITIONS:
+        song_dir = tmp_path / condition / "data" / song_rel
+        _write_stem(song_dir / "stem_0.mp3", amplitude=0.2)
+
+    basic = tmp_path / "basic"
+    pd.DataFrame([{
+        "path": str(basic / "data" / song_rel),
+        "track": 0,
+        "program": 0,
+        "is_drum": True,
+        "name": "Drums",
+        "has_lyrics": False,
+    }]).to_csv(basic / "stems.csv", index=False)
+
+    trial = {
+        "id": "stem_drums_01",
+        "type": "stem",
+        "song_id": song_rel,
+        "track": 0,
+        "category": "drums",
+    }
+    clips_dir = tmp_path / "clips"
+    prepared = write_trial_clips(trial, tmp_path, clips_dir, clip_seconds=2.0)
+    assert prepared["equivalences"] == {
+        "ddsp_basic": "basic",
+        "ddsp_basic_realify": "basic_realify",
+        "ddsp_slakh": "slakh",
+        "ddsp_slakh_realify": "slakh_realify",
+    }
+
+
+def test_write_trial_clips_piano_has_no_equivalences(tmp_path: Path):
+    song_rel = "0/0/QmPiano"
+    for condition in ABLATION_MUSHRA_CONDITIONS:
+        song_dir = tmp_path / condition / "data" / song_rel
+        _write_stem(song_dir / "stem_0.mp3", amplitude=0.2)
+
+    basic = tmp_path / "basic"
+    pd.DataFrame([{
+        "path": str(basic / "data" / song_rel),
+        "track": 0,
+        "program": 0,
+        "is_drum": False,
+        "name": "Piano",
+        "has_lyrics": False,
+    }]).to_csv(basic / "stems.csv", index=False)
+
+    trial = {
+        "id": "stem_piano_01",
+        "type": "stem",
+        "song_id": song_rel,
+        "track": 0,
+        "category": "piano",
+    }
+    prepared = write_trial_clips(trial, tmp_path, tmp_path / "clips", clip_seconds=2.0)
+    assert "equivalences" not in prepared or prepared.get("equivalences") == {}
+
+
+def test_annotate_manifest_equivalences(tmp_path: Path):
+    song_rel = "0/0/QmDrums"
+    basic = tmp_path / "basic"
+    (basic / "data" / song_rel).mkdir(parents=True)
+    pd.DataFrame([{
+        "path": str(basic / "data" / song_rel),
+        "track": 0,
+        "program": 0,
+        "is_drum": True,
+        "name": "Drums",
+        "has_lyrics": False,
+    }]).to_csv(basic / "stems.csv", index=False)
+
+    manifest_path = tmp_path / "trial_manifest.yaml"
+    manifest_path.write_text(
+        yaml.safe_dump({
+            "ablations_dir": str(tmp_path),
+            "trials": [{
+                "id": "stem_drums_01",
+                "type": "stem",
+                "song_id": song_rel,
+                "track": 0,
+                "category": "drums",
+                "conditions": {
+                    c: f"stem_drums_01/{c}.wav" for c in ABLATION_MUSHRA_CONDITIONS
+                },
+            }],
+        })
+    )
+    doc = annotate_manifest_equivalences(manifest_path)
+    assert doc["trials"][0]["equivalences"] == {
+        "ddsp_basic": "basic",
+        "ddsp_basic_realify": "basic_realify",
+        "ddsp_slakh": "slakh",
+        "ddsp_slakh_realify": "slakh_realify",
+    }

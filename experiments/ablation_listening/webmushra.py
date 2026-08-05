@@ -18,6 +18,10 @@ from experiments.ablation_listening.conditions import (
     SCALE_LABELS,
     mushra_page_id,
 )
+from experiments.ablation_listening.equivalence import (
+    trial_equivalences,
+    unique_condition_ids,
+)
 from experiments.ablation_listening.paths import (
     DEFAULT_CLIPS_DIR,
     DEFAULT_MANIFEST,
@@ -32,14 +36,17 @@ _CONDITION_LIST = ", ".join(
 )
 
 MUSHRA_INTRO_HTML = f"""
-<p><strong>sPDMX ablation listening test (8 conditions).</strong>
+<p><strong>sPDMX ablation listening test.</strong>
 Use wired headphones in a quiet room.</p>
 <p>Each musical excerpt appears <strong>twice</strong> — once for
 <strong>content adherence</strong> and once for <strong>realism</strong>
 (separate rating pages; same audio).</p>
 <p>The <strong>Reference</strong> button plays <strong>A1</strong>
-(<code>basic</code> Fluidsynth). Eight blind conditions are shuffled and unlabeled:
-{_CONDITION_LIST}. One blind slot is identical to the Reference.</p>
+(<code>basic</code> Fluidsynth). Blind conditions are shuffled and unlabeled
+(up to eight: {_CONDITION_LIST}). The exact set varies by excerpt: when a
+DDSP condition is a soundfont fallback identical to its donor (per routing),
+that duplicate is omitted so you do not rate the same audio twice. One blind
+slot (when present) matches the Reference.</p>
 <p>Rate each blind condition from 0–100 relative to the Reference on the scale
 named on that page. You may loop and switch between Reference and conditions.</p>
 <p>Stem trials cover all instrument categories so scores can be analyzed
@@ -127,12 +134,22 @@ def trial_page_content(trial: dict, scale: str) -> str:
     note_html = f"<p><em>{note}</em></p>" if note else ""
     scale_label = SCALE_LABELS.get(scale, scale)
     scale_help = SCALE_HELP.get(scale, "")
+    stimuli_ids = unique_condition_ids(
+        ABLATION_MUSHRA_CONDITIONS,
+        trial_equivalences(trial),
+    )
+    n_stimuli = len(stimuli_ids)
+    ref_note = (
+        " One blind condition matches the Reference."
+        if REFERENCE_CONDITION in stimuli_ids
+        else ""
+    )
     return (
         f"<p><strong>{label}</strong> — rate <strong>{scale_label}</strong></p>"
         f"{note_html}"
         f"<p>{scale_help}</p>"
-        "<p>Rate each blind condition vs the Reference (A1). "
-        "One blind condition matches the Reference.</p>"
+        f"<p>Rate each of the {n_stimuli} blind condition(s) vs the Reference (A1)."
+        f"{ref_note}</p>"
     )
 
 
@@ -142,6 +159,10 @@ def build_mushra_trial_page(trial: dict, wav_paths: dict[str, str], *, scale: st
     reference = wav_paths[REFERENCE_CONDITION]
     page_id = mushra_page_id(trial["id"], scale)
     scale_label = SCALE_LABELS[scale]
+    stimuli_ids = unique_condition_ids(
+        ABLATION_MUSHRA_CONDITIONS,
+        trial_equivalences(trial),
+    )
     return {
         "type": "mushra",
         "id": page_id,
@@ -158,7 +179,7 @@ def build_mushra_trial_page(trial: dict, wav_paths: dict[str, str], *, scale: st
         "reference": reference,
         "stimuli": {
             condition_id: wav_paths[condition_id]
-            for condition_id in ABLATION_MUSHRA_CONDITIONS
+            for condition_id in stimuli_ids
         },
     }
 
@@ -264,7 +285,12 @@ def prepare_webmushra(
         )
 
     volume_stimulus = trials[0]["webmushra_wav_paths"][REFERENCE_CONDITION]
-    config = build_webmushra_config(manifest, volume_stimulus=volume_stimulus, test_id=test_id)
+    config = build_webmushra_config(
+        manifest,
+        volume_stimulus=volume_stimulus,
+        test_id=test_id,
+        test_name="sPDMX Ablation Listening Test",
+    )
     config_path = write_webmushra_config(config, webmushra_root, config_name)
 
     # Save manifest copy with wav paths for aggregation/debugging.

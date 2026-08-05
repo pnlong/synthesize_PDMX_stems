@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 
 import pandas as pd
+import yaml
 
 from experiments.ablation_listening.aggregate import factorial_table, render_markdown
 from experiments.ablation_listening.conditions import (
@@ -19,7 +20,9 @@ from experiments.ablation_listening.conditions import (
     category_from_trial_id,
     parse_mushra_page_id,
 )
+from experiments.ablation_listening.equivalence import equivalences_by_trial_id
 from experiments.ablation_listening.paths import (
+    DEFAULT_MANIFEST,
     DEFAULT_OUTPUT_DIR,
     DEFAULT_WEBMUSHRA_ROOT,
     WEBMUSHRA_TEST_ID,
@@ -53,8 +56,79 @@ def normalize_condition(stimulus: str) -> str | None:
     return CONDITION_ALIASES.get(key)
 
 
-def load_mushra_csv(path: Path) -> pd.DataFrame:
-    """Load ratings; parse ``trial_id__scale`` page ids into trial + scale columns."""
+def load_manifest_equivalences(manifest_path: Path | None) -> dict[str, dict[str, str]]:
+    if manifest_path is None or not Path(manifest_path).is_file():
+        return {}
+    with open(manifest_path) as f:
+        manifest = yaml.safe_load(f) or {}
+    return equivalences_by_trial_id(manifest)
+
+
+def expand_equivalence_scores(
+    df: pd.DataFrame,
+    equivalences_by_trial: dict[str, dict[str, str]],
+) -> pd.DataFrame:
+    """Synthesize ratings for omitted donor-copy conditions from rated donors."""
+    if df.empty or not equivalences_by_trial:
+        if "auto_assigned" not in df.columns:
+            df = df.copy()
+            df["auto_assigned"] = False
+            df["source_condition"] = None
+        return df
+
+    df = df.copy()
+    if "auto_assigned" not in df.columns:
+        df["auto_assigned"] = False
+    if "source_condition" not in df.columns:
+        df["source_condition"] = None
+
+    # Avoid double-inserting if a duplicate was somehow already rated.
+    existing = {
+        (row.listener_id, row.trial_id, row.scale, row.condition_id)
+        for row in df.itertuples(index=False)
+    }
+
+    extra: list[dict] = []
+    for row in df.itertuples(index=False):
+        if bool(getattr(row, "auto_assigned", False)):
+            continue
+        equiv = equivalences_by_trial.get(str(row.trial_id)) or {}
+        for duplicate, donor in equiv.items():
+            if row.condition_id != donor:
+                continue
+            key = (row.listener_id, row.trial_id, row.scale, duplicate)
+            if key in existing:
+                continue
+            existing.add(key)
+            extra.append({
+                "listener_id": row.listener_id,
+                "page_id": row.page_id,
+                "trial_id": row.trial_id,
+                "scale": row.scale,
+                "category": row.category,
+                "trial_type": row.trial_type,
+                "condition_id": duplicate,
+                "score": row.score,
+                "auto_assigned": True,
+                "source_condition": donor,
+            })
+
+    if not extra:
+        return df
+    return pd.concat([df, pd.DataFrame(extra)], ignore_index=True)
+
+
+def load_mushra_csv(
+    path: Path,
+    *,
+    manifest_path: Path | None = None,
+    equivalences_by_trial: dict[str, dict[str, str]] | None = None,
+) -> pd.DataFrame:
+    """Load ratings; parse ``trial_id__scale`` page ids into trial + scale columns.
+
+    When trial equivalences are available (manifest or explicit map), omitted
+    donor-copy conditions receive auto-assigned scores matching their donor.
+    """
     rows = []
     with open(path, newline="") as f:
         reader = csv.DictReader(f)
@@ -87,8 +161,13 @@ def load_mushra_csv(path: Path) -> pd.DataFrame:
                 "trial_type": trial_type,
                 "condition_id": condition_id,
                 "score": score,
+                "auto_assigned": False,
+                "source_condition": None,
             })
-    return pd.DataFrame(rows)
+    df = pd.DataFrame(rows)
+    if equivalences_by_trial is None:
+        equivalences_by_trial = load_manifest_equivalences(manifest_path)
+    return expand_equivalence_scores(df, equivalences_by_trial)
 
 
 def _means_dict(series: pd.Series) -> dict[str, float]:
@@ -245,6 +324,15 @@ def parse_args(args=None):
     parser.add_argument("--webmushra-root", default=DEFAULT_WEBMUSHRA_ROOT, type=Path)
     parser.add_argument("--test-id", default=WEBMUSHRA_TEST_ID)
     parser.add_argument(
+        "--manifest",
+        default=DEFAULT_MANIFEST,
+        type=Path,
+        help=(
+            "Trial manifest with per-trial equivalences; omitted donor-copy "
+            "conditions inherit the donor's score."
+        ),
+    )
+    parser.add_argument(
         "--output",
         default=DEFAULT_OUTPUT_DIR / "results_notes_webmushra.md",
         type=Path,
@@ -258,8 +346,10 @@ def main(args=None) -> None:
     if not results_path.is_file():
         raise FileNotFoundError(f"No results at {results_path}")
 
-    df = load_mushra_csv(results_path)
+    df = load_mushra_csv(results_path, manifest_path=opts.manifest)
     summary = summarize_mushra(df)
+    n_auto = int(df["auto_assigned"].sum()) if "auto_assigned" in df.columns else 0
+    summary["n_auto_assigned"] = n_auto
 
     opts.output.parent.mkdir(parents=True, exist_ok=True)
     markdown = render_mushra_markdown(summary, responses_path=results_path)
@@ -269,6 +359,8 @@ def main(args=None) -> None:
     print(markdown)
     print(f"Wrote {opts.output}")
     print(f"Wrote {json_path}")
+    if n_auto:
+        print(f"Auto-assigned {n_auto} ratings from donor equivalences")
 
 
 if __name__ == "__main__":

@@ -70,6 +70,34 @@ def test_build_mushra_trial_hidden_reference():
     assert page["createAnchor35"] is False
 
 
+def test_build_mushra_trial_omits_equivalences():
+    wav_paths = {
+        c: f"stimuli/spdmx_ablation/stem_drums_01/{c}.wav"
+        for c in ABLATION_MUSHRA_CONDITIONS
+    }
+    trial = {
+        "id": "stem_drums_01",
+        "type": "stem",
+        "category": "drums",
+        "track": 0,
+        "equivalences": {
+            "ddsp_basic": "basic",
+            "ddsp_slakh": "slakh",
+            "ddsp_basic_realify": "basic_realify",
+            "ddsp_slakh_realify": "slakh_realify",
+        },
+    }
+    page = build_mushra_trial_page(trial, wav_paths, scale="realism")
+    assert set(page["stimuli"]) == {
+        "basic",
+        "basic_realify",
+        "slakh",
+        "slakh_realify",
+    }
+    assert page["reference"] == wav_paths["basic"]
+    assert "4 blind condition" in page["content"]
+
+
 def test_export_trial_wavs(tmp_path: Path, mini_trial: dict):
     webmushra = tmp_path / "webMUSHRA"
     webmushra.mkdir()

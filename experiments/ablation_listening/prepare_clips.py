@@ -20,6 +20,9 @@ from experiments.ablation_listening.conditions import (
     STEM_TRIAL_CATEGORIES,
     condition_roots,
 )
+from experiments.ablation_listening.equivalence import (
+    detect_equivalences_for_trial,
+)
 from experiments.ablation_listening.paths import (
     DEFAULT_CLIPS_DIR,
     DEFAULT_MANIFEST,
@@ -412,13 +415,66 @@ def write_trial_clips(
         write_audio(torch.from_numpy(waveform), out_path, audio_format)
         written[condition_id] = str(out_path.relative_to(clips_dir))
 
-    return {
+    equivalences = detect_equivalences_for_trial(trial, ablations_dir)
+    result = {
         **trial,
         "clip_seconds": clip_seconds,
         "clip_start_seconds": start_seconds,
         "audio_format": audio_format,
         "conditions": written,
     }
+    if equivalences:
+        result["equivalences"] = equivalences
+    return result
+
+
+def annotate_trial_equivalences(
+    trial: dict,
+    ablations_dir: Path,
+    *,
+    pdmx_root: Path | None = None,
+) -> dict:
+    """Add/refresh ``equivalences`` on a trial via ``route_stem``."""
+    equivalences = detect_equivalences_for_trial(
+        trial,
+        ablations_dir,
+        pdmx_root=pdmx_root,
+    )
+    updated = {**trial}
+    if equivalences:
+        updated["equivalences"] = equivalences
+    else:
+        updated.pop("equivalences", None)
+    return updated
+
+
+def annotate_manifest_equivalences(
+    manifest_path: Path,
+    *,
+    ablations_dir: Path | None = None,
+    pdmx_root: Path | None = None,
+    write: bool = True,
+) -> dict:
+    """Detect donor-copy equivalences for every trial via ``route_stem``."""
+    manifest_path = Path(manifest_path)
+    with open(manifest_path) as f:
+        doc = yaml.safe_load(f) or {}
+    root = Path(ablations_dir) if ablations_dir is not None else Path(
+        doc.get("ablations_dir") or ""
+    )
+    if not root.is_dir():
+        raise FileNotFoundError(
+            f"Ablations dir missing for equivalence annotate: {root}"
+        )
+    trials = [
+        annotate_trial_equivalences(trial, root, pdmx_root=pdmx_root)
+        for trial in (doc.get("trials") or [])
+    ]
+    doc["trials"] = trials
+    if write:
+        with open(manifest_path, "w") as f:
+            yaml.safe_dump(doc, f, sort_keys=False, default_flow_style=False)
+    return doc
 
 
 def build_manifest(
@@ -559,10 +615,20 @@ def main(args=None) -> None:
     )
     n_stem = sum(1 for t in doc["trials"] if t["type"] == "stem")
     n_mix = sum(1 for t in doc["trials"] if t["type"] == "mixture")
+    n_equiv = sum(len(t.get("equivalences") or {}) for t in doc["trials"])
+    n_unique_ratings = sum(
+        len(ABLATION_MUSHRA_CONDITIONS) - len(t.get("equivalences") or {})
+        for t in doc["trials"]
+    )
     print(
         f"Prepared {len(doc['trials'])} trials "
         f"({n_stem} stem, {n_mix} mixture) × "
         f"{len(ABLATION_MUSHRA_CONDITIONS)} conditions"
+    )
+    print(
+        f"Donor equivalences: {n_equiv} omitted duplicates "
+        f"→ {n_unique_ratings} unique stimuli across trials "
+        f"(× {len(('content', 'realism'))} scales)"
     )
     print(f"Manifest: {opts.manifest.resolve()}")
     print(f"Clips: {opts.clips_dir.resolve()}")

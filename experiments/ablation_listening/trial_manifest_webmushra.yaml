@@ -100,6 +100,11 @@ trials:
     ddsp_basic_realify: stem_drums_01/ddsp_basic_realify.mp3
     ddsp_slakh: stem_drums_01/ddsp_slakh.mp3
     ddsp_slakh_realify: stem_drums_01/ddsp_slakh_realify.mp3
+  equivalences:
+    ddsp_basic: basic
+    ddsp_slakh: slakh
+    ddsp_basic_realify: basic_realify
+    ddsp_slakh_realify: slakh_realify
   webmushra_wav_paths:
     basic: stimuli/spdmx_ablation/stem_drums_01/basic.wav
     basic_realify: stimuli/spdmx_ablation/stem_drums_01/basic_realify.wav
@@ -128,6 +133,11 @@ trials:
     ddsp_basic_realify: stem_drums_02/ddsp_basic_realify.mp3
     ddsp_slakh: stem_drums_02/ddsp_slakh.mp3
     ddsp_slakh_realify: stem_drums_02/ddsp_slakh_realify.mp3
+  equivalences:
+    ddsp_basic: basic
+    ddsp_slakh: slakh
+    ddsp_basic_realify: basic_realify
+    ddsp_slakh_realify: slakh_realify
   webmushra_wav_paths:
     basic: stimuli/spdmx_ablation/stem_drums_02/basic.wav
     basic_realify: stimuli/spdmx_ablation/stem_drums_02/basic_realify.wav
@@ -268,6 +278,11 @@ trials:
     ddsp_basic_realify: stem_voice_01/ddsp_basic_realify.mp3
     ddsp_slakh: stem_voice_01/ddsp_slakh.mp3
     ddsp_slakh_realify: stem_voice_01/ddsp_slakh_realify.mp3
+  equivalences:
+    ddsp_basic: basic
+    ddsp_slakh: slakh
+    ddsp_basic_realify: basic_realify
+    ddsp_slakh_realify: slakh_realify
   webmushra_wav_paths:
     basic: stimuli/spdmx_ablation/stem_voice_01/basic.wav
     basic_realify: stimuli/spdmx_ablation/stem_voice_01/basic_realify.wav
@@ -296,6 +311,11 @@ trials:
     ddsp_basic_realify: stem_voice_02/ddsp_basic_realify.mp3
     ddsp_slakh: stem_voice_02/ddsp_slakh.mp3
     ddsp_slakh_realify: stem_voice_02/ddsp_slakh_realify.mp3
+  equivalences:
+    ddsp_basic: basic
+    ddsp_slakh: slakh
+    ddsp_basic_realify: basic_realify
+    ddsp_slakh_realify: slakh_realify
   webmushra_wav_paths:
     basic: stimuli/spdmx_ablation/stem_voice_02/basic.wav
     basic_realify: stimuli/spdmx_ablation/stem_voice_02/basic_realify.wav
@@ -324,6 +344,11 @@ trials:
     ddsp_basic_realify: stem_mallet_01/ddsp_basic_realify.mp3
     ddsp_slakh: stem_mallet_01/ddsp_slakh.mp3
     ddsp_slakh_realify: stem_mallet_01/ddsp_slakh_realify.mp3
+  equivalences:
+    ddsp_basic: basic
+    ddsp_slakh: slakh
+    ddsp_basic_realify: basic_realify
+    ddsp_slakh_realify: slakh_realify
   webmushra_wav_paths:
     basic: stimuli/spdmx_ablation/stem_mallet_01/basic.wav
     basic_realify: stimuli/spdmx_ablation/stem_mallet_01/basic_realify.wav
@@ -352,6 +377,11 @@ trials:
     ddsp_basic_realify: stem_mallet_02/ddsp_basic_realify.mp3
     ddsp_slakh: stem_mallet_02/ddsp_slakh.mp3
     ddsp_slakh_realify: stem_mallet_02/ddsp_slakh_realify.mp3
+  equivalences:
+    ddsp_basic: basic
+    ddsp_slakh: slakh
+    ddsp_basic_realify: basic_realify
+    ddsp_slakh_realify: slakh_realify
   webmushra_wav_paths:
     basic: stimuli/spdmx_ablation/stem_mallet_02/basic.wav
     basic_realify: stimuli/spdmx_ablation/stem_mallet_02/basic_realify.wav
@@ -380,6 +410,11 @@ trials:
     ddsp_basic_realify: stem_organ_01/ddsp_basic_realify.mp3
     ddsp_slakh: stem_organ_01/ddsp_slakh.mp3
     ddsp_slakh_realify: stem_organ_01/ddsp_slakh_realify.mp3
+  equivalences:
+    ddsp_basic: basic
+    ddsp_slakh: slakh
+    ddsp_basic_realify: basic_realify
+    ddsp_slakh_realify: slakh_realify
   webmushra_wav_paths:
     basic: stimuli/spdmx_ablation/stem_organ_01/basic.wav
     basic_realify: stimuli/spdmx_ablation/stem_organ_01/basic_realify.wav
@@ -408,6 +443,11 @@ trials:
     ddsp_basic_realify: stem_organ_02/ddsp_basic_realify.mp3
     ddsp_slakh: stem_organ_02/ddsp_slakh.mp3
     ddsp_slakh_realify: stem_organ_02/ddsp_slakh_realify.mp3
+  equivalences:
+    ddsp_basic: basic
+    ddsp_slakh: slakh
+    ddsp_basic_realify: basic_realify
+    ddsp_slakh_realify: slakh_realify
   webmushra_wav_paths:
     basic: stimuli/spdmx_ablation/stem_organ_02/basic.wav
     basic_realify: stimuli/spdmx_ablation/stem_organ_02/basic_realify.wav
@@ -436,6 +476,11 @@ trials:
     ddsp_basic_realify: stem_guitar_01/ddsp_basic_realify.mp3
     ddsp_slakh: stem_guitar_01/ddsp_slakh.mp3
     ddsp_slakh_realify: stem_guitar_01/ddsp_slakh_realify.mp3
+  equivalences:
+    ddsp_basic: basic
+    ddsp_slakh: slakh
+    ddsp_basic_realify: basic_realify
+    ddsp_slakh_realify: slakh_realify
   webmushra_wav_paths:
     basic: stimuli/spdmx_ablation/stem_guitar_01/basic.wav
     basic_realify: stimuli/spdmx_ablation/stem_guitar_01/basic_realify.wav
@@ -464,6 +509,11 @@ trials:
     ddsp_basic_realify: stem_guitar_02/ddsp_basic_realify.mp3
     ddsp_slakh: stem_guitar_02/ddsp_slakh.mp3
     ddsp_slakh_realify: stem_guitar_02/ddsp_slakh_realify.mp3
+  equivalences:
+    ddsp_basic: basic
+    ddsp_slakh: slakh
+    ddsp_basic_realify: basic_realify
+    ddsp_slakh_realify: slakh_realify
   webmushra_wav_paths:
     basic: stimuli/spdmx_ablation/stem_guitar_02/basic.wav
     basic_realify: stimuli/spdmx_ablation/stem_guitar_02/basic_realify.wav
@@ -492,6 +542,11 @@ trials:
     ddsp_basic_realify: stem_brass_01/ddsp_basic_realify.mp3
     ddsp_slakh: stem_brass_01/ddsp_slakh.mp3
     ddsp_slakh_realify: stem_brass_01/ddsp_slakh_realify.mp3
+  equivalences:
+    ddsp_basic: basic
+    ddsp_slakh: slakh
+    ddsp_basic_realify: basic_realify
+    ddsp_slakh_realify: slakh_realify
   webmushra_wav_paths:
     basic: stimuli/spdmx_ablation/stem_brass_01/basic.wav
     basic_realify: stimuli/spdmx_ablation/stem_brass_01/basic_realify.wav
@@ -548,6 +603,11 @@ trials:
     ddsp_basic_realify: stem_polyphonic_01/ddsp_basic_realify.mp3
     ddsp_slakh: stem_polyphonic_01/ddsp_slakh.mp3
     ddsp_slakh_realify: stem_polyphonic_01/ddsp_slakh_realify.mp3
+  equivalences:
+    ddsp_basic: basic
+    ddsp_slakh: slakh
+    ddsp_basic_realify: basic_realify
+    ddsp_slakh_realify: slakh_realify
   webmushra_wav_paths:
     basic: stimuli/spdmx_ablation/stem_polyphonic_01/basic.wav
     basic_realify: stimuli/spdmx_ablation/stem_polyphonic_01/basic_realify.wav
@@ -576,6 +636,11 @@ trials:
     ddsp_basic_realify: stem_polyphonic_02/ddsp_basic_realify.mp3
     ddsp_slakh: stem_polyphonic_02/ddsp_slakh.mp3
     ddsp_slakh_realify: stem_polyphonic_02/ddsp_slakh_realify.mp3
+  equivalences:
+    ddsp_basic: basic
+    ddsp_slakh: slakh
+    ddsp_basic_realify: basic_realify
+    ddsp_slakh_realify: slakh_realify
   webmushra_wav_paths:
     basic: stimuli/spdmx_ablation/stem_polyphonic_02/basic.wav
     basic_realify: stimuli/spdmx_ablation/stem_polyphonic_02/basic_realify.wav

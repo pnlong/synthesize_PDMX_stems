@@ -12,7 +12,8 @@ Formal **MUSHRA** comparing **all 8 ablation conditions** (A1–CB2), with separ
 | **CB** `ddsp_slakh` | CB1 | CB2 |
 
 - **Reference** button = **A1** (`basic`)
-- **Eight blind conditions** = A1–CB2 (shuffled; names hidden); one slot matches the Reference
+- **Blind conditions** = unique A1–CB2 for that excerpt (shuffled; names hidden); one slot matches the Reference when A1 is present
+- **Donor-copy dedup:** when ``route_stem`` chooses soundfont for a trial stem, that means the DDSP conditions are donor copies (`ddsp_basic`↔`basic`, `ddsp_slakh`↔`slakh`, and the realify pairs). Those duplicates are **omitted** from the page. Aggregation **auto-assigns** the donor’s score to the omitted condition so factorial tables still cover all 8. Equivalences are stored per trial in `trial_manifest.yaml` under `equivalences`.
 - Each stem excerpt is rated **twice** (two pages, same audio):
   - **Content adherence** — melody / rhythm / timing vs Reference
   - **Realism** — natural instrument timbre / artifacts vs Reference
@@ -43,7 +44,17 @@ uv run python -m experiments.ablation_listening.prepare_clips -j 8
 # shorter: --stems-per-category 1
 ```
 
-Writes 10s clips to [`output/clips/`](output/clips/) and [`trial_manifest.yaml`](trial_manifest.yaml).
+Writes 10s clips to [`output/clips/`](output/clips/) and [`trial_manifest.yaml`](trial_manifest.yaml) (including per-trial `equivalences` for donor copies).
+
+To refresh equivalences on an existing manifest without re-cutting:
+
+```bash
+uv run python -c "
+from experiments.ablation_listening.prepare_clips import annotate_manifest_equivalences
+from experiments.ablation_listening.paths import DEFAULT_MANIFEST
+annotate_manifest_equivalences(DEFAULT_MANIFEST)
+"
+```
 
 ### 4. Export WAV + generate webMUSHRA config
 
@@ -52,7 +63,7 @@ uv run python -m experiments.ablation_listening.generate_webmushra
 ```
 
 - Converts clips → WAV under `third_party/webMUSHRA/stimuli/spdmx_ablation/`
-- Writes `third_party/webMUSHRA/configs/spdmx_ablation.yaml` (dual-scale pages: `stem_<cat>_<nn>__content` / `__realism`)
+- Writes `third_party/webMUSHRA/configs/spdmx_ablation.yaml` (dual-scale pages: `stem_<cat>_<nn>__content` / `__realism`; omits equivalent duplicates)
 
 ### 5. Serve (local or ngrok)
 
@@ -74,13 +85,14 @@ uv run python -m experiments.ablation_listening.aggregate_webmushra \
   --output experiments/ablation_listening/output/results_notes_webmushra.md
 ```
 
-Produces overall condition means, 4×2 factorial tables, and **per-category** content/realism tables.
+Reads `trial_manifest.yaml` equivalences by default and expands omitted DDSP conditions before computing means. Produces overall condition means, 4×2 factorial tables, and **per-category** content/realism tables.
 
 ## Layout
 
 | File | Role |
 |------|------|
 | [`conditions.py`](conditions.py) | 8 condition IDs, scales, page-id helpers |
+| [`equivalence.py`](equivalence.py) | ``route_stem``-based donor-copy detection + unique stimuli |
 | [`prepare_clips.py`](prepare_clips.py) | Select per-category stems + extract 10s clips |
 | [`generate_webmushra.py`](generate_webmushra.py) | WAV export + YAML config |
 | [`serve_webmushra.py`](serve_webmushra.py) | PHP dev server wrapper |
