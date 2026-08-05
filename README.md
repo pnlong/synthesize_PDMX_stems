@@ -65,16 +65,15 @@ Output:
 ### Full PDMX (after listening test)
 
 ```bash
-# Step 0 (if not already): register + dense corrected MIDIs (default)
+# Step 0 (if not already): register + dense corrected MIDIs
 uv run python -m analysis.prepare_synthesis --subset all_valid -j 8
 
-# Engineered full stems (feature flag until legacy path is dropped)
-SPDMX_DENSE_MIDI=1 uv run python -m synthesis.synthesize --render-mode basic --full
-SPDMX_DENSE_MIDI=1 uv run python -m synthesis.synthesize --render-mode basic --full --realify
+uv run python -m synthesis.synthesize --render-mode basic --full
+uv run python -m synthesis.synthesize --render-mode basic --full --realify
 ```
 
 Output: `{OUTPUT_DIR}/dev/stems/` and `{OUTPUT_DIR}/dev/stems_realify/`.
-`stems.csv` uses contiguous `track` plus `original_track` (PDMX index). Leave the dense flag off for current listening ablations.
+`stems.csv` uses contiguous `track` plus `original_track` (PDMX index).
 
 ### Assembled sPDMX dataset (planned)
 

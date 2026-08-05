@@ -16,7 +16,7 @@ Output symlinked in-repo at [`analysis/output/`](output/) → `{OUTPUT_DIR}/dev/
 | **`analyze_stems`** | PDMX MIDI files | Note count per track (symbolic) | Explore synthesis load / `MAX_N_NOTES_IN_STEM` limits. Not a duration analysis. |
 | **`analyze_gm_programs`** | PDMX MIDI, or `--from-register` | GM program usage counts + bar chart | Raw MIDI inventory, or **corrected** inventory from `register.csv` (`gm_program_*_corrected.*`). |
 
-**`prepare_synthesis` is a synthesis prerequisite**, not optional exploration: run it (or refresh it after editing the alias YAML) before `synthesis.synthesize`. By default it also writes dense corrected MIDIs under `{OUTPUT_DIR}/dev/mid_corrected/` (use `--no-write-corrected-midi` to skip). Enable those midis at synthesize time with `SPDMX_DENSE_MIDI=1` / `--dense-midi` (default off until listening ablations are done).
+**`prepare_synthesis` is a synthesis prerequisite**, not optional exploration: run it (or refresh it after editing the alias YAML) before `synthesis.synthesize`. By default it also writes dense corrected MIDIs under `{OUTPUT_DIR}/dev/mid_corrected/` (use `--no-write-corrected-midi` to skip). Synthesize always loads those corrected midis.
 
 **`analyze_song_lengths` vs `analyze_durations`:** both concern time in seconds, but song lengths reads symbolic metadata for the full dataset; analyze durations reads actual audio files from whatever subset you synthesized (e.g. 100-song ablation).
 

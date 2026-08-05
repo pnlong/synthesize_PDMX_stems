@@ -40,10 +40,7 @@ from synthesis.audio import (
     synthesis_audio_format,
 )
 from synthesis.cli_common import add_audio_format_arg
-from synthesis.dense_midi import (
-    default_corrected_midi_dir,
-    dense_midi_enabled,
-)
+from synthesis.dense_midi import default_corrected_midi_dir
 from synthesis.paths import (
     ablation_raw_dir,
     ablation_realify_dir,
@@ -93,18 +90,11 @@ def resolve_song_midi(
     *,
     pdmx_root: Path,
     output_dir: str = OUTPUT_DIR,
-    dense: bool | None = None,
 ) -> Path:
-    """Resolve the MIDI file whose track indices match rendered stems."""
-    pdmx_mid = pdmx_mid_from_song_dir(song_dir, pdmx_root)
-    use_dense = dense_midi_enabled() if dense is None else dense
-    if not use_dense:
-        if not pdmx_mid.is_file():
-            raise FileNotFoundError(f"PDMX MIDI not found for {song_dir}: {pdmx_mid}")
-        return pdmx_mid
-
+    """Resolve the dense corrected MIDI whose track indices match rendered stems."""
     from analysis.corrected_midi import resolve_corrected_midi_path
 
+    pdmx_mid = pdmx_mid_from_song_dir(song_dir, pdmx_root)
     corrected = resolve_corrected_midi_path(
         pdmx_mid,
         pdmx_root=pdmx_root,
@@ -112,7 +102,8 @@ def resolve_song_midi(
     )
     if not corrected.is_file():
         raise FileNotFoundError(
-            f"Dense MIDI enabled but corrected MIDI missing for {song_dir}: {corrected}"
+            f"Corrected MIDI missing for {song_dir}: {corrected}\n"
+            "Run: uv run python -m analysis.prepare_synthesis --subset all_valid -j 8"
         )
     return corrected
 

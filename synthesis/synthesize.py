@@ -145,10 +145,7 @@ def synthesize_song_at_index(
         pdmx_mid, args=args, pdmx_root=pdmx_root,
     )
     midi = mido.MidiFile(filename=str(midi_path), charset="utf8")
-    n_tracks = len(midi.tracks)
-    # Dense corrected midis omit empty tracks; prefer sidecar length when present.
-    if track_map is not None:
-        n_tracks = len(track_map)
+    n_tracks = len(track_map)
 
     if (
         path_output in completed_paths
@@ -175,14 +172,11 @@ def synthesize_song_at_index(
         track_paths = [f"{temp_dir.name}/{j}.mid" for j in range(n_tracks)]
         track_render_meta: list[dict] = []
 
-    if track_map is not None:
-        tracks_to_render = [
-            (j, midi.tracks[j])
-            for j in sorted(track_map.keys())
-            if j < len(midi.tracks)
-        ]
-    else:
-        tracks_to_render = list(enumerate(midi.tracks))
+    tracks_to_render = [
+        (j, midi.tracks[j])
+        for j in sorted(track_map.keys())
+        if j < len(midi.tracks)
+    ]
 
     for j, track in tracks_to_render:
         if need_to_synthesize:
@@ -196,9 +190,7 @@ def synthesize_song_at_index(
         n_notes = 0
         max_velocity = 0
         determined_whether_track_is_drum = False
-        original_track = (
-            int(track_map[j]["original_track"]) if track_map is not None else j
-        )
+        original_track = int(track_map[j]["original_track"])
 
         for message in track:
             if message.type == "note_on" and message.velocity > 0:
@@ -218,28 +210,8 @@ def synthesize_song_at_index(
             if need_to_synthesize and n_notes <= MAX_N_NOTES_IN_STEM:
                 track_midi_track.append(message)
 
-        # Apply GM register correction (track-name → program) before render routing.
-        # Dense corrected midis already bake register programs — skip re-apply.
-        register_lookup = getattr(args, "gm_register_lookup", None)
-        if register_lookup is not None and track_map is None:
-            from analysis.gm_register import lookup_corrected_program
-
-            mid_key = pdmx_mid
-            corrected = lookup_corrected_program(
-                register_lookup,
-                mid=mid_key,
-                track=j,
-                default=program,
-            )
-            if corrected != program:
-                program = corrected
-                if need_to_synthesize:
-                    apply_patch_to_midi_track(
-                        track_midi_track,
-                        PatchAssignment(program=program, is_drum=is_drum),
-                    )
-        elif track_map is not None:
-            program = int(track_map[j].get("program", program))
+        # Dense corrected midis already bake register programs.
+        program = int(track_map[j].get("program", program))
 
         if need_to_synthesize:
             track_midi.tracks.append(track_midi_track)
@@ -668,39 +640,33 @@ def run_synthesis(args, output_dir: str):
     ]
     dataset = dataset.reset_index(drop=True)
 
-    from synthesis.dense_midi import dense_midi_enabled, default_corrected_midi_dir
+    from analysis.corrected_midi import load_track_map, resolve_corrected_midi_path
+    from synthesis.dense_midi import default_corrected_midi_dir
 
-    if dense_midi_enabled(args):
-        from analysis.corrected_midi import load_track_map, resolve_corrected_midi_path
-
-        corrected_root = Path(
-            getattr(args, "corrected_midi_dir", None)
-            or default_corrected_midi_dir(args.output_dir)
+    corrected_root = Path(
+        getattr(args, "corrected_midi_dir", None)
+        or default_corrected_midi_dir(args.output_dir)
+    )
+    print(f"Using dense corrected midis under {corrected_root}")
+    new_mids = []
+    new_n_tracks = []
+    for mid in dataset["mid_pdmx"]:
+        corrected = resolve_corrected_midi_path(
+            mid,
+            pdmx_root=original_dataset_dir,
+            corrected_midi_dir=corrected_root,
         )
-        print(f"Dense MIDI enabled — using corrected midis under {corrected_root}")
-        new_mids = []
-        new_n_tracks = []
-        for mid in dataset["mid_pdmx"]:
-            corrected = resolve_corrected_midi_path(
-                mid,
-                pdmx_root=original_dataset_dir,
-                corrected_midi_dir=corrected_root,
+        if not corrected.is_file():
+            raise FileNotFoundError(
+                f"Corrected MIDI missing: {corrected}\n"
+                "Generate corrected midis first:\n"
+                "  uv run python -m analysis.prepare_synthesis --subset all_valid -j 8"
             )
-            if not corrected.is_file():
-                raise FileNotFoundError(
-                    f"Dense MIDI enabled but corrected MIDI missing: {corrected}\n"
-                    "Generate corrected midis first:\n"
-                    "  uv run python -m analysis.prepare_synthesis --subset all_valid "
-                    "-j 8\n"
-                    "Or disable with --no-dense-midi / unset SPDMX_DENSE_MIDI."
-                )
-            tmap = load_track_map(corrected)
-            new_mids.append(str(corrected))
-            new_n_tracks.append(len(tmap))
-        dataset["mid"] = new_mids
-        dataset["n_tracks"] = new_n_tracks
-    else:
-        print("Dense MIDI off (legacy PDMX track indices). Enable with --dense-midi or SPDMX_DENSE_MIDI=1.")
+        tmap = load_track_map(corrected)
+        new_mids.append(str(corrected))
+        new_n_tracks.append(len(tmap))
+    dataset["mid"] = new_mids
+    dataset["n_tracks"] = new_n_tracks
 
     for song_dir in set(dataset["path_output"]):
         makedirs(song_dir, exist_ok=True)

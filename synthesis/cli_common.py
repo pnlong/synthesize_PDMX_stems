@@ -134,24 +134,6 @@ def add_synthesis_args(parser: argparse.ArgumentParser):
         action="store_true",
         help="Do not apply GM register corrections (use MIDI program_change as-is).",
     )
-    dense = parser.add_mutually_exclusive_group()
-    dense.add_argument(
-        "--dense-midi",
-        dest="dense_midi",
-        action="store_true",
-        default=None,
-        help=(
-            "Use dense corrected MIDIs under dev/mid_corrected/ "
-            "(empty tracks dropped, register programs baked in). "
-            "Also set via SPDMX_DENSE_MIDI=1."
-        ),
-    )
-    dense.add_argument(
-        "--no-dense-midi",
-        dest="dense_midi",
-        action="store_false",
-        help="Force legacy PDMX MIDI indexing even if SPDMX_DENSE_MIDI is set.",
-    )
     parser.add_argument(
         "--corrected-midi-dir",
         default=None,

@@ -176,12 +176,12 @@ python -m synthesis.listening.serve
 
 # Full PDMX after listening test (dense corrected MIDI)
 python -m analysis.prepare_synthesis --subset all_valid -j 8
-SPDMX_DENSE_MIDI=1 python -m synthesis.synthesize --render-mode basic --full
-SPDMX_DENSE_MIDI=1 python -m synthesis.synthesize --render-mode basic --full --realify
-SPDMX_DENSE_MIDI=1 python -m synthesis.mix --full -j 8
+python -m synthesis.synthesize --render-mode basic --full
+python -m synthesis.synthesize --render-mode basic --full --realify
+python -m synthesis.mix --full -j 8
 ```
 
-Listening ablations keep the default (**dense MIDI off** / legacy PDMX track indices) until you flip `SPDMX_DENSE_MIDI` or pass `--dense-midi`. After cutover, drop the legacy path so dense is always on and `prepare_synthesis` is the only setup step needed.
+Synthesize always uses dense corrected MIDIs from `dev/mid_corrected/` (`prepare_synthesis` is the step-0 setup).
 
 Song-length analysis (no synthesis required):
 
