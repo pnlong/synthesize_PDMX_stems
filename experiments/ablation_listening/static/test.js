@@ -487,6 +487,18 @@ startBtn.addEventListener("click", () => {
   });
 });
 
+async function finishTest() {
+  player.stop();
+  const result = await saveToServer(false);
+  clearClientSession();
+  testPanelEl.classList.add("hidden");
+  completeEl.classList.remove("hidden");
+  completeMessageEl.textContent = "Thank you — responses saved on the server.";
+  completePathEl.textContent = result.saved;
+  window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+  return result;
+}
+
 prevBtn.addEventListener("click", async () => {
   if (state.trialIndex > 0) {
     try {
@@ -504,6 +516,14 @@ nextBtn.addEventListener("click", async () => {
   if (!detail || !isTrialComplete(detail.id)) {
     return;
   }
+  if (state.trialIndex >= state.trialOrder.length - 1) {
+    try {
+      await finishTest();
+    } catch (err) {
+      showSaveStatus(err.message, true);
+    }
+    return;
+  }
   try {
     await saveToServer(true);
     showSaveStatus("Progress saved");
@@ -511,9 +531,7 @@ nextBtn.addEventListener("click", async () => {
     showSaveStatus(err.message, true);
     return;
   }
-  if (state.trialIndex < state.trialOrder.length - 1) {
-    await loadTrial(state.trialIndex + 1);
-  }
+  await loadTrial(state.trialIndex + 1);
 });
 
 saveBtn.addEventListener("click", () => {
@@ -523,16 +541,7 @@ saveBtn.addEventListener("click", () => {
 });
 
 finishBtn.addEventListener("click", () => {
-  player.stop();
-  saveToServer(false)
-    .then((result) => {
-      clearClientSession();
-      testPanelEl.classList.add("hidden");
-      completeEl.classList.remove("hidden");
-      completeMessageEl.textContent = "Thank you — responses saved on the server.";
-      completePathEl.textContent = result.saved;
-    })
-    .catch((err) => showSaveStatus(err.message, true));
+  finishTest().catch((err) => showSaveStatus(err.message, true));
 });
 
 if (params.get("autostart") === "1") {

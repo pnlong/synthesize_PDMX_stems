@@ -89,13 +89,16 @@ trials:
     ddsp_slakh_realify: slakh_realify
 - id: stem_drums_02
   type: stem
-  song_id: 15/2/QmX3p8B7sg318hieeQYBPQDbiGdm2hxH9nHeQpJfMmZcE4
-  song_path: /deepfreeze/pnlong/SPDMX/dev/ablations/basic/data/15/2/QmX3p8B7sg318hieeQYBPQDbiGdm2hxH9nHeQpJfMmZcE4
-  track: 16
+  song_id: 11/37/QmTPVWjbMf6vCXCy7FYf2FMHRhHzgQrWjJ4JBNWZmTjK26
+  song_path: /deepfreeze/pnlong/SPDMX/dev/ablations/basic/data/11/37/QmTPVWjbMf6vCXCy7FYf2FMHRhHzgQrWjJ4JBNWZmTjK26
+  track: 7
   category: drums
-  note: Snare Drum
+  note: Drumset
+  program: 0
+  is_drum: true
+  gm_instrument: Drums
   clip_seconds: 10.0
-  clip_start_seconds: 53.0
+  clip_start_seconds: 38.0
   audio_format: mp3
   conditions:
     basic: stem_drums_02/basic.mp3
@@ -333,13 +336,16 @@ trials:
     ddsp_slakh_realify: slakh_realify
 - id: stem_guitar_01
   type: stem
-  song_id: 3/50/QmdwwkQVdZVZa73KC2kwmnK4REWK38Zb4mPEyopPAkb4vP
-  song_path: /deepfreeze/pnlong/SPDMX/dev/ablations/basic/data/3/50/QmdwwkQVdZVZa73KC2kwmnK4REWK38Zb4mPEyopPAkb4vP
-  track: 13
+  song_id: 1/48/Qmbv1YuMvL1wtEt2VKccbSGidbbrYJxfjXno2sRqaYKkPj
+  song_path: /deepfreeze/pnlong/SPDMX/dev/ablations/basic/data/1/48/Qmbv1YuMvL1wtEt2VKccbSGidbbrYJxfjXno2sRqaYKkPj
+  track: 0
   category: guitar
-  note: Guitar (Treble Clef)
+  note: Classical Guitar
+  program: 24
+  is_drum: false
+  gm_instrument: Acoustic Guitar (nylon)
   clip_seconds: 10.0
-  clip_start_seconds: 144.0
+  clip_start_seconds: 0.0
   audio_format: mp3
   conditions:
     basic: stem_guitar_01/basic.mp3
@@ -357,13 +363,16 @@ trials:
     ddsp_slakh_realify: slakh_realify
 - id: stem_guitar_02
   type: stem
-  song_id: 6/25/QmNit8z6V7zsUyVoL373ZK52TGfGhJGz2DKTwyYZyzHEHk
-  song_path: /deepfreeze/pnlong/SPDMX/dev/ablations/basic/data/6/25/QmNit8z6V7zsUyVoL373ZK52TGfGhJGz2DKTwyYZyzHEHk
+  song_id: 3/0/Qmd1iYFtkewmGqKZnQXNk569CAe8eSquks6cHDUNVeASzA
+  song_path: /deepfreeze/pnlong/SPDMX/dev/ablations/basic/data/3/0/Qmd1iYFtkewmGqKZnQXNk569CAe8eSquks6cHDUNVeASzA
   track: 0
   category: guitar
-  note: "Guitarra cl\xE1sica"
+  note: Guitar
+  program: 24
+  is_drum: false
+  gm_instrument: Acoustic Guitar (nylon)
   clip_seconds: 10.0
-  clip_start_seconds: 6.0
+  clip_start_seconds: 0.0
   audio_format: mp3
   conditions:
     basic: stem_guitar_02/basic.mp3
