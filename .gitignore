@@ -13,8 +13,8 @@ experiments/preset_sweep/output
 experiments/patch_sweep/output
 experiments/ablation_listening/output/
 
-# webMUSHRA (clone locally; see experiments/ablation_listening/README.md)
-third_party/webMUSHRA/
+# Local third-party clones (not vendored)
+third_party/
 
 # Isolated TensorFlow venv for MIDI-DDSP + DDSP-Piano (SETUP Track C)
 .venv-ddsp/

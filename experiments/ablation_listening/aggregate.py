@@ -8,8 +8,11 @@ from collections import defaultdict
 from pathlib import Path
 
 import pandas as pd
-import yaml
 
+from experiments.ablation_listening.equivalence import (
+    expand_equivalence_scores,
+    load_manifest_equivalences,
+)
 from experiments.ablation_listening.paths import DEFAULT_MANIFEST, DEFAULT_OUTPUT_DIR
 from experiments.ablation_listening.session import REFERENCE_CONDITION
 from experiments.listening_shared.scale import (
@@ -50,7 +53,11 @@ def load_responses(path: Path) -> dict:
         return json.load(f)
 
 
-def ratings_dataframe(responses: dict) -> pd.DataFrame:
+def ratings_dataframe(
+    responses: dict,
+    *,
+    equivalences_by_trial: dict[str, dict[str, str]] | None = None,
+) -> pd.DataFrame:
     rows = []
     listener_id = responses.get("listener_id")
     for entry in responses.get("ratings", []):
@@ -73,8 +80,18 @@ def ratings_dataframe(responses: dict) -> pd.DataFrame:
                 "is_reference": is_reference,
                 "content": float(content) if content is not None else float("nan"),
                 "realism": float(sample["realism"]),
+                "auto_assigned": False,
+                "source_condition": None,
             })
-    return pd.DataFrame(rows)
+    df = pd.DataFrame(rows)
+    if equivalences_by_trial:
+        df = expand_equivalence_scores(
+            df,
+            equivalences_by_trial,
+            score_columns=("content", "realism"),
+            scale_key=None,
+        )
+    return df
 
 
 def content_filter(
@@ -262,16 +279,27 @@ def render_markdown(summary: dict, *, responses_path: Path) -> str:
     return "\n".join(lines) + "\n"
 
 
-def aggregate_responses(paths: list[Path]) -> tuple[pd.DataFrame, dict]:
+def aggregate_responses(
+    paths: list[Path],
+    *,
+    manifest_path: Path | None = None,
+) -> tuple[pd.DataFrame, dict]:
+    equivalences = load_manifest_equivalences(manifest_path)
     frames = []
     for path in paths:
-        df = ratings_dataframe(load_responses(path))
+        df = ratings_dataframe(
+            load_responses(path),
+            equivalences_by_trial=equivalences,
+        )
         if not df.empty:
             frames.append(df)
     if not frames:
         return pd.DataFrame(), {"error": "no ratings"}
     combined = pd.concat(frames, ignore_index=True)
-    return combined, summarize(combined)
+    summary = summarize(combined)
+    if "auto_assigned" in combined.columns:
+        summary["n_auto_assigned"] = int(combined["auto_assigned"].sum())
+    return combined, summary
 
 
 def parse_args(args=None):
@@ -292,14 +320,14 @@ def parse_args(args=None):
         "--manifest",
         default=DEFAULT_MANIFEST,
         type=Path,
-        help="Trial manifest (for metadata only).",
+        help="Trial manifest (equivalences for auto-assigning omitted DDSP conditions).",
     )
     return parser.parse_args(args)
 
 
 def main(args=None) -> None:
     opts = parse_args(args)
-    _, summary = aggregate_responses(opts.responses)
+    _, summary = aggregate_responses(opts.responses, manifest_path=opts.manifest)
     opts.output.parent.mkdir(parents=True, exist_ok=True)
     markdown = render_markdown(summary, responses_path=opts.responses[0])
     opts.output.write_text(markdown)
@@ -308,6 +336,9 @@ def main(args=None) -> None:
     print(markdown)
     print(f"Wrote {opts.output}")
     print(f"Wrote {json_path}")
+    n_auto = summary.get("n_auto_assigned") or 0
+    if n_auto:
+        print(f"Auto-assigned {n_auto} ratings from donor equivalences")
 
 
 if __name__ == "__main__":

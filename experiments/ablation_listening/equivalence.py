@@ -153,7 +153,7 @@ def unique_condition_ids(
     all_conditions: tuple[str, ...] | list[str],
     equivalences: dict[str, str] | None,
 ) -> list[str]:
-    """Conditions to present on a MUSHRA page (omit donor-copy duplicates)."""
+    """Conditions to present as blind samples (omit donor-copy duplicates)."""
     skip = set(equivalences or {})
     return [c for c in all_conditions if c not in skip]
 
@@ -185,12 +185,103 @@ def equivalences_by_trial_id(manifest: dict) -> dict[str, dict[str, str]]:
     return out
 
 
+def load_manifest_equivalences(manifest_path: Path | None) -> dict[str, dict[str, str]]:
+    if manifest_path is None or not Path(manifest_path).is_file():
+        return {}
+    import yaml
+
+    with open(manifest_path) as f:
+        manifest = yaml.safe_load(f) or {}
+    return equivalences_by_trial_id(manifest)
+
+
+def expand_equivalence_scores(
+    df: "pd.DataFrame",
+    equivalences_by_trial: dict[str, dict[str, str]],
+    *,
+    score_columns: tuple[str, ...] = ("score",),
+    scale_key: str | None = "scale",
+) -> "pd.DataFrame":
+    """Synthesize ratings for omitted donor-copy conditions from rated donors.
+
+    Supports:
+    - long format: ``score`` + ``scale`` columns
+    - wide format (custom JSON): ``content`` + ``realism`` columns (``scale_key=None``)
+    """
+    import pandas as pd
+
+    if df.empty or not equivalences_by_trial:
+        if "auto_assigned" not in df.columns:
+            df = df.copy()
+            df["auto_assigned"] = False
+            df["source_condition"] = None
+        return df
+
+    df = df.copy()
+    if "auto_assigned" not in df.columns:
+        df["auto_assigned"] = False
+    if "source_condition" not in df.columns:
+        df["source_condition"] = None
+
+    def _row_key(row) -> tuple:
+        parts = [row.listener_id, row.trial_id, row.condition_id]
+        if scale_key is not None:
+            parts.insert(2, getattr(row, scale_key))
+        return tuple(parts)
+
+    existing = {_row_key(row) for row in df.itertuples(index=False)}
+
+    extra: list[dict] = []
+    for row in df.itertuples(index=False):
+        if bool(getattr(row, "auto_assigned", False)):
+            continue
+        equiv = equivalences_by_trial.get(str(row.trial_id)) or {}
+        for duplicate, donor in equiv.items():
+            if row.condition_id != donor:
+                continue
+            key_parts = [row.listener_id, row.trial_id, duplicate]
+            if scale_key is not None:
+                key_parts.insert(2, getattr(row, scale_key))
+            key = tuple(key_parts)
+            if key in existing:
+                continue
+            existing.add(key)
+            new_row = {
+                "listener_id": row.listener_id,
+                "trial_id": row.trial_id,
+                "category": row.category,
+                "trial_type": row.trial_type,
+                "condition_id": duplicate,
+                "auto_assigned": True,
+                "source_condition": donor,
+            }
+            if scale_key is not None:
+                new_row[scale_key] = getattr(row, scale_key)
+                if hasattr(row, "page_id"):
+                    new_row["page_id"] = row.page_id
+            if hasattr(row, "is_reference"):
+                new_row["is_reference"] = False
+            if hasattr(row, "condition_label"):
+                from synthesis.listening.catalog import CONDITION_LABELS
+
+                new_row["condition_label"] = CONDITION_LABELS.get(duplicate, duplicate)
+            for col in score_columns:
+                new_row[col] = getattr(row, col)
+            extra.append(new_row)
+
+    if not extra:
+        return df
+    return pd.concat([df, pd.DataFrame(extra)], ignore_index=True)
+
+
 __all__ = [
     "DONOR_EQUIVALENCE_PAIRS",
     "detect_equivalences_for_stem",
     "detect_equivalences_for_trial",
     "donor_equivalences_for_backend",
     "equivalences_by_trial_id",
+    "expand_equivalence_scores",
+    "load_manifest_equivalences",
     "load_stem_midi_track",
     "load_stem_row",
     "trial_equivalences",

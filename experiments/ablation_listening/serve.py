@@ -1,4 +1,4 @@
-"""HTTP server for the ablation listening test (A1–B2)."""
+"""HTTP server for the ablation listening test (custom dual-slider UI)."""
 
 from __future__ import annotations
 
@@ -209,7 +209,7 @@ def main(args=None) -> None:
     url = f"http://{opts.host}:{opts.port}"
     print(f"Serving ablation listening test at {url}")
     print("For remote listeners: ngrok http", opts.port)
-    print("Open", f"{url}/test?seed=42")
+    print("Open", f"{url}/test")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

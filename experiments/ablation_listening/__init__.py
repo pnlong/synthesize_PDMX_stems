@@ -1,1 +1,2 @@
-"""Ablation listening test — compare rendered A1/A2/B1/B2 clips."""
+"""Ablation listening test — compare rendered A1–CB2 clips (custom dual-slider UI)."""
+

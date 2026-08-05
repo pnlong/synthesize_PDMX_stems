@@ -4,7 +4,13 @@ import {
 } from "/shared/slider.js";
 
 const params = new URLSearchParams(window.location.search);
-const REFERENCE_KEY = "__reference__";
+
+function freshSessionSeed() {
+  // New shuffle of trial order + blind labels on every start.
+  const bytes = new Uint32Array(1);
+  crypto.getRandomValues(bytes);
+  return bytes[0] & 0x7fffffff;
+}
 
 const state = {
   meta: null,
@@ -14,7 +20,7 @@ const state = {
   ratings: {},
   storageKey: null,
   listenerId: "",
-  sessionSeed: Number(params.get("seed") || document.getElementById("session-seed")?.value || "42"),
+  sessionSeed: freshSessionSeed(),
 };
 
 const setupEl = document.getElementById("setup");
@@ -31,13 +37,13 @@ const referenceSectionEl = document.getElementById("reference-section");
 const referenceAudioEl = document.getElementById("reference-audio");
 const referenceSlidersEl = document.getElementById("reference-sliders");
 const samplesEl = document.getElementById("samples");
+const samplesHeadingEl = document.getElementById("samples-heading");
 const prevBtn = document.getElementById("prev-btn");
 const nextBtn = document.getElementById("next-btn");
 const saveBtn = document.getElementById("save-btn");
 const finishBtn = document.getElementById("finish-btn");
 const startBtn = document.getElementById("start-btn");
 const listenerInput = document.getElementById("listener-id");
-const sessionSeedInput = document.getElementById("session-seed");
 const completeMessageEl = document.getElementById("complete-message");
 const completePathEl = document.getElementById("complete-path");
 
@@ -85,38 +91,44 @@ function trialRatings(trialId) {
   return state.ratings[trialId];
 }
 
-function isReferenceComplete(trialId) {
-  const ref = trialRatings(trialId).samples[REFERENCE_KEY];
-  return ref && isScoreRated(ref.realism);
-}
-
-function isVariantComplete(trialId, blindLabel) {
+function isSampleComplete(trialId, blindLabel) {
   const sample = trialRatings(trialId).samples[blindLabel];
   return sample && isScoreRated(sample.content) && isScoreRated(sample.realism);
 }
 
-function isTrialComplete(trialId) {
-  const detail = state.trialDetail;
+function isTrialComplete(trialId, detail = state.trialDetail) {
   if (!detail || detail.id !== trialId) return false;
-  if (!isReferenceComplete(trialId)) return false;
-  return detail.samples.every((s) => isVariantComplete(trialId, s.blind_label));
+  if (!detail.samples?.length) return false;
+  return detail.samples.every((s) => isSampleComplete(trialId, s.blind_label));
+}
+
+function entryLooksComplete(entry, expectedCount) {
+  if (!entry?.samples) return false;
+  const rated = Object.values(entry.samples).filter(
+    (s) => isScoreRated(s.content) && isScoreRated(s.realism),
+  );
+  if (expectedCount != null) {
+    return rated.length >= expectedCount;
+  }
+  return rated.length > 0 && rated.length === Object.keys(entry.samples).length;
 }
 
 function completedTrialCount() {
   return state.trialOrder.filter((trialId) => {
     const entry = state.ratings[trialId];
-    if (!entry?.samples) return false;
-    const ref = entry.samples[REFERENCE_KEY];
-    if (!ref || !isScoreRated(ref.realism)) return false;
-    const variants = Object.entries(entry.samples).filter(([k]) => k !== REFERENCE_KEY);
-    return variants.length >= 3 && variants.every(([, s]) =>
-      isScoreRated(s.content) && isScoreRated(s.realism)
-    );
+    const expected =
+      state.trialDetail?.id === trialId
+        ? state.trialDetail.samples.length
+        : entry?.expected_n_samples;
+    return entryLooksComplete(entry, expected);
   }).length;
 }
 
 function updateProgress() {
-  progressEl.textContent = `Trial ${state.trialIndex + 1} of ${state.trialOrder.length} · ${completedTrialCount()} complete`;
+  const nUnique = state.trialDetail?.n_unique;
+  const uniqueNote = nUnique != null ? ` · ${nUnique} samples` : "";
+  progressEl.textContent =
+    `Trial ${state.trialIndex + 1} of ${state.trialOrder.length}${uniqueNote} · ${completedTrialCount()} complete`;
   finishBtn.disabled = completedTrialCount() !== state.trialOrder.length;
   saveBtn.disabled = false;
 }
@@ -128,17 +140,7 @@ function buildResponsesPayload(checkpoint = false) {
     if (!entry?.samples) continue;
 
     const samples = [];
-    const ref = entry.samples[REFERENCE_KEY];
-    if (ref && isScoreRated(ref.realism)) {
-      samples.push({
-        is_reference: true,
-        condition_id: ref.condition_id,
-        realism: Number(ref.realism),
-      });
-    }
-
-    for (const [key, sample] of Object.entries(entry.samples)) {
-      if (key === REFERENCE_KEY) continue;
+    for (const sample of Object.values(entry.samples)) {
       if (!isScoreRated(sample.content) || !isScoreRated(sample.realism)) continue;
       samples.push({
         blind_label: sample.blind_label,
@@ -206,16 +208,23 @@ function renderTrial() {
     detail.song_id,
     detail.track != null ? `track ${detail.track}` : null,
     detail.clip_seconds != null ? `${detail.clip_seconds}s clip` : null,
+    detail.n_unique != null ? `${detail.n_unique} unique conditions` : null,
   ].filter(Boolean).join(" · ");
   trialNoteEl.textContent = detail.note || "";
   rubricHintEl.textContent =
-    `${state.meta.rubrics.content.help} Blind samples only. Reference (A1): realism only.`;
+    `${state.meta.rubrics.content.help} Rate every blind sample on Content and Realism. `
+    + "The Reference is play-only; one blind sample may match it.";
+
+  if (samplesHeadingEl) {
+    samplesHeadingEl.textContent = `Rate blind samples (${detail.samples.length})`;
+  }
 
   const saved = trialRatings(detail.id);
   saved.trial_type = detail.type;
   saved.category = detail.category;
+  saved.expected_n_samples = detail.samples.length;
 
-  // Reference (A1) — visible, realism only
+  // Reference (A1) — visible, play-only
   referenceSectionEl.classList.remove("hidden");
   referenceAudioEl.innerHTML = "";
   if (detail.reference?.available) {
@@ -223,34 +232,15 @@ function renderTrial() {
   } else {
     referenceAudioEl.textContent = "Reference audio missing";
   }
-
-  referenceSlidersEl.innerHTML = "";
-  if (!saved.samples[REFERENCE_KEY]) {
-    saved.samples[REFERENCE_KEY] = {
-      condition_id: detail.reference.condition_id,
-      is_reference: true,
-    };
+  if (referenceSlidersEl) {
+    referenceSlidersEl.innerHTML = "";
   }
-  const refEntry = saved.samples[REFERENCE_KEY];
 
-  createScoreSlider(referenceSlidersEl, {
-    rubric: "realism",
-    label: "Realism",
-    help: detail.realism_rubric.help,
-    value: refEntry.realism ?? null,
-    onChange: (value) => {
-      refEntry.realism = value;
-      saveLocalRatings();
-      updateProgress();
-    },
-  });
-
-  // Blinded variants (A2/B1/B2) — content + realism
   samplesEl.innerHTML = "";
   for (const sample of detail.samples) {
     const card = document.createElement("article");
     card.className = "sample-card";
-    if (!isVariantComplete(detail.id, sample.blind_label)) {
+    if (!isSampleComplete(detail.id, sample.blind_label)) {
       card.classList.add("incomplete");
     }
 
@@ -280,11 +270,13 @@ function renderTrial() {
       };
     }
     const entry = saved.samples[sample.blind_label];
+    entry.condition_id = sample.condition_id;
+    entry.blind_label = sample.blind_label;
 
     const commit = () => {
       saveLocalRatings();
       updateProgress();
-      card.classList.toggle("incomplete", !isVariantComplete(detail.id, sample.blind_label));
+      card.classList.toggle("incomplete", !isSampleComplete(detail.id, sample.blind_label));
     };
 
     createScoreSlider(sliders, {
@@ -321,7 +313,7 @@ function renderTrial() {
 
 async function startTest() {
   state.listenerId = listenerInput.value.trim();
-  state.sessionSeed = Number(sessionSeedInput.value || "42");
+  state.sessionSeed = freshSessionSeed();
   if (!state.listenerId) {
     alert("Please enter a listener ID.");
     return;
@@ -344,12 +336,13 @@ async function startTest() {
   for (const entry of serverPayload.ratings || []) {
     const mergedSamples = { ...(state.ratings[entry.trial_id]?.samples || {}) };
     for (const sample of entry.samples || []) {
-      const key = sample.is_reference ? REFERENCE_KEY : sample.blind_label;
-      mergedSamples[key] = sample;
+      if (sample.is_reference || !sample.blind_label) continue;
+      mergedSamples[sample.blind_label] = sample;
     }
     state.ratings[entry.trial_id] = {
       trial_type: entry.trial_type,
       category: entry.category,
+      expected_n_samples: entry.samples?.filter((s) => !s.is_reference).length,
       samples: mergedSamples,
     };
   }
@@ -361,12 +354,7 @@ async function startTest() {
   for (let i = 0; i < state.trialOrder.length; i += 1) {
     const trialId = state.trialOrder[i];
     const entry = state.ratings[trialId];
-    const refOk = entry?.samples?.[REFERENCE_KEY] && isScoreRated(entry.samples[REFERENCE_KEY].realism);
-    const variants = Object.entries(entry?.samples || {}).filter(([k]) => k !== REFERENCE_KEY);
-    const variantsOk = variants.length >= 3 && variants.every(([, s]) =>
-      isScoreRated(s.content) && isScoreRated(s.realism)
-    );
-    if (!refOk || !variantsOk) {
+    if (!entryLooksComplete(entry, entry?.expected_n_samples)) {
       resumeIndex = i;
       break;
     }

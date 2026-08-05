@@ -567,7 +567,7 @@ def prepare_clips(
 def parse_args(args=None):
     parser = argparse.ArgumentParser(
         description=(
-            "Prepare 10s clips for the 8-condition ablation MUSHRA "
+            "Prepare 10s clips for the 8-condition ablation listening test "
             "(stem trials × listening categories)."
         ),
     )

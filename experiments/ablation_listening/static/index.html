@@ -10,9 +10,13 @@
 <body>
   <div class="landing">
     <h1>Ablation Listening Test</h1>
-    <p class="subtitle">Compare blinded A2/B1/B2 samples against a visible <strong>Reference (A1)</strong>. Rate blind samples on content (vs reference) and realism. Rate reference realism only.</p>
+    <p class="subtitle">
+      Each page is one musical excerpt. Play the labeled <strong>Reference</strong>,
+      then rate several unlabeled versions on <strong>content</strong> (vs Reference)
+      and <strong>realism</strong>.
+    </p>
 
-    <p>Use wired headphones in a quiet room. All samples in a trial were generated from the same MIDI.</p>
+    <p>Use headphones in a quiet room if you can. All samples on a page come from the same musical excerpt.</p>
 
     <table class="scale-table">
       <thead>
@@ -28,9 +32,8 @@
     </table>
 
     <p class="hint">Click a band for a quick rating (snaps to 10, 30, 50, 70, or 90). Drag the slider or type a number for a precise score.</p>
-    <p class="hint">Remote access: host with <code>--host 0.0.0.0</code> and share via <code>ngrok http 8767</code>.</p>
 
-    <a class="primary-btn" href="/test?seed=42">Start test</a>
+    <a class="primary-btn" href="/test">Start test</a>
   </div>
 </body>
 </html>

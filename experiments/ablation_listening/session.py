@@ -5,15 +5,18 @@ from __future__ import annotations
 import random
 import string
 
-from synthesis.listening.catalog import CONDITION_ORDER
+from experiments.ablation_listening.conditions import ABLATION_MUSHRA_CONDITIONS
+from experiments.ablation_listening.equivalence import (
+    trial_equivalences,
+    unique_condition_ids,
+)
 
 REFERENCE_CONDITION = "basic"
-VARIANT_CONDITIONS = tuple(c for c in CONDITION_ORDER if c != REFERENCE_CONDITION)
 
 RUBRICS = {
     "content": {
         "label": "Content",
-        "help": "Same melody, rhythm, and timing as the reference (A1)?",
+        "help": "Same melody, rhythm, and timing as the Reference?",
     },
     "realism_stem": {
         "label": "Realism",
@@ -60,12 +63,13 @@ def trial_order(trial_ids: list[str], session_seed: int) -> list[str]:
     return ordered
 
 
-def variant_condition_ids() -> list[str]:
-    return list(VARIANT_CONDITIONS)
+def unique_blind_condition_ids(trial: dict) -> list[str]:
+    """Conditions shown as blind samples (includes ``basic`` when not a donor-copy omit)."""
+    return unique_condition_ids(ABLATION_MUSHRA_CONDITIONS, trial_equivalences(trial))
 
 
 def default_condition_ids() -> list[str]:
-    return list(CONDITION_ORDER)
+    return list(ABLATION_MUSHRA_CONDITIONS)
 
 
 def storage_key(test_id: str, session_seed: int) -> str:

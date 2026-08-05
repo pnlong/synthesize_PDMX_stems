@@ -6,6 +6,7 @@ from pathlib import Path
 
 import yaml
 
+from experiments.ablation_listening.equivalence import trial_equivalences
 from experiments.ablation_listening.paths import (
     DEFAULT_CLIPS_DIR,
     DEFAULT_MANIFEST,
@@ -13,10 +14,11 @@ from experiments.ablation_listening.paths import (
 )
 from experiments.ablation_listening.session import (
     REFERENCE_CONDITION,
+    RUBRICS,
     blinded_condition_order,
     realism_rubric,
     trial_order,
-    variant_condition_ids,
+    unique_blind_condition_ids,
 )
 from synthesis.listening.catalog import CONDITION_LABELS
 
@@ -43,13 +45,14 @@ class AblationListeningCatalog:
             "n_trials": len(trial_ids),
             "trial_order": trial_ids,
             "rubrics": {
-                "content": {
-                    "label": "Content",
-                    "help": "Same melody, rhythm, and timing as the reference (A1)?",
-                },
+                "content": RUBRICS["content"],
                 "reference": {
                     "label": "Reference (A1)",
-                    "help": "Basic Fluidsynth synthesis — content ground truth; rate realism only.",
+                    "help": (
+                        "Basic Fluidsynth synthesis — play-only content ground truth. "
+                        "Compare blind samples to this Reference; one blind sample may "
+                        "match it."
+                    ),
                 },
                 "realism_stem": realism_rubric("stem"),
                 "realism_mix": realism_rubric("mixture"),
@@ -74,6 +77,8 @@ class AblationListeningCatalog:
 
         audio_format = trial.get("audio_format") or "mp3"
         conditions = trial.get("conditions") or {}
+        equivalences = trial_equivalences(trial)
+        blind_ids = unique_blind_condition_ids(trial)
 
         ref_path = conditions.get(REFERENCE_CONDITION)
         if not ref_path:
@@ -87,7 +92,7 @@ class AblationListeningCatalog:
         }
 
         ordered = blinded_condition_order(
-            variant_condition_ids(),
+            blind_ids,
             trial_id=trial_id,
             session_seed=session_seed,
         )
@@ -114,6 +119,8 @@ class AblationListeningCatalog:
             "clip_seconds": trial.get("clip_seconds"),
             "reference": reference,
             "samples": samples,
+            "n_unique": len(samples),
+            "equivalences": equivalences,
             "realism_rubric": realism_rubric(str(trial.get("type") or "stem")),
         }
 

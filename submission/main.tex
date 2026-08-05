@@ -19,7 +19,7 @@ Large multitrack audio datasets enable training of generative and separation mod
 We present \textbf{sPDMX}, a pipeline that converts the public-domain symbolic corpus PDMX into multi-stem audio with controllable synthesis quality.
 Starting from FluidSynth renders, we introduce Slakh-style per-category soundfont variety, optional neural DDSP synthesis, and Stable Audio~3 audio-to-audio ``realify.''
 Per-category rendering and realify settings are locked via blinded tuning listening tests.
-We then compare eight factorial ablation conditions in a dual-scale webMUSHRA study (content adherence and realism) and select a production recipe for the full dataset.
+We then compare eight factorial ablation conditions in a dual-scale listening study (content adherence and realism) and select a production recipe for the full dataset.
 Finally, we train Stable Audio Open from scratch on Slakh2100 versus sPDMX and evaluate listener preference on held-out generations.
 % Results placeholders filled after studies complete.
 \end{abstract}
@@ -69,7 +69,7 @@ We treat these as optional render paths within a broader factorial design rather
 
 \textbf{Generative audio and evaluation.}
 Stable Audio Open~\cite{evans2024stable} is our downstream training target; SA3~\cite{evans2026stable} supplies audio-to-audio realify.
-Subjective evaluation follows MUSHRA~\cite{bs1534} via webMUSHRA~\cite{schoeffler2018webmushra}, with separate content and realism scales.
+Subjective evaluation uses a custom dual-scale web listening interface (content and realism, 0--100), with a labeled open reference and shuffled unlabeled conditions per excerpt.
 
 \section{Method}
 \label{sec:method}
@@ -123,27 +123,27 @@ For Slakh patches, phases compared candidate soundfont banks and then FX profile
 For SA3 presets, phased sweeps over \texttt{init\_noise\_level}, prompt variant, and diffusion hyperparameters produced per-category winners; categories for which realify harmed quality (e.g., mallet, organ) disable realify in production.
 Locked configs define the engineered A2/B1/B2 (and DDSP variants) used in the formal ablation study.
 
-\section{Listening study: ablation MUSHRA}
+\section{Listening study: ablation}
 \label{sec:listening}
 
-We conducted a formal dual-scale MUSHRA~\cite{bs1534} using webMUSHRA~\cite{schoeffler2018webmushra} over all eight conditions in Table~\ref{tab:ablations}.
-The open reference was A1 (basic); the same signal also appeared as a hidden reference among the eight shuffled conditions.
-Each trial presented a $\sim$10\,s stem excerpt.
-Listeners completed two pages per excerpt---\emph{content adherence} and \emph{realism}---on a 0--100 scale.
-The trial set comprised 2 stems $\times$ 10 listening categories (piano, drums, strings, wind, voice, mallet, organ, guitar, brass, polyphonic), for 20 excerpts and 40 rating pages.
+We conducted a formal dual-scale listening study over all eight conditions in Table~\ref{tab:ablations}.
+The open reference was A1 (basic); the same signal also appeared as a hidden reference among the shuffled unlabeled conditions when present.
+Each trial presented a $\sim$10\,s stem excerpt on a single page: listeners rated every unique condition on both \emph{content adherence} and \emph{realism} (0--100).
+Donor-copy DDSP fallbacks identical to their soundfont donors were omitted from the page and assigned the donor scores at aggregation.
+The trial set comprised 2 stems $\times$ 10 listening categories (piano, drums, strings, wind, voice, mallet, organ, guitar, brass, polyphonic), for 20 rating pages.
 We collected responses from $N{=}\textit{[TBD]}$ listeners.
 
 \subsection{Results}
 \label{ssec:mushra_results}
 
 Table~\ref{tab:mushra} summarizes mean scores (\textit{placeholder}).
-% TODO: replace with aggregate_webmushra output.
+% TODO: replace with aggregate.py output.
 Overall, condition \textbf{[TBD, e.g.\ B2]} achieved the best trade-off between content and realism and was selected as the production recipe for full-scale sPDMX.
 Per-category breakdowns (not shown for space) informed remaining realify bypasses and shortlist adjustments.
 
 \begin{table}[t]
 \centering
-\caption{Ablation MUSHRA means (0--100). \textit{Placeholder---replace after aggregation.}}
+\caption{Ablation listening means (0--100). \textit{Placeholder---replace after aggregation.}}
 \label{tab:mushra}
 \vspace{1mm}
 \small
@@ -166,7 +166,7 @@ CB2 & -- & -- \\
 \section{Engineered sPDMX}
 \label{sec:engineered}
 
-Using the MUSHRA-selected recipe and the locked per-category Slakh/SA3 configs from Section~\ref{ssec:tuning}, we rendered the full PDMX-derived release set.
+Using the listening-selected recipe and the locked per-category Slakh/SA3 configs from Section~\ref{ssec:tuning}, we rendered the full PDMX-derived release set.
 Each song directory contains mono stems and a loudness-normalized mixture~\cite{series2011algorithms}.
 Metadata from PDMX (paths, instrumentation, durations) is retained alongside stem inventories so that models can train on stems, mixtures, or both.
 Where neural DDSP coverage is incomplete, soundfont fallbacks preserve full song completeness.
@@ -177,7 +177,7 @@ Vocal stems use the soundfont (+ optional realify) path; lyric-conditioned singi
 
 To test whether listening-tuned large-scale stems improve generative modeling, we trained Stable Audio Open~\cite{evans2024stable} from scratch under matched budgets on (i)~Slakh2100~\cite{manilow2019cutting} and (ii)~sPDMX rendered with the Section~\ref{sec:listening} winner.
 Both models generated audio for a fixed set of held-out text prompts.
-In a second listening test, participants rated pairs (or MUSHRA-style sets) of generations on content relevance to the prompt and perceived audio realism, and indicated overall preference.
+In a second listening test, participants rated pairs of generations on content relevance to the prompt and perceived audio realism, and indicated overall preference.
 
 \subsection{Results}
 \label{ssec:sao_results}
@@ -205,7 +205,7 @@ sPDMX (winner) & -- & -- & -- \\
 \label{sec:conclusion}
 
 We presented sPDMX, a listening-tuned pipeline that turns PDMX into multi-stem audio via Slakh-style soundfont variety, optional DDSP, and SA3 realify.
-Ablation MUSHRA guided the production recipe; training SAO on sPDMX versus Slakh2100 tested downstream value of that recipe.
+Ablation listening guided the production recipe; training SAO on sPDMX versus Slakh2100 tested downstream value of that recipe.
 Future work includes broader listener pools, automatic content-fidelity gates, and releasing configs alongside the dataset for reproducible regeneration.
 
 % Provenance note (brief): FluidSynth soundfonts; MIDI-DDSP/URMP; DDSP-Piano/MAESTRO; SA3 licensed weights.

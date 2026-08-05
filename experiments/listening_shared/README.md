@@ -18,24 +18,16 @@ Listeners rate **content** and **realism** on a continuous **0–100** scale:
 
 ## ngrok hosting
 
-**Ablation test (webMUSHRA, recommended):**
-
-```bash
-uv run python -m experiments.ablation_listening.generate_webmushra
-uv run python -m experiments.ablation_listening.serve_webmushra --host 0.0.0.0 --port 8767
-ngrok http 8767
-```
-
-Open `http://127.0.0.1:8767/?config=spdmx_ablation.yaml`. Requires PHP. Results: `third_party/webMUSHRA/results/spdmx_ablation/mushra.csv`.
-
-**Legacy custom slider UI:**
+**Ablation test:**
 
 ```bash
 uv run python -m experiments.ablation_listening.serve --host 0.0.0.0 --port 8767
 ngrok http 8767
 ```
 
-Share the `https://….ngrok-free.app` URL with listeners. webMUSHRA saves CSV server-side; the legacy UI saves JSON under `output/responses/`.
+Open `http://127.0.0.1:8767/test`. Results save as JSON under `experiments/ablation_listening/output/responses/`.
+
+Share the `https://….ngrok-free.app` URL with listeners.
 
 **Remote listening tips:**
 - Use wired headphones when possible

@@ -24,13 +24,10 @@
 
     <div id="setup" class="test-panel">
       <h2>Before you begin</h2>
-      <p class="hint">Enter a listener ID (your name or initials). Responses save automatically as you go.</p>
+      <p class="hint">Enter a listener ID (your name or initials). Responses save automatically as you go. Trial order is shuffled each time you start.</p>
       <div class="listener-form">
         <label>Listener ID
-          <input id="listener-id" type="text" required placeholder="phillip">
-        </label>
-        <label>Session seed (optional)
-          <input id="session-seed" type="number" value="42">
+          <input id="listener-id" type="text" required placeholder="Enter ID here">
         </label>
       </div>
       <button id="start-btn" type="button" class="primary-btn">Begin trials</button>
@@ -52,14 +49,14 @@
       </section>
 
       <section id="reference-section" class="reference-section hidden">
-        <h3>Reference (A1 — basic synthesis)</h3>
-        <p class="hint">Content ground truth. Compare blind samples to this reference. Rate realism only.</p>
+        <h3>Reference</h3>
+        <p class="hint">Play-only. Compare each blind sample to this Reference. One blind sample may match it.</p>
         <div id="reference-audio" class="audio-slot"></div>
-        <div id="reference-sliders"></div>
+        <div id="reference-sliders" class="hidden"></div>
       </section>
 
       <section class="samples-section">
-        <h3>Rate blind samples (A2 / B1 / B2)</h3>
+        <h3 id="samples-heading">Rate blind samples</h3>
         <p id="rubric-hint" class="rubric-hint"></p>
         <div id="samples" class="samples"></div>
       </section>

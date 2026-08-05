@@ -150,7 +150,39 @@ code {
 .nav-footer {
   display: flex;
   justify-content: space-between;
+  gap: 1rem;
   margin-top: 1.5rem;
+}
+
+.nav-footer button {
+  padding: 0.65rem 1.1rem;
+  border-radius: 8px;
+  border: 1px solid var(--accent);
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.nav-footer button:hover:not(:disabled) {
+  background: rgba(110, 168, 254, 0.18);
+}
+
+.nav-footer button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  border-color: var(--border);
+}
+
+#next-btn:not(:disabled) {
+  background: var(--accent);
+  color: #0f1117;
+  border-color: var(--accent);
+}
+
+#next-btn:not(:disabled):hover {
+  filter: brightness(1.08);
 }
 
 .loading,
