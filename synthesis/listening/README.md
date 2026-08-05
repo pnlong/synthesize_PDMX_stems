@@ -18,6 +18,8 @@ The server prefers `{OUTPUT_DIR}/dev/ablations/clips/` when that tree has condit
 
 By default (`LISTENING_PREFER_SUMMABLE = True` in `shared/config.py`), each logical condition (`basic`, …) **requires** the sibling `{condition}_summable` tree from `synthesis.mix --no-overwrite` (no silent fallback to raw). If any of the eight are missing, the catalog/server errors. Set that constant to `False` to audition raw synthesis stems instead.
 
+Mixtures: if `mixture.*` is missing, the server sums the song’s stems on the fly (for summable trees that is the intended mix).
+
 ```bash
 # Mix all 8 ablations into *_summable (keeps raw untouched; no mixture files)
 bash synthesis/mix_ablations.sh

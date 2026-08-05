@@ -94,16 +94,26 @@ class ListeningHandler(BaseHTTPRequestHandler):
             return
         condition, song_id, filename = parsed
         audio_path = self.catalog.resolve_audio_path(condition, song_id, filename)
-        if audio_path is None:
-            self._send_error(HTTPStatus.NOT_FOUND, "Audio not found")
+        if audio_path is not None:
+            self._send_file(audio_path)
             return
-        self._send_file(audio_path)
+        # Summable trees often omit mixture.*; sum stems on demand.
+        stem, ext = Path(filename).stem, Path(filename).suffix.lstrip(".").lower()
+        mime = AUDIO_MIME_TYPES.get(f".{ext}")
+        if stem == "mixture" and mime is not None:
+            data = self.catalog.mixture_audio_bytes(condition, song_id, ext)
+            if data is not None:
+                self._send_bytes(data, mime)
+                return
+        self._send_error(HTTPStatus.NOT_FOUND, "Audio not found")
 
     def _send_file(self, audio_path: Path) -> None:
         mime = AUDIO_MIME_TYPES.get(audio_path.suffix.lower()) or mimetypes.guess_type(
             str(audio_path)
         )[0] or "application/octet-stream"
-        data = audio_path.read_bytes()
+        self._send_bytes(audio_path.read_bytes(), mime)
+
+    def _send_bytes(self, data: bytes, mime: str) -> None:
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", mime)
         self.send_header("Content-Length", str(len(data)))

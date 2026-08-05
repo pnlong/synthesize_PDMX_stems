@@ -39,7 +39,7 @@ All condition dirs under the ablations root must have matching stem audio for se
 ### 3. Prepare trial clips
 
 ```bash
-uv run python -m experiments.ablation_listening.prepare_clips
+uv run python -m experiments.ablation_listening.prepare_clips -j 8
 # shorter: --stems-per-category 1
 ```
 
@@ -62,6 +62,8 @@ ngrok http 8767
 ```
 
 Open: `http://127.0.0.1:8767/?config=spdmx_ablation.yaml`
+
+Participant invite draft: [`PARTICIPANT_EMAIL.md`](PARTICIPANT_EMAIL.md)
 
 Results CSV: `third_party/webMUSHRA/results/spdmx_ablation/mushra.csv`
 

@@ -339,6 +339,51 @@ def write_flac(waveform: torch.Tensor, path: Path) -> Path:
     return path
 
 
+def list_stem_paths(
+    song_dir: Path,
+    audio_format: str = DEFAULT_AUDIO_FORMAT,
+    *,
+    require_valid: bool = True,
+) -> list[Path]:
+    """Sorted ``stem_*.{ext}`` paths under ``song_dir`` (missing dir → empty)."""
+    if not song_dir.is_dir():
+        return []
+    paths = sorted(song_dir.glob(f"stem_*.{audio_format}"))
+    if require_valid:
+        return [p for p in paths if stem_is_valid(p)]
+    return paths
+
+
+def sum_stems_in_song_dir(
+    song_dir: Path,
+    audio_format: str = DEFAULT_AUDIO_FORMAT,
+) -> torch.Tensor:
+    """Load valid stems and return their sample-wise sum (pad to equal length).
+
+    For ``*_summable`` trees the mix is exactly this sum (peak already baked in).
+    Applies Slakh-style peak limiting only if the sum exceeds ``MIXTURE_PEAK_LIMIT``.
+    """
+    stem_paths = list_stem_paths(song_dir, audio_format, require_valid=True)
+    if not stem_paths:
+        raise FileNotFoundError(f"No valid stems under {song_dir}")
+    waveforms = [load_stem(path) for path in stem_paths]
+    mixture, _peak_gain = build_mixture(waveforms)
+    return mixture
+
+
+def encode_audio_bytes(
+    waveform: torch.Tensor,
+    audio_format: str = DEFAULT_AUDIO_FORMAT,
+) -> bytes:
+    """Encode a waveform to in-memory ``mp3`` / ``flac`` bytes."""
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / f"audio.{audio_format}"
+        write_audio(waveform, path, audio_format)
+        return path.read_bytes()
+
+
 def write_audio(
     waveform: torch.Tensor,
     path: Path,

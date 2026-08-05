@@ -16,7 +16,13 @@ from shared.config import (
     STEMS_FILE_NAME,
 )
 from shared.repo_symlinks import REPO_ABLATIONS_SYMLINK
-from synthesis.audio import mixture_filename, stem_filename
+from synthesis.audio import (
+    encode_audio_bytes,
+    list_stem_paths,
+    mixture_filename,
+    stem_filename,
+    sum_stems_in_song_dir,
+)
 from synthesis.patches import LISTENING_CATEGORY_GM_CLASSES, resolve_probe_category
 from synthesis.paths import ablations_root
 from synthesis.realify.captions.generate import generate_captions_from_tables
@@ -162,6 +168,29 @@ def _audio_cell(
     return {
         "available": available,
         "url": f"/audio/{target_condition}/{song_id}/{filename}" if available else None,
+    }
+
+
+def _mixture_cell(
+    ablations_dir: Path,
+    reference_condition: str,
+    song_path: str | Path,
+    target_condition: str,
+    audio_format: str,
+) -> dict:
+    """Mixture URL: on-disk ``mixture.*``, or summable-from-stems when mix file is absent."""
+    song_dir = _song_dir_for_condition(
+        ablations_dir, reference_condition, song_path, target_condition
+    )
+    filename = mixture_filename(audio_format)
+    has_file = (song_dir / filename).is_file()
+    has_stems = bool(list_stem_paths(song_dir, audio_format, require_valid=False))
+    available = has_file or has_stems
+    song_id = song_id_from_path(song_path)
+    return {
+        "available": available,
+        "url": f"/audio/{target_condition}/{song_id}/{filename}" if available else None,
+        "from_stems": available and not has_file,
     }
 
 
@@ -407,16 +436,16 @@ class AblationCatalog:
 
         mixture_filename_str = mixture_filename(audio_format)
         mixture = {
-            condition: _audio_cell(
+            condition: _mixture_cell(
                 self.ablations_dir,
                 self.reference_condition,
                 song_path,
                 condition,
-                mixture_filename_str,
+                audio_format,
             )
             for condition in CONDITION_ORDER
         } if self.include_mixtures else {
-            condition: {"available": False, "url": None}
+            condition: {"available": False, "url": None, "from_stems": False}
             for condition in CONDITION_ORDER
         }
 
@@ -469,6 +498,38 @@ class AblationCatalog:
                     return None
                 return audio_path if audio_path.is_file() else None
         return None
+
+    def resolve_song_dir(self, condition: str, song_id: str) -> Path | None:
+        if condition not in CONDITION_ORDER:
+            return None
+        if ".." in Path(song_id).parts:
+            return None
+        for _, row in self._songs_df.iterrows():
+            if song_id_from_path(row["path"]) == song_id:
+                song_dir = _song_dir_for_condition(
+                    self.ablations_dir,
+                    self.reference_condition,
+                    row["path"],
+                    condition,
+                ).resolve()
+                if not str(song_dir).startswith(str(self.ablations_dir)):
+                    return None
+                return song_dir
+        return None
+
+    def mixture_audio_bytes(self, condition: str, song_id: str, audio_format: str) -> bytes | None:
+        """Return on-disk mixture bytes, or sum stems when ``mixture.*`` is missing."""
+        song_dir = self.resolve_song_dir(condition, song_id)
+        if song_dir is None:
+            return None
+        mix_path = song_dir / mixture_filename(audio_format)
+        if mix_path.is_file():
+            return mix_path.read_bytes()
+        try:
+            mixture = sum_stems_in_song_dir(song_dir, audio_format)
+        except FileNotFoundError:
+            return None
+        return encode_audio_bytes(mixture, audio_format)
 
 
 def _na_to_none(value) -> str | None:

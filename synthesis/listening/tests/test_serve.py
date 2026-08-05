@@ -98,3 +98,31 @@ def test_parse_audio_request_rejects_traversal():
 
 def test_parse_audio_request_rejects_invalid_condition():
     assert parse_audio_request("/audio/unknown/7/19/QmTest/mixture.mp3") is None
+
+
+def test_serves_mixture_summed_from_stems(tmp_path):
+    import numpy as np
+    import soundfile as sf
+
+    from synthesis.listening.catalog import AblationCatalog
+    from synthesis.listening.tests.test_catalog import _write_ablation_tree
+
+    _write_ablation_tree(tmp_path)
+    song_dir = tmp_path / "basic" / "data" / "7/19/QmTestSong"
+    (song_dir / "mixture.mp3").unlink()
+    # Replace placeholder bytes with real audio so summing works.
+    sr = 44100
+    for track in range(2):
+        sf.write(
+            str(song_dir / f"stem_{track}.mp3"),
+            np.full(sr, 0.1 * (track + 1), dtype=np.float32),
+            sr,
+            format="MP3",
+        )
+
+    catalog = AblationCatalog(tmp_path)
+    handler = _handler(catalog)
+    handler.path = "/audio/basic/7/19/QmTestSong/mixture.mp3"
+    handler.do_GET()
+    assert handler._last_status == HTTPStatus.OK
+    assert len(handler.wfile.getvalue()) > 100

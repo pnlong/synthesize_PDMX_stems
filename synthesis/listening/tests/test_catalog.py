@@ -152,6 +152,18 @@ def test_missing_realify_audio_marked_unavailable(tmp_path: Path):
     assert detail["mixture"]["basic_realify"]["available"] is False
 
 
+def test_mixture_available_from_stems_when_mix_file_missing(tmp_path: Path):
+    _write_ablation_tree(tmp_path)
+    song_dir = tmp_path / "basic" / "data" / "7/19/QmTestSong"
+    (song_dir / "mixture.mp3").unlink()
+    catalog = AblationCatalog(tmp_path)
+    detail = catalog.get_song("7/19/QmTestSong")
+    cell = detail["mixture"]["basic"]
+    assert cell["available"] is True
+    assert cell["from_stems"] is True
+    assert cell["url"] == "/audio/basic/7/19/QmTestSong/mixture.mp3"
+
+
 def test_resolve_audio_path_rejects_traversal(tmp_path: Path):
     _write_ablation_tree(tmp_path)
     catalog = AblationCatalog(tmp_path)
