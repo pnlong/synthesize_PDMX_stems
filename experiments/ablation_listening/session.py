@@ -72,8 +72,14 @@ def default_condition_ids() -> list[str]:
     return list(ABLATION_MUSHRA_CONDITIONS)
 
 
-def storage_key(test_id: str, session_seed: int) -> str:
-    return f"ablation_listening_{test_id}_{session_seed}"
+def storage_key(test_id: str, session_seed: int, listener_id: str = "") -> str:
+    safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in str(listener_id or "anon"))
+    return f"ablation_listening_{test_id}_{safe}_{session_seed}"
+
+
+def safe_listener_id(listener_id: str | None) -> str:
+    text = str(listener_id or "anonymous").strip() or "anonymous"
+    return "".join(c if c.isalnum() or c in "-_" else "_" for c in text)
 
 
 def realism_rubric(trial_type: str) -> dict:

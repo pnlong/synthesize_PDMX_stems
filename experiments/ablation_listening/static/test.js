@@ -5,11 +5,42 @@ import {
 
 const params = new URLSearchParams(window.location.search);
 
+const LISTENER_STORAGE_KEY = "ablation_listening_listener_id";
+const SEED_STORAGE_KEY = "ablation_listening_session_seed";
+
 function freshSessionSeed() {
-  // New shuffle of trial order + blind labels on every start.
   const bytes = new Uint32Array(1);
   crypto.getRandomValues(bytes);
   return bytes[0] & 0x7fffffff;
+}
+
+function getOrCreateListenerId() {
+  let id = localStorage.getItem(LISTENER_STORAGE_KEY);
+  if (id && /^[A-Za-z0-9_-]+$/.test(id)) {
+    return id;
+  }
+  // Stable per browser/profile so concurrent listeners never collide.
+  id = (crypto.randomUUID?.() || `L${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`)
+    .replace(/[^A-Za-z0-9_-]/g, "");
+  localStorage.setItem(LISTENER_STORAGE_KEY, id);
+  return id;
+}
+
+function readStoredSessionSeed() {
+  const raw = localStorage.getItem(SEED_STORAGE_KEY);
+  if (raw && /^\d+$/.test(raw)) {
+    return Number(raw);
+  }
+  return null;
+}
+
+function persistSessionSeed(seed) {
+  localStorage.setItem(SEED_STORAGE_KEY, String(seed));
+}
+
+function clearClientSession() {
+  localStorage.removeItem(LISTENER_STORAGE_KEY);
+  localStorage.removeItem(SEED_STORAGE_KEY);
 }
 
 const state = {
@@ -19,8 +50,8 @@ const state = {
   trialDetail: null,
   ratings: {},
   storageKey: null,
-  listenerId: "",
-  sessionSeed: freshSessionSeed(),
+  listenerId: getOrCreateListenerId(),
+  sessionSeed: readStoredSessionSeed() ?? freshSessionSeed(),
 };
 
 const setupEl = document.getElementById("setup");
@@ -43,9 +74,13 @@ const nextBtn = document.getElementById("next-btn");
 const saveBtn = document.getElementById("save-btn");
 const finishBtn = document.getElementById("finish-btn");
 const startBtn = document.getElementById("start-btn");
-const listenerInput = document.getElementById("listener-id");
+const sessionIdHintEl = document.getElementById("session-id-hint");
 const completeMessageEl = document.getElementById("complete-message");
 const completePathEl = document.getElementById("complete-path");
+
+if (sessionIdHintEl) {
+  sessionIdHintEl.textContent = `Session ID: ${state.listenerId}`;
+}
 
 async function fetchJson(url) {
   const response = await fetch(url);
@@ -131,6 +166,11 @@ function updateProgress() {
     `Trial ${state.trialIndex + 1} of ${state.trialOrder.length}${uniqueNote} · ${completedTrialCount()} complete`;
   finishBtn.disabled = completedTrialCount() !== state.trialOrder.length;
   saveBtn.disabled = false;
+  if (state.trialDetail) {
+    nextBtn.disabled = !isTrialComplete(state.trialDetail.id);
+    nextBtn.textContent =
+      state.trialIndex === state.trialOrder.length - 1 ? "All trials done" : "Next trial →";
+  }
 }
 
 function buildResponsesPayload(checkpoint = false) {
@@ -163,6 +203,7 @@ function buildResponsesPayload(checkpoint = false) {
     listener_id: state.listenerId,
     session_seed: state.sessionSeed,
     checkpoint,
+    complete: !checkpoint,
     ratings,
   };
 }
@@ -202,15 +243,15 @@ function renderTrial() {
   const detail = state.trialDetail;
   if (!detail) return;
 
-  const typeLabel = detail.type === "mixture" ? "Mixture" : `Stem · ${detail.category || "unknown"}`;
-  trialTitleEl.textContent = `${typeLabel} — ${detail.id}`;
-  trialMetaEl.textContent = [
-    detail.song_id,
-    detail.track != null ? `track ${detail.track}` : null,
-    detail.clip_seconds != null ? `${detail.clip_seconds}s clip` : null,
-    detail.n_unique != null ? `${detail.n_unique} unique conditions` : null,
-  ].filter(Boolean).join(" · ");
-  trialNoteEl.textContent = detail.note || "";
+  if (detail.type === "mixture") {
+    trialTitleEl.textContent = "Mixture";
+  } else {
+    trialTitleEl.textContent = detail.category
+      ? detail.category.charAt(0).toUpperCase() + detail.category.slice(1)
+      : "Stem";
+  }
+  trialMetaEl.textContent = "";
+  trialNoteEl.textContent = "";
   rubricHintEl.textContent =
     `${state.meta.rubrics.content.help} Rate every blind sample on Content and Realism. `
     + "The Reference is play-only; one blind sample may match it.";
@@ -312,26 +353,41 @@ function renderTrial() {
 }
 
 async function startTest() {
-  state.listenerId = listenerInput.value.trim();
-  state.sessionSeed = freshSessionSeed();
-  if (!state.listenerId) {
-    alert("Please enter a listener ID.");
-    return;
+  state.listenerId = getOrCreateListenerId();
+  if (sessionIdHintEl) {
+    sessionIdHintEl.textContent = `Session ID: ${state.listenerId}`;
   }
 
   setupEl.classList.add("hidden");
   loadingEl.classList.remove("hidden");
 
-  state.meta = await fetchJson(`/api/meta?seed=${state.sessionSeed}`);
-  state.storageKey = state.meta.storage_key;
-  state.trialOrder = state.meta.trial_order;
-
   let serverPayload = { ratings: [] };
   try {
-    serverPayload = await fetchJson("/api/responses/session");
+    serverPayload = await fetchJson(
+      `/api/responses/session?listener_id=${encodeURIComponent(state.listenerId)}`,
+    );
   } catch {
     serverPayload = { ratings: [] };
   }
+
+  // Keep the same shuffle when resuming so blind labels stay aligned with saved scores.
+  const storedSeed = readStoredSessionSeed();
+  const serverSeed = Number(serverPayload.session_seed);
+  if (storedSeed != null) {
+    state.sessionSeed = storedSeed;
+  } else if (Number.isFinite(serverSeed) && serverSeed > 0) {
+    state.sessionSeed = serverSeed;
+  } else {
+    state.sessionSeed = freshSessionSeed();
+  }
+  persistSessionSeed(state.sessionSeed);
+
+  state.meta = await fetchJson(
+    `/api/meta?seed=${state.sessionSeed}&listener_id=${encodeURIComponent(state.listenerId)}`,
+  );
+  state.storageKey = state.meta.storage_key;
+  state.trialOrder = state.meta.trial_order;
+
   state.ratings = loadSavedRatings();
   for (const entry of serverPayload.ratings || []) {
     const mergedSamples = { ...(state.ratings[entry.trial_id]?.samples || {}) };
@@ -413,6 +469,7 @@ saveBtn.addEventListener("click", () => {
 finishBtn.addEventListener("click", () => {
   saveToServer(false)
     .then((result) => {
+      clearClientSession();
       testPanelEl.classList.add("hidden");
       completeEl.classList.remove("hidden");
       completeMessageEl.textContent = "Thank you — responses saved on the server.";

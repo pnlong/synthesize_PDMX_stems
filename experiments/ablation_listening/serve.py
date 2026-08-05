@@ -17,7 +17,7 @@ from experiments.ablation_listening.paths import (
     DEFAULT_MANIFEST,
     DEFAULT_RESPONSES_DIR,
 )
-from experiments.ablation_listening.session import storage_key
+from experiments.ablation_listening.session import safe_listener_id, storage_key
 from experiments.listening.json_util import json_safe
 
 MODULE_DIR = Path(__file__).resolve().parent
@@ -79,14 +79,17 @@ class AblationListeningHandler(BaseHTTPRequestHandler):
             return
 
         checkpoint = bool(payload.pop("checkpoint", False))
+        # Keep an explicit complete flag on disk (Finish writes complete=true).
+        if "complete" not in payload:
+            payload["complete"] = not checkpoint
         out_dir = self.catalog.responses_dir()
         out_dir.mkdir(parents=True, exist_ok=True)
+        listener = payload.get("listener_id") or "anonymous"
+        safe_listener = safe_listener_id(listener)
         if checkpoint:
-            out_path = self.catalog.session_responses_path()
+            out_path = self.catalog.session_responses_path(listener)
         else:
             timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-            listener = payload.get("listener_id") or "anonymous"
-            safe_listener = "".join(c if c.isalnum() or c in "-_" else "_" for c in str(listener))
             out_path = out_dir / f"responses_{safe_listener}_{timestamp}.json"
         out_path.write_text(json.dumps(json_safe(payload), indent=2))
         self._send_json({"saved": str(out_path), "checkpoint": checkpoint})
@@ -95,11 +98,18 @@ class AblationListeningHandler(BaseHTTPRequestHandler):
         session_seed = int((query.get("seed") or ["42"])[0])
         if path == "/api/meta":
             payload = self.catalog.meta(session_seed)
-            payload["storage_key"] = storage_key(self.catalog.test_id, session_seed)
+            listener = (query.get("listener_id") or [""])[0]
+            payload["storage_key"] = storage_key(
+                self.catalog.test_id, session_seed, listener,
+            )
             self._send_json(payload)
             return
         if path == "/api/responses/session":
-            session_path = self.catalog.session_responses_path()
+            listener = (query.get("listener_id") or [""])[0]
+            if not str(listener).strip():
+                self._send_error(HTTPStatus.BAD_REQUEST, "listener_id required")
+                return
+            session_path = self.catalog.session_responses_path(listener)
             if session_path.is_file():
                 self._send_json(json.loads(session_path.read_text()))
             else:

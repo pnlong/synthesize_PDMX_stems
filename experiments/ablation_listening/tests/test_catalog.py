@@ -155,3 +155,47 @@ def test_aggregate_expands_equivalences(tmp_path: Path):
     assert float(auto["content"]) == 90.0
     assert float(auto["realism"]) == 40.0
     assert auto["source_condition"] == "basic"
+
+
+def test_aggregate_skips_in_progress_files(tmp_path: Path):
+    from experiments.ablation_listening.aggregate import resolve_completed_response_paths
+
+    responses_dir = tmp_path / "responses"
+    responses_dir.mkdir()
+    done = {
+        "listener_id": "alice",
+        "complete": True,
+        "ratings": [{
+            "trial_id": "stem_drums_01",
+            "trial_type": "stem",
+            "category": "drums",
+            "samples": [
+                {"blind_label": "A", "condition_id": "basic", "content": 90, "realism": 40},
+                {"blind_label": "B", "condition_id": "slakh", "content": 80, "realism": 70},
+            ],
+        }],
+    }
+    progress = {
+        "listener_id": "bob",
+        "complete": False,
+        "ratings": [{
+            "trial_id": "stem_drums_01",
+            "trial_type": "stem",
+            "category": "drums",
+            "samples": [
+                {"blind_label": "A", "condition_id": "basic", "content": 10, "realism": 10},
+            ],
+        }],
+    }
+    done_path = responses_dir / "responses_alice_20260101T000000Z.json"
+    progress_path = responses_dir / "responses_in_progress_bob.json"
+    done_path.write_text(json.dumps(done))
+    progress_path.write_text(json.dumps(progress))
+
+    completed = resolve_completed_response_paths([responses_dir])
+    assert completed == [done_path.resolve()]
+
+    df, summary = aggregate_responses([responses_dir])
+    assert set(df["listener_id"]) == {"alice"}
+    assert summary["n_response_files"] == 1
+    assert float(df[df["condition_id"] == "basic"]["content"].iloc[0]) == 90.0

@@ -67,6 +67,33 @@ def _ablation_tree(tmp_path: Path) -> Path:
     return tmp_path
 
 
+def test_reference_has_audible_clip_rejects_sparse_end_burst(tmp_path: Path):
+    """Overall RMS can pass while material only fills the last ~2s — reject those."""
+    song_rel = "0/0/QmSparse"
+    for condition in ABLATION_MUSHRA_CONDITIONS:
+        song_dir = tmp_path / condition / "data" / song_rel
+        song_dir.mkdir(parents=True, exist_ok=True)
+        sr = 44100
+        audio = np.zeros(sr * 12, dtype=np.float32)
+        audio[sr * 10 :] = 0.3
+        sf.write(str(song_dir / "stem_0.mp3"), audio, sr, format="MP3")
+
+    basic = tmp_path / "basic"
+    pd.DataFrame([{
+        "path": str(basic / "data" / song_rel),
+        "track": 0,
+        "program": 0,
+        "is_drum": False,
+        "name": "Piano",
+        "has_lyrics": False,
+    }]).to_csv(basic / "stems.csv", index=False)
+
+    from experiments.ablation_listening.conditions import condition_roots
+
+    roots = condition_roots(tmp_path)
+    assert reference_has_audible_clip(song_rel, 0, roots) is False
+
+
 def test_reference_has_audible_clip_rejects_silent(tmp_path: Path):
     root = _ablation_tree(tmp_path)
     from experiments.ablation_listening.conditions import condition_roots

@@ -45,6 +45,25 @@ from synthesis.audio import (
 from synthesis.listening.catalog import default_ablations_dir, song_id_from_path
 from synthesis.patches import resolve_probe_category
 
+# Require material across most of the clip (reject silence + end-burst windows).
+DEFAULT_MIN_ACTIVE_FRACTION = 0.7
+
+
+def _find_dense_clip_start(
+    source_path: Path,
+    *,
+    clip_seconds: float,
+    min_rms: float = DEFAULT_MIN_RMS,
+    min_active_fraction: float = DEFAULT_MIN_ACTIVE_FRACTION,
+) -> float | None:
+    """Prefer a window with continuous material over sparse end-burst clips."""
+    return find_audible_clip_start(
+        source_path,
+        clip_seconds=clip_seconds,
+        min_rms=min_rms,
+        min_active_fraction=min_active_fraction,
+        prefer_densest=True,
+    )
 
 def _song_dir(root: Path, song_id: str) -> Path:
     return root / DATA_DIR_NAME / song_id
@@ -83,8 +102,9 @@ def reference_has_audible_clip(
     trial_type: str = "stem",
     clip_seconds: float = DEFAULT_CLIP_SECONDS,
     min_rms: float = DEFAULT_MIN_RMS,
+    min_active_fraction: float = DEFAULT_MIN_ACTIVE_FRACTION,
 ) -> bool:
-    """True when the A1 reference has a non-silent ``clip_seconds`` window."""
+    """True when the A1 reference has a dense non-silent ``clip_seconds`` window."""
     song_dir = _song_dir(roots[REFERENCE_CONDITION], song_id)
     audio_format = _detect_format(song_dir)
     if audio_format is None:
@@ -99,10 +119,11 @@ def reference_has_audible_clip(
         return False
     if is_silent(source_path, min_rms=min_rms):
         return False
-    return find_audible_clip_start(
+    return _find_dense_clip_start(
         source_path,
         clip_seconds=clip_seconds,
         min_rms=min_rms,
+        min_active_fraction=min_active_fraction,
     ) is not None
 
 
@@ -354,13 +375,16 @@ def _clip_reference_path(
     if not source_path.is_file():
         raise FileNotFoundError(f"Missing reference audio: {source_path}")
 
-    start = find_audible_clip_start(
+    start = _find_dense_clip_start(
         source_path,
         clip_seconds=clip_seconds,
         min_rms=DEFAULT_MIN_RMS,
     )
     if start is None:
-        raise RuntimeError(f"No audible {clip_seconds}s clip in {source_path}")
+        raise RuntimeError(
+            f"No dense audible {clip_seconds}s clip "
+            f"(need ≥{DEFAULT_MIN_ACTIVE_FRACTION:.0%} active) in {source_path}"
+        )
     return source_path, audio_format, start
 
 

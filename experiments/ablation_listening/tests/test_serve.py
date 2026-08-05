@@ -78,11 +78,6 @@ def test_post_responses(tmp_path: Path, monkeypatch):
     catalog = _write_manifest(tmp_path)
     responses_dir = tmp_path / "responses"
     monkeypatch.setattr(catalog, "responses_dir", lambda: responses_dir)
-    monkeypatch.setattr(
-        catalog,
-        "session_responses_path",
-        lambda: responses_dir / "responses_in_progress.json",
-    )
 
     handler = _handler(catalog)
     handler.catalog = catalog
@@ -96,4 +91,37 @@ def test_post_responses(tmp_path: Path, monkeypatch):
     handler.path = "/api/responses"
     handler.do_POST()
     assert handler._last_status == HTTPStatus.OK
-    assert (responses_dir / "responses_in_progress.json").is_file()
+    assert (responses_dir / "responses_in_progress_tester.json").is_file()
+
+
+def test_session_checkpoint_is_per_listener(tmp_path: Path, monkeypatch):
+    catalog = _write_manifest(tmp_path)
+    responses_dir = tmp_path / "responses"
+    monkeypatch.setattr(catalog, "responses_dir", lambda: responses_dir)
+
+    handler = _handler(catalog)
+    handler.catalog = catalog
+    for listener, score in (("alice", 10), ("bob", 20)):
+        body = json.dumps({
+            "listener_id": listener,
+            "checkpoint": True,
+            "ratings": [{"trial_id": "mix_01", "score": score}],
+        }).encode()
+        handler.headers = {"Content-Length": str(len(body))}
+        handler.rfile = BytesIO(body)
+        handler.wfile = BytesIO()
+        handler.path = "/api/responses"
+        handler.do_POST()
+        assert handler._last_status == HTTPStatus.OK
+
+    alice = json.loads((responses_dir / "responses_in_progress_alice.json").read_text())
+    bob = json.loads((responses_dir / "responses_in_progress_bob.json").read_text())
+    assert alice["ratings"][0]["score"] == 10
+    assert bob["ratings"][0]["score"] == 20
+
+    handler.wfile = BytesIO()
+    handler.path = "/api/responses/session?listener_id=alice"
+    handler.do_GET()
+    assert handler._last_status == HTTPStatus.OK
+    loaded = json.loads(handler.wfile.getvalue())
+    assert loaded["ratings"][0]["score"] == 10

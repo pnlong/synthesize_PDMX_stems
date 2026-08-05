@@ -197,6 +197,47 @@ def clip_rms(path: Path, *, clip_seconds: float, start_seconds: float = 0.0) -> 
     return float(np.sqrt(np.mean(np.square(audio))))
 
 
+def waveform_active_fraction(
+    waveform: np.ndarray,
+    *,
+    sample_rate: int = SAMPLE_RATE,
+    hop_seconds: float = 0.25,
+    min_rms: float = DEFAULT_MIN_RMS,
+) -> float:
+    """Fraction of short hops inside ``waveform`` whose RMS is >= ``min_rms``.
+
+    Used to reject windows that are mostly silence with a brief burst (e.g. only
+    the last second of a 10s clip is audible).
+    """
+    if waveform.size == 0:
+        return 0.0
+    if waveform.ndim == 2:
+        mono = np.mean(np.asarray(waveform, dtype=np.float32), axis=0)
+    else:
+        mono = np.asarray(waveform, dtype=np.float32).reshape(-1)
+
+    hop = max(1, int(hop_seconds * sample_rate))
+    n = int(mono.shape[0])
+    if n <= 0:
+        return 0.0
+    if n <= hop:
+        rms = float(np.sqrt(np.mean(np.square(mono))))
+        return 1.0 if rms >= min_rms else 0.0
+
+    starts = list(range(0, n - hop + 1, hop))
+    # Cover trailing samples when the last full hop doesn't reach the end.
+    if starts[-1] + hop < n:
+        starts.append(n - hop)
+
+    active = 0
+    for start in starts:
+        chunk = mono[start : start + hop]
+        rms = float(np.sqrt(np.mean(np.square(chunk))))
+        if rms >= min_rms:
+            active += 1
+    return active / len(starts)
+
+
 def find_audible_clip_start(
     path: Path,
     *,
@@ -204,8 +245,17 @@ def find_audible_clip_start(
     min_rms: float = DEFAULT_MIN_RMS,
     hop_seconds: float = 1.0,
     min_start_seconds: float = 0.0,
+    min_active_fraction: float = 0.0,
+    activity_hop_seconds: float = 0.25,
+    prefer_densest: bool = False,
 ) -> float | None:
-    """Return a start offset (seconds) where clip_seconds has RMS >= min_rms."""
+    """Return a start offset (seconds) where the clip window has enough material.
+
+    Always requires whole-window RMS >= ``min_rms``. When ``min_active_fraction``
+    > 0, also requires that fraction of short hops inside the window to be
+    audible (so sparse end-burst clips are rejected). When ``prefer_densest`` is
+    True, returns the qualifying window with the highest active fraction.
+    """
     if not stem_is_valid(path):
         return None
 
@@ -216,11 +266,35 @@ def find_audible_clip_start(
 
     hop_frames = max(1, int(hop_seconds * SAMPLE_RATE))
     first_frame = int(min_start_seconds * SAMPLE_RATE)
+    best_start: float | None = None
+    best_fraction = -1.0
+
     for start_frame in range(first_frame, total_frames - clip_frames + 1, hop_frames):
         start_seconds = start_frame / SAMPLE_RATE
-        if clip_rms(path, clip_seconds=clip_seconds, start_seconds=start_seconds) >= min_rms:
+        audio = clip_stem_waveform(
+            path,
+            clip_seconds=clip_seconds,
+            start_seconds=start_seconds,
+        )
+        if audio.size == 0:
+            continue
+        rms = float(np.sqrt(np.mean(np.square(audio))))
+        if rms < min_rms:
+            continue
+        fraction = waveform_active_fraction(
+            audio,
+            hop_seconds=activity_hop_seconds,
+            min_rms=min_rms,
+        )
+        if fraction < min_active_fraction:
+            continue
+        if not prefer_densest:
             return start_seconds
-    return None
+        if fraction > best_fraction:
+            best_fraction = fraction
+            best_start = start_seconds
+
+    return best_start
 
 
 def write_diverse_clip_dataset(

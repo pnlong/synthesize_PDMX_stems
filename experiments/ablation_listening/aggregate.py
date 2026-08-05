@@ -53,6 +53,46 @@ def load_responses(path: Path) -> dict:
         return json.load(f)
 
 
+def is_completed_responses_file(path: Path) -> bool:
+    """True for finished exports; false for in-progress checkpoints."""
+    name = Path(path).name
+    if "in_progress" in name:
+        return False
+    return name.endswith(".json")
+
+
+def resolve_completed_response_paths(paths: list[Path]) -> list[Path]:
+    """Expand files/dirs and drop in-progress checkpoint JSONs."""
+    resolved: list[Path] = []
+    seen: set[Path] = set()
+    for raw in paths:
+        path = Path(raw)
+        if path.is_dir():
+            candidates = sorted(path.glob("responses_*.json")) + sorted(
+                path.glob("responses.json")
+            )
+        elif path.exists():
+            candidates = [path]
+        else:
+            candidates = []
+        for candidate in candidates:
+            candidate = candidate.resolve()
+            if candidate in seen:
+                continue
+            if not is_completed_responses_file(candidate):
+                continue
+            # Prefer an explicit complete flag when present.
+            try:
+                doc = load_responses(candidate)
+            except (OSError, json.JSONDecodeError):
+                continue
+            if doc.get("complete") is False:
+                continue
+            seen.add(candidate)
+            resolved.append(candidate)
+    return resolved
+
+
 def ratings_dataframe(
     responses: dict,
     *,
@@ -284,9 +324,12 @@ def aggregate_responses(
     *,
     manifest_path: Path | None = None,
 ) -> tuple[pd.DataFrame, dict]:
+    completed = resolve_completed_response_paths(list(paths))
+    if not completed:
+        return pd.DataFrame(), {"error": "no completed response files"}
     equivalences = load_manifest_equivalences(manifest_path)
     frames = []
-    for path in paths:
+    for path in completed:
         df = ratings_dataframe(
             load_responses(path),
             equivalences_by_trial=equivalences,
@@ -297,6 +340,8 @@ def aggregate_responses(
         return pd.DataFrame(), {"error": "no ratings"}
     combined = pd.concat(frames, ignore_index=True)
     summary = summarize(combined)
+    summary["n_response_files"] = len(completed)
+    summary["response_files"] = [str(p) for p in completed]
     if "auto_assigned" in combined.columns:
         summary["n_auto_assigned"] = int(combined["auto_assigned"].sum())
     return combined, summary
@@ -307,9 +352,17 @@ def parse_args(args=None):
     parser.add_argument(
         "--responses",
         nargs="+",
-        required=True,
         type=Path,
-        help="One or more exported response JSON files.",
+        help=(
+            "Completed response JSON file(s) and/or directories. "
+            "In-progress checkpoints (responses_in_progress_*.json) are ignored."
+        ),
+    )
+    parser.add_argument(
+        "--responses-dir",
+        type=Path,
+        default=None,
+        help="Directory of response JSONs (default: experiments/ablation_listening/output/responses).",
     )
     parser.add_argument(
         "--output",
@@ -326,16 +379,33 @@ def parse_args(args=None):
 
 
 def main(args=None) -> None:
+    from experiments.ablation_listening.paths import DEFAULT_RESPONSES_DIR
+
     opts = parse_args(args)
-    _, summary = aggregate_responses(opts.responses, manifest_path=opts.manifest)
+    sources: list[Path] = list(opts.responses or [])
+    if opts.responses_dir is not None:
+        sources.append(opts.responses_dir)
+    elif not sources:
+        sources.append(DEFAULT_RESPONSES_DIR)
+
+    completed = resolve_completed_response_paths(sources)
+    if not completed:
+        raise FileNotFoundError(
+            "No completed response files found "
+            f"(looked in: {', '.join(str(s) for s in sources)}). "
+            "Finish the test (not just checkpoints) before aggregating."
+        )
+
+    _, summary = aggregate_responses(completed, manifest_path=opts.manifest)
     opts.output.parent.mkdir(parents=True, exist_ok=True)
-    markdown = render_markdown(summary, responses_path=opts.responses[0])
+    markdown = render_markdown(summary, responses_path=completed[0])
     opts.output.write_text(markdown)
     json_path = opts.output.with_suffix(".json")
     json_path.write_text(json.dumps(summary, indent=2))
     print(markdown)
     print(f"Wrote {opts.output}")
     print(f"Wrote {json_path}")
+    print(f"Used {len(completed)} completed response file(s)")
     n_auto = summary.get("n_auto_assigned") or 0
     if n_auto:
         print(f"Auto-assigned {n_auto} ratings from donor equivalences")

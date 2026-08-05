@@ -17,6 +17,7 @@ from experiments.ablation_listening.session import (
     RUBRICS,
     blinded_condition_order,
     realism_rubric,
+    safe_listener_id,
     trial_order,
     unique_blind_condition_ids,
 )
@@ -144,7 +145,7 @@ class AblationListeningCatalog:
             return self.manifest_path.parent / "output" / "responses"
         return DEFAULT_RESPONSES_DIR
 
-    def session_responses_path(self) -> Path:
+    def session_responses_path(self, listener_id: str | None = None) -> Path:
         out = self.responses_dir()
         out.mkdir(parents=True, exist_ok=True)
-        return out / "responses_in_progress.json"
+        return out / f"responses_in_progress_{safe_listener_id(listener_id)}.json"

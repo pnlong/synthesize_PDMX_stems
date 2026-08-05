@@ -16,9 +16,11 @@ from experiments.preset_sweep.config import (
     noise_variant_id,
 )
 from experiments.preset_sweep.diverse_stems import (
+    find_audible_clip_start,
     is_silent,
     replace_silent_probe_clips,
     select_diverse_stems,
+    waveform_active_fraction,
     write_diverse_clip_dataset,
 )
 from experiments.preset_sweep.winners import record_phase_winners
@@ -104,6 +106,53 @@ def test_noise_audit_winners_prefers_realism_after_content_gate_and_lowers_phase
     )
     assert winners_df.iloc[0]["variant_id"] == "noise0.35"
     assert revisions == {"piano": "noise0.35"}
+
+
+def test_find_audible_clip_start_rejects_end_burst_when_dense_required(tmp_path: Path):
+    """A loud last 2s inside a mostly-silent file must not pass min_active_fraction=0.5."""
+    path = tmp_path / "end_burst.flac"
+    sr = 44100
+    audio = np.zeros(sr * 12, dtype=np.float32)
+    audio[sr * 10 :] = 0.3
+    sf.write(str(path), audio, sr, format="FLAC")
+
+    assert find_audible_clip_start(path, clip_seconds=10.0, min_rms=0.01) is not None
+    assert (
+        find_audible_clip_start(
+            path,
+            clip_seconds=10.0,
+            min_rms=0.01,
+            min_active_fraction=0.5,
+        )
+        is None
+    )
+
+
+def test_find_audible_clip_start_prefers_densest_window(tmp_path: Path):
+    path = tmp_path / "dense.flac"
+    sr = 44100
+    audio = np.zeros(sr * 20, dtype=np.float32)
+    # Material starts at t=8s; densest 10s window begins there.
+    audio[sr * 8 : sr * 20] = 0.25
+    sf.write(str(path), audio, sr, format="FLAC")
+
+    start = find_audible_clip_start(
+        path,
+        clip_seconds=10.0,
+        min_rms=0.01,
+        min_active_fraction=0.5,
+        prefer_densest=True,
+    )
+    assert start is not None
+    assert start >= 8.0
+
+
+def test_waveform_active_fraction_half_active():
+    sr = 44100
+    audio = np.zeros((1, sr * 4), dtype=np.float32)
+    audio[:, sr * 2 :] = 0.2
+    fraction = waveform_active_fraction(audio, hop_seconds=0.5, min_rms=0.01)
+    assert 0.45 <= fraction <= 0.55
 
 
 def test_select_diverse_stems_filters_silence_and_short_audio(tmp_path: Path, monkeypatch):
