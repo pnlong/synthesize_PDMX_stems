@@ -11,6 +11,7 @@ analysis/output
 synthesis/ablations_output
 experiments/preset_sweep/output
 experiments/patch_sweep/output
+experiments/ablation_listening/output/
 
 # webMUSHRA (clone locally; see experiments/ablation_listening/README.md)
 third_party/webMUSHRA/
