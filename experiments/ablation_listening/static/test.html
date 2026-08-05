@@ -44,10 +44,20 @@
         <p id="trial-note" class="note"></p>
       </section>
 
+      <section id="player-section" class="player-section">
+        <canvas id="waveform" class="waveform" width="800" height="72" aria-label="Shared loop waveform"></canvas>
+        <div class="player-meta">
+          <span id="player-time" class="player-time">0:00 / 0:10</span>
+          <span class="hint">Clips loop. Switching Play keeps the same place in the 10s loop.</span>
+        </div>
+      </section>
+
       <section id="reference-section" class="reference-section hidden">
-        <h3>Reference</h3>
+        <div class="sample-header">
+          <h3>Reference</h3>
+          <div id="reference-audio" class="audio-slot"></div>
+        </div>
         <p class="hint">Play-only. Compare each blind sample to this Reference. One blind sample may match it.</p>
-        <div id="reference-audio" class="audio-slot"></div>
         <div id="reference-sliders" class="hidden"></div>
       </section>
 

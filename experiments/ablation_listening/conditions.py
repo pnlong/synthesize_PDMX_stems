@@ -21,6 +21,15 @@ DEFAULT_STEMS_PER_CATEGORY = 2
 RATING_SCALES: tuple[str, ...] = ("content", "realism")
 
 
+def gm_instrument_label(*, program: int, is_drum: bool) -> str:
+    """Human-readable GM instrument for the listening UI."""
+    from analysis.gm_programs import DRUM_GM_ID, gm_program_display_name
+
+    if is_drum:
+        return gm_program_display_name(DRUM_GM_ID)
+    return gm_program_display_name(int(program))
+
+
 def condition_roots(ablations_dir: Path) -> dict[str, Path]:
     ablations_dir = Path(ablations_dir)
     return {cid: ablations_dir / cid for cid in ABLATION_MUSHRA_CONDITIONS}
@@ -48,4 +57,5 @@ __all__ = [
     "STEM_TRIAL_CATEGORIES",
     "category_from_trial_id",
     "condition_roots",
+    "gm_instrument_label",
 ]

@@ -13,6 +13,7 @@ Formal listening test comparing **all 8 ablation conditions** (A1–CB2), with *
 
 - **One page = one clip** (~20 stem trials by default)
 - **Visible Reference** = A1 (`basic`) — play-only
+- **Shared loop player** (webMUSHRA-style): one waveform, looping 10s clip; Play/Pause on Reference and each blind sample continues from the same playhead
 - **Blind samples** = unique conditions for that excerpt (shuffled; up to 8), each with **Content** and **Realism** sliders (0–100). One blind sample may match the Reference.
 - **Donor-copy dedup:** when `route_stem` chooses soundfont, DDSP↔donor duplicates are omitted from the page. Aggregation auto-assigns the donor’s scores so factorial tables still cover all 8. See `equivalences` in [`trial_manifest.yaml`](trial_manifest.yaml).
 - Default trials: **2 stems × 10 listening categories** = 20 excerpts

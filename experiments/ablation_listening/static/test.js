@@ -2,6 +2,11 @@ import {
   createScoreSlider,
   isScoreRated,
 } from "/shared/slider.js";
+import {
+  SharedLoopPlayer,
+  createPlayButton,
+  setPlayButtonState,
+} from "/static/player.js";
 
 const params = new URLSearchParams(window.location.search);
 
@@ -52,6 +57,7 @@ const state = {
   storageKey: null,
   listenerId: getOrCreateListenerId(),
   sessionSeed: readStoredSessionSeed() ?? freshSessionSeed(),
+  playButtons: new Map(),
 };
 
 const setupEl = document.getElementById("setup");
@@ -77,11 +83,27 @@ const startBtn = document.getElementById("start-btn");
 const sessionIdHintEl = document.getElementById("session-id-hint");
 const completeMessageEl = document.getElementById("complete-message");
 const completePathEl = document.getElementById("complete-path");
+const waveformEl = document.getElementById("waveform");
+const playerTimeEl = document.getElementById("player-time");
+
+const player = new SharedLoopPlayer({
+  canvas: waveformEl,
+  timeEl: playerTimeEl,
+  onActiveChange: syncPlayButtons,
+});
 
 if (sessionIdHintEl) {
   sessionIdHintEl.textContent = `Session ID: ${state.listenerId}`;
 }
 
+function syncPlayButtons(activeKey, playing) {
+  for (const [key, btn] of state.playButtons) {
+    setPlayButtonState(btn, {
+      active: key === activeKey,
+      playing: key === activeKey && playing,
+    });
+  }
+}
 async function fetchJson(url) {
   const response = await fetch(url);
   if (!response.ok) {
@@ -222,35 +244,53 @@ async function saveToServer(checkpoint = true) {
   return response.json();
 }
 
-function renderAudio(container, url) {
+function renderPlayButton(container, key) {
   container.innerHTML = "";
-  const audio = document.createElement("audio");
-  audio.controls = true;
-  audio.preload = "none";
-  audio.src = url;
-  container.append(audio);
+  const btn = createPlayButton({
+    onClick: () => {
+      player.toggle(key).catch((err) => showSaveStatus(err.message, true));
+    },
+  });
+  state.playButtons.set(key, btn);
+  container.append(btn);
+  setPlayButtonState(btn, {
+    active: player.activeKey === key,
+    playing: player.activeKey === key && player.isPlaying(),
+  });
 }
 
 async function loadTrial(index) {
+  player.stop();
+  state.playButtons.clear();
   state.trialIndex = index;
   const trialId = currentTrialId();
   state.trialDetail = await fetchJson(`/api/trials/${encodeURIComponent(trialId)}?seed=${state.sessionSeed}`);
-  renderTrial();
+  await renderTrial();
   updateProgress();
+  window.scrollTo({ top: 0, left: 0, behavior: "auto" });
 }
 
-function renderTrial() {
+async function renderTrial() {
   const detail = state.trialDetail;
   if (!detail) return;
 
   if (detail.type === "mixture") {
     trialTitleEl.textContent = "Mixture";
+    trialMetaEl.textContent = "";
   } else {
-    trialTitleEl.textContent = detail.category
+    const category = detail.category
       ? detail.category.charAt(0).toUpperCase() + detail.category.slice(1)
       : "Stem";
+    trialTitleEl.textContent = category;
+    if (detail.gm_instrument) {
+      const programNote = detail.is_drum
+        ? "GM drums"
+        : (detail.program != null ? `GM ${detail.program}` : "GM");
+      trialMetaEl.textContent = `${detail.gm_instrument} (${programNote})`;
+    } else {
+      trialMetaEl.textContent = "";
+    }
   }
-  trialMetaEl.textContent = "";
   trialNoteEl.textContent = "";
   rubricHintEl.textContent =
     `${state.meta.rubrics.content.help} Rate every blind sample on Content and Realism. `
@@ -265,11 +305,21 @@ function renderTrial() {
   saved.category = detail.category;
   saved.expected_n_samples = detail.samples.length;
 
-  // Reference (A1) — visible, play-only
+  const sources = {};
+  if (detail.reference?.available && detail.reference.url) {
+    sources.reference = detail.reference.url;
+  }
+  for (const sample of detail.samples) {
+    if (sample.available && sample.url) {
+      sources[`sample:${sample.blind_label}`] = sample.url;
+    }
+  }
+
+  state.playButtons.clear();
   referenceSectionEl.classList.remove("hidden");
   referenceAudioEl.innerHTML = "";
-  if (detail.reference?.available) {
-    renderAudio(referenceAudioEl, detail.reference.url);
+  if (sources.reference) {
+    renderPlayButton(referenceAudioEl, "reference");
   } else {
     referenceAudioEl.textContent = "Reference audio missing";
   }
@@ -290,16 +340,17 @@ function renderTrial() {
     const title = document.createElement("h3");
     title.textContent = `Sample ${sample.blind_label}`;
     header.append(title);
-    card.append(header);
 
     const audioSlot = document.createElement("div");
     audioSlot.className = "audio-slot";
-    if (sample.available) {
-      renderAudio(audioSlot, sample.url);
+    const sampleKey = `sample:${sample.blind_label}`;
+    if (sources[sampleKey]) {
+      renderPlayButton(audioSlot, sampleKey);
     } else {
       audioSlot.textContent = "Audio missing";
     }
-    card.append(audioSlot);
+    header.append(audioSlot);
+    card.append(header);
 
     const sliders = document.createElement("div");
     sliders.className = "sample-sliders";
@@ -350,8 +401,13 @@ function renderTrial() {
   nextBtn.disabled = !isTrialComplete(detail.id);
   nextBtn.textContent =
     state.trialIndex === state.trialOrder.length - 1 ? "All trials done" : "Next trial →";
-}
 
+  try {
+    await player.load(sources, { waveformKey: sources.reference ? "reference" : null });
+  } catch (err) {
+    showSaveStatus(err.message || "Audio load failed", true);
+  }
+}
 async function startTest() {
   state.listenerId = getOrCreateListenerId();
   if (sessionIdHintEl) {
@@ -467,6 +523,7 @@ saveBtn.addEventListener("click", () => {
 });
 
 finishBtn.addEventListener("click", () => {
+  player.stop();
   saveToServer(false)
     .then((result) => {
       clearClientSession();

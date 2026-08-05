@@ -255,39 +255,55 @@ def find_audible_clip_start(
     > 0, also requires that fraction of short hops inside the window to be
     audible (so sparse end-burst clips are rejected). When ``prefer_densest`` is
     True, returns the qualifying window with the highest active fraction.
+
+    Loads the stem once and slides over a precomputed hop-energy series (avoids
+    re-decoding the same MP3/FLAC for every candidate window).
     """
     if not stem_is_valid(path):
         return None
 
-    clip_frames = int(clip_seconds * SAMPLE_RATE)
-    total_frames = stem_n_samples(path)
-    if total_frames < clip_frames:
+    try:
+        audio, file_sr = sf.read(str(path), dtype="float32", always_2d=True)
+    except (RuntimeError, OSError, ValueError):
+        return None
+    if audio.size == 0:
         return None
 
-    hop_frames = max(1, int(hop_seconds * SAMPLE_RATE))
-    first_frame = int(min_start_seconds * SAMPLE_RATE)
+    sr = int(file_sr) if file_sr else SAMPLE_RATE
+    mono = np.mean(np.asarray(audio, dtype=np.float32), axis=1)
+    n = int(mono.shape[0])
+    clip_frames = int(clip_seconds * sr)
+    if n < clip_frames:
+        return None
+
+    activity_hop = max(1, int(activity_hop_seconds * sr))
+    n_hops = n // activity_hop
+    hops_in_clip = max(1, int(round(clip_seconds / activity_hop_seconds)))
+    if n_hops < hops_in_clip:
+        return None
+
+    segment = mono[: n_hops * activity_hop].reshape(n_hops, activity_hop)
+    hop_mean_sq = np.mean(np.square(segment, dtype=np.float64), axis=1)
+    hop_active = (np.sqrt(hop_mean_sq) >= min_rms).astype(np.int32)
+    cum_active = np.concatenate(([0], np.cumsum(hop_active)))
+    cum_mean_sq = np.concatenate(([0.0], np.cumsum(hop_mean_sq)))
+
+    search_hop_hops = max(1, int(round(hop_seconds / activity_hop_seconds)))
+    first_hop = int(min_start_seconds / activity_hop_seconds)
+    last_start_hop = n_hops - hops_in_clip
+
     best_start: float | None = None
     best_fraction = -1.0
 
-    for start_frame in range(first_frame, total_frames - clip_frames + 1, hop_frames):
-        start_seconds = start_frame / SAMPLE_RATE
-        audio = clip_stem_waveform(
-            path,
-            clip_seconds=clip_seconds,
-            start_seconds=start_seconds,
-        )
-        if audio.size == 0:
+    for start_hop in range(first_hop, last_start_hop + 1, search_hop_hops):
+        end_hop = start_hop + hops_in_clip
+        window_ms = (cum_mean_sq[end_hop] - cum_mean_sq[start_hop]) / hops_in_clip
+        if float(np.sqrt(window_ms)) < min_rms:
             continue
-        rms = float(np.sqrt(np.mean(np.square(audio))))
-        if rms < min_rms:
-            continue
-        fraction = waveform_active_fraction(
-            audio,
-            hop_seconds=activity_hop_seconds,
-            min_rms=min_rms,
-        )
+        fraction = float(cum_active[end_hop] - cum_active[start_hop]) / hops_in_clip
         if fraction < min_active_fraction:
             continue
+        start_seconds = start_hop * activity_hop / sr
         if not prefer_densest:
             return start_seconds
         if fraction > best_fraction:

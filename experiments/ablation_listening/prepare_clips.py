@@ -19,6 +19,7 @@ from experiments.ablation_listening.conditions import (
     REFERENCE_CONDITION,
     STEM_TRIAL_CATEGORIES,
     condition_roots,
+    gm_instrument_label,
 )
 from experiments.ablation_listening.equivalence import (
     detect_equivalences_for_trial,
@@ -55,14 +56,15 @@ def _find_dense_clip_start(
     clip_seconds: float,
     min_rms: float = DEFAULT_MIN_RMS,
     min_active_fraction: float = DEFAULT_MIN_ACTIVE_FRACTION,
+    prefer_densest: bool = True,
 ) -> float | None:
-    """Prefer a window with continuous material over sparse end-burst clips."""
+    """Find a window with continuous material (optionally the densest one)."""
     return find_audible_clip_start(
         source_path,
         clip_seconds=clip_seconds,
         min_rms=min_rms,
         min_active_fraction=min_active_fraction,
-        prefer_densest=True,
+        prefer_densest=prefer_densest,
     )
 
 def _song_dir(root: Path, song_id: str) -> Path:
@@ -124,6 +126,8 @@ def reference_has_audible_clip(
         clip_seconds=clip_seconds,
         min_rms=min_rms,
         min_active_fraction=min_active_fraction,
+        # Screening only needs existence; densest search is for clip writing.
+        prefer_densest=False,
     ) is not None
 
 
@@ -270,6 +274,8 @@ def select_stem_trials(
                 "track": track,
                 "category": category,
                 "note": str(row.get("name") or "").strip() or None,
+                "program": int(row.get("program", 0) or 0),
+                "is_drum": bool(row.get("is_drum", False)),
             })
 
         preferred_keys = {
@@ -309,6 +315,12 @@ def select_stem_trials(
                 "track": picked["track"],
                 "category": picked["category"],
                 "note": picked.get("note"),
+                "program": int(picked.get("program", 0) or 0),
+                "is_drum": bool(picked.get("is_drum", False)),
+                "gm_instrument": gm_instrument_label(
+                    program=int(picked.get("program", 0) or 0),
+                    is_drum=bool(picked.get("is_drum", False)),
+                ),
             })
 
     return trials

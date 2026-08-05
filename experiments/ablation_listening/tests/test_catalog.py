@@ -52,6 +52,43 @@ def test_catalog_get_trial_includes_basic(manifest_and_clips):
     assert len(detail["samples"]) == len(ABLATION_MUSHRA_CONDITIONS)
     assert {s["condition_id"] for s in detail["samples"]} == set(ABLATION_MUSHRA_CONDITIONS)
     assert all(sample["available"] for sample in detail["samples"])
+    assert detail["gm_instrument"] is None
+
+
+def test_catalog_includes_gm_instrument(tmp_path: Path):
+    clips_dir = tmp_path / "clips"
+    trial_dir = clips_dir / "stem_brass_01"
+    trial_dir.mkdir(parents=True)
+    for cond in ABLATION_MUSHRA_CONDITIONS:
+        (trial_dir / f"{cond}.mp3").write_bytes(b"\x00" * 64)
+
+    manifest = tmp_path / "trial_manifest.yaml"
+    with open(manifest, "w") as f:
+        yaml.safe_dump({
+            "test_id": "test_v1",
+            "trials": [{
+                "id": "stem_brass_01",
+                "type": "stem",
+                "category": "brass",
+                "song_id": "1/2/QmBrass",
+                "track": 0,
+                "program": 56,
+                "is_drum": False,
+                "gm_instrument": "Trumpet",
+                "clip_seconds": 10.0,
+                "audio_format": "mp3",
+                "conditions": {
+                    c: f"stem_brass_01/{c}.mp3" for c in ABLATION_MUSHRA_CONDITIONS
+                },
+            }],
+        }, f)
+
+    catalog = AblationListeningCatalog(manifest, clips_dir)
+    detail = catalog.get_trial("stem_brass_01", session_seed=7)
+    assert detail["category"] == "brass"
+    assert detail["gm_instrument"] == "Trumpet"
+    assert detail["program"] == 56
+    assert detail["is_drum"] is False
 
 
 def test_catalog_omits_equivalences(tmp_path: Path):

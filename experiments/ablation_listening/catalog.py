@@ -6,7 +6,11 @@ from pathlib import Path
 
 import yaml
 
-from experiments.ablation_listening.equivalence import trial_equivalences
+from experiments.ablation_listening.conditions import gm_instrument_label
+from experiments.ablation_listening.equivalence import (
+    load_stem_row,
+    trial_equivalences,
+)
 from experiments.ablation_listening.paths import (
     DEFAULT_CLIPS_DIR,
     DEFAULT_MANIFEST,
@@ -37,6 +41,8 @@ class AblationListeningCatalog:
         self.test_id = str(self._doc.get("test_id") or "ablation_listening_v1")
         self.trials = list(self._doc.get("trials") or [])
         self.trial_by_id = {trial["id"]: trial for trial in self.trials}
+        ablations = self._doc.get("ablations_dir")
+        self.ablations_dir = Path(ablations) if ablations else None
 
     def meta(self, session_seed: int) -> dict:
         trial_ids = trial_order([trial["id"] for trial in self.trials], session_seed)
@@ -71,6 +77,50 @@ class AblationListeningCatalog:
             },
         }
 
+    def _resolve_gm(self, trial: dict) -> dict:
+        """Return program / is_drum / gm_instrument for a stem trial."""
+        if trial.get("type") != "stem":
+            return {
+                "program": None,
+                "is_drum": None,
+                "gm_instrument": None,
+            }
+
+        program = trial.get("program")
+        is_drum = trial.get("is_drum")
+        gm_instrument = trial.get("gm_instrument")
+
+        if (program is None or is_drum is None) and self.ablations_dir and trial.get("track") is not None:
+            try:
+                row = load_stem_row(
+                    self.ablations_dir,
+                    str(trial["song_id"]),
+                    int(trial["track"]),
+                )
+                if program is None:
+                    program = int(row.get("program", 0) or 0)
+                if is_drum is None:
+                    is_drum = bool(row.get("is_drum", False))
+            except (FileNotFoundError, KeyError, ValueError, TypeError):
+                pass
+
+        if is_drum is None:
+            is_drum = False
+        if program is None:
+            program = 0
+
+        if not gm_instrument:
+            gm_instrument = gm_instrument_label(
+                program=int(program),
+                is_drum=bool(is_drum),
+            )
+
+        return {
+            "program": None if is_drum else int(program),
+            "is_drum": bool(is_drum),
+            "gm_instrument": gm_instrument,
+        }
+
     def get_trial(self, trial_id: str, session_seed: int) -> dict | None:
         trial = self.trial_by_id.get(trial_id)
         if trial is None:
@@ -80,6 +130,7 @@ class AblationListeningCatalog:
         conditions = trial.get("conditions") or {}
         equivalences = trial_equivalences(trial)
         blind_ids = unique_blind_condition_ids(trial)
+        gm = self._resolve_gm(trial)
 
         ref_path = conditions.get(REFERENCE_CONDITION)
         if not ref_path:
@@ -117,6 +168,9 @@ class AblationListeningCatalog:
             "song_id": trial.get("song_id"),
             "track": trial.get("track"),
             "note": trial.get("note"),
+            "program": gm["program"],
+            "is_drum": gm["is_drum"],
+            "gm_instrument": gm["gm_instrument"],
             "clip_seconds": trial.get("clip_seconds"),
             "reference": reference,
             "samples": samples,
