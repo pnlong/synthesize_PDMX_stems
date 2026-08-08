@@ -331,9 +331,6 @@ async function renderTrial() {
   for (const sample of detail.samples) {
     const card = document.createElement("article");
     card.className = "sample-card";
-    if (!isSampleComplete(detail.id, sample.blind_label)) {
-      card.classList.add("incomplete");
-    }
 
     const header = document.createElement("div");
     header.className = "sample-header";
@@ -359,11 +356,20 @@ async function renderTrial() {
       saved.samples[sample.blind_label] = {
         blind_label: sample.blind_label,
         condition_id: sample.condition_id,
+        content: 50,
+        realism: 50,
       };
     }
     const entry = saved.samples[sample.blind_label];
     entry.condition_id = sample.condition_id;
     entry.blind_label = sample.blind_label;
+    // Default both scales to 50 so an untouched slider counts as rated.
+    if (!isScoreRated(entry.content)) entry.content = 50;
+    if (!isScoreRated(entry.realism)) entry.realism = 50;
+
+    if (!isSampleComplete(detail.id, sample.blind_label)) {
+      card.classList.add("incomplete");
+    }
 
     const commit = () => {
       saveLocalRatings();
@@ -375,7 +381,7 @@ async function renderTrial() {
       rubric: "content",
       label: "Content",
       help: state.meta.rubrics.content.help,
-      value: entry.content ?? null,
+      value: entry.content,
       onChange: (value) => {
         entry.content = value;
         commit();
@@ -386,7 +392,7 @@ async function renderTrial() {
       rubric: "realism",
       label: "Realism",
       help: detail.realism_rubric.help,
-      value: entry.realism ?? null,
+      value: entry.realism,
       onChange: (value) => {
         entry.realism = value;
         commit();
@@ -396,6 +402,9 @@ async function renderTrial() {
     card.append(sliders);
     samplesEl.append(card);
   }
+
+  saveLocalRatings();
+  updateProgress();
 
   prevBtn.disabled = state.trialIndex === 0;
   nextBtn.disabled = !isTrialComplete(detail.id);
