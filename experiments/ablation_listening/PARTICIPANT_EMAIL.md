@@ -1,6 +1,6 @@
 **Subject:** quick listening test for my audio project?
 
-Hey, I'm running a short listening study for a music synthesis project and would love your ears if you have ~30–45 minutes. This is the link: https://putdown-eating-brownnose.ngrok-free.dev.
+Hey, I'm running a short listening study for a music synthesis project and would love your ears if you have ~40 minutes. This is the link: https://putdown-eating-brownnose.ngrok-free.dev.
 
 A few notes:
 - Leave the tab open until you finish

@@ -375,6 +375,17 @@ def parse_args(args=None):
         type=Path,
         help="Trial manifest (equivalences for auto-assigning omitted DDSP conditions).",
     )
+    parser.add_argument(
+        "--plots-dir",
+        type=Path,
+        default=None,
+        help=(
+            "If set, also write overview + per-category content/realism bar plots "
+            "(default folder when flag present with no path: output/plots)."
+        ),
+        nargs="?",
+        const=DEFAULT_OUTPUT_DIR / "plots",
+    )
     return parser.parse_args(args)
 
 
@@ -396,7 +407,7 @@ def main(args=None) -> None:
             "Finish the test (not just checkpoints) before aggregating."
         )
 
-    _, summary = aggregate_responses(completed, manifest_path=opts.manifest)
+    df, summary = aggregate_responses(completed, manifest_path=opts.manifest)
     opts.output.parent.mkdir(parents=True, exist_ok=True)
     markdown = render_markdown(summary, responses_path=completed[0])
     opts.output.write_text(markdown)
@@ -409,6 +420,16 @@ def main(args=None) -> None:
     n_auto = summary.get("n_auto_assigned") or 0
     if n_auto:
         print(f"Auto-assigned {n_auto} ratings from donor equivalences")
+
+    if opts.plots_dir is not None:
+        from experiments.ablation_listening.plot_results import write_plots
+
+        result = write_plots(df, opts.plots_dir)
+        print(f"Wrote plots under {opts.plots_dir}")
+        print(f"  overview: {result['overview'].name}")
+        print(f"  by category: {result['overview_by_category'].name}")
+        print(f"  panels: {len(result['by_category'])} in by_category/")
+        print(f"  winners: {result['category_winners'].name}")
 
 
 if __name__ == "__main__":

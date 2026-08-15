@@ -65,10 +65,24 @@ Each browser gets a random listener ID (stored in `localStorage`) so concurrent 
 
 ```bash
 uv run python -m experiments.ablation_listening.aggregate \
-  --output experiments/ablation_listening/output/results_notes.md
+  --output experiments/ablation_listening/output/results_notes.md \
+  --plots-dir
 ```
 
 By default this reads `output/responses/` and **only** finished exports (`responses_<listener>_<timestamp>.json`). In-progress checkpoints (`responses_in_progress_*.json`) are ignored.
+
+`--plots-dir` writes bar charts to `output/plots/` (PDF, transparent background):
+- `overview.pdf` — overall content / realism / combined (x-axis A/B/CA/CB; left=synthetic, right=realified; ★ = winner)
+- `overview_by_category.pdf` — all categories in one figure
+- `by_category/<category>.pdf` — three-panel content|realism|combined per category
+- `category_winners.csv` — per-category winner on
+  $\mathrm{combined}=(\mathrm{content}/100)\times\mathrm{realism}$ (+ margin vs 2nd / DDSP donor)
+
+Plots only:
+
+```bash
+uv run python -m experiments.ablation_listening.plot_results
+```
 
 ## Layout
 
