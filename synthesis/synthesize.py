@@ -817,7 +817,7 @@ def _parallel_map(fn, items, *, jobs: int, desc: str, unit: str = "song"):
     label = desc if n_jobs <= 1 else f"{desc} (-j {n_jobs})"
     if n_jobs <= 1 or len(items) <= 1:
         return [fn(item) for item in tqdm(items, total=len(items), desc=label, unit=unit)]
-    chunksize = max(8, min(64, len(items) // (n_jobs * 4) or 8))
+    chunksize = 8
     with ThreadPoolExecutor(max_workers=n_jobs) as executor:
         return list(
             tqdm(
@@ -843,12 +843,18 @@ def prepare_render_dataset(
     register_df: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     """Load PDMX rows for this run and attach ``path_output`` song directories."""
-    dataset = pd.read_csv(args.dataset_filepath, sep=",", header=0, index_col=False)
-    dataset = dataset[dataset["subset:all_valid"]].reset_index(drop=True)
-    dataset = dataset.drop(
-        columns=["metadata", "mxl", "pdf", "version", "subset:all_valid"],
-        errors="ignore",
+    print(f"Loading PDMX from {args.dataset_filepath} ...", flush=True)
+    skip_cols = {"metadata", "mxl", "pdf", "version"}
+    dataset = pd.read_csv(
+        args.dataset_filepath,
+        sep=",",
+        header=0,
+        index_col=False,
+        usecols=lambda col: col not in skip_cols,
     )
+    dataset = dataset[dataset["subset:all_valid"]].reset_index(drop=True)
+    dataset = dataset.drop(columns=["subset:all_valid"], errors="ignore")
+    print(f"Using {len(dataset)} valid songs", flush=True)
     if args.full:
         dataset = prepare_full_dataset(dataset)
     else:
@@ -947,19 +953,23 @@ def run_layout_pass(
 
     dataset = prepare_render_dataset(args, media_dir, register_df=register_df)
     hybrid = _hybrid_recipe(args) is not None
-    pdmx_root = Path(dirname(args.dataset_filepath)).resolve() if hybrid else None
-    dirs: list[str] = []
-    for row in dataset.itertuples(index=False):
-        dirs.append(row.path_output)
-        if pdmx_root is not None:
-            rel = Path(row.mid).resolve().relative_to(pdmx_root)
-            dirs.append(str((Path(media_dir) / rel).parent))
+    print(f"Planning {len(dataset)} song directories ...", flush=True)
+    dirs: list[str] = list(dataset["path_output"])
+    if hybrid:
+        pdmx_root = str(Path(dirname(args.dataset_filepath))).rstrip("/")
+        prefix = pdmx_root + "/"
+        media = Path(media_dir)
+        for mid in dataset["mid"]:
+            mid_s = str(mid)
+            rel = mid_s[len(prefix):] if mid_s.startswith(prefix) else mid_s.lstrip("/")
+            dirs.append(str((media / rel).parent))
     seen: set[str] = set()
     unique_dirs: list[str] = []
     for path in dirs:
         if path not in seen:
             seen.add(path)
             unique_dirs.append(path)
+    print(f"Creating {len(unique_dirs)} directories ...", flush=True)
     _parallel_map(lambda path: makedirs(path, exist_ok=True), unique_dirs, jobs=_jobs(args), desc="Pass 0 layout")
     ensure_synthesis_tables(output_dir, args)
     if _hybrid_recipe(args) is not None:
