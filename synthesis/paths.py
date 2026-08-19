@@ -11,7 +11,9 @@ from shared.config import (
     INSTRUMENTS_DIR_NAME,
     MID_CORRECTED_DIR_NAME,
     SONG_LENGTHS_DIR_NAME,
+    SPDMX_AUDIO_DIR_NAME,
     SPDMX_DATASET_DIR_NAME,
+    SPDMX_MID_DIR_NAME,
     STEMS_DIR_NAME,
     STEMS_REALIFY_DIR_NAME,
     TRACK_NAMES_DIR_NAME,
@@ -72,6 +74,14 @@ def track_names_dir(output_dir: str) -> str:
 
 def spdmx_dataset_dir(output_dir: str) -> str:
     return f"{output_dir}/{SPDMX_DATASET_DIR_NAME}"
+
+
+def spdmx_audio_dir(output_dir: str) -> str:
+    return f"{spdmx_dataset_dir(output_dir)}/{SPDMX_AUDIO_DIR_NAME}"
+
+
+def spdmx_mid_dir(output_dir: str) -> str:
+    return f"{spdmx_dataset_dir(output_dir)}/{SPDMX_MID_DIR_NAME}"
 
 
 def remap_path_prefix(value: str, source_dir: Path, output_dir: Path) -> str:

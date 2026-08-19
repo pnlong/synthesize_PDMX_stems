@@ -8,7 +8,9 @@ from shared.config import (
     ABLATION_SAMPLE_SIZE,
     DEV_DIR_NAME,
     OUTPUT_DIR,
+    SPDMX_AUDIO_DIR_NAME,
     SPDMX_DATASET_DIR_NAME,
+    SPDMX_MID_DIR_NAME,
     STEMS_DIR_NAME,
     STEMS_REALIFY_DIR_NAME,
 )
@@ -28,7 +30,9 @@ from synthesis.paths import (
     full_stems_dir,
     full_stems_realify_dir,
     song_lengths_dir,
+    spdmx_audio_dir,
     spdmx_dataset_dir,
+    spdmx_mid_dir,
 )
 
 
@@ -90,6 +94,8 @@ def test_song_lengths_dir():
 
 def test_spdmx_dataset_dir():
     assert spdmx_dataset_dir("/out") == f"/out/{SPDMX_DATASET_DIR_NAME}"
+    assert spdmx_audio_dir("/out") == f"/out/{SPDMX_DATASET_DIR_NAME}/{SPDMX_AUDIO_DIR_NAME}"
+    assert spdmx_mid_dir("/out") == f"/out/{SPDMX_DATASET_DIR_NAME}/{SPDMX_MID_DIR_NAME}"
 
 
 def test_ablation_sample_size_and_seed():

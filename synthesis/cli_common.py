@@ -25,7 +25,16 @@ def default_gm_register_path(output_dir: str = OUTPUT_DIR) -> str:
     return f"{instruments_dir(output_dir)}/all_valid/register.csv"
 
 
-def add_audio_format_arg(parser: argparse.ArgumentParser):
+def add_audio_format_arg(parser: argparse.ArgumentParser, *, flac_default: bool = False):
+    if flac_default:
+        parser.add_argument(
+            "--mp3",
+            dest="flac",
+            action="store_false",
+            help="Write MP3 stems instead of the default FLAC.",
+        )
+        parser.set_defaults(flac=True)
+        return
     parser.add_argument(
         "--flac",
         action="store_true",
@@ -39,6 +48,7 @@ def add_synthesis_args(
     include_render_mode: bool = True,
     include_realify: bool = True,
     full_default: bool = False,
+    flac_default: bool = False,
 ):
     parser.add_argument("-df", "--dataset_filepath", default=PDMX_FILEPATH, type=str)
     parser.add_argument("-o", "--output_dir", default=OUTPUT_DIR, type=str)
@@ -125,7 +135,7 @@ def add_synthesis_args(
             "DDSP modes: if a donor soundfont stem is missing, render Fluidsynth instead of erroring."
         ),
     )
-    add_audio_format_arg(parser)
+    add_audio_format_arg(parser, flac_default=flac_default)
     parser.add_argument(
         "--no-silence-enforce",
         action="store_true",

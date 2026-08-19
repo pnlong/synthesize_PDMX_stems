@@ -7,7 +7,7 @@ Turn the [PDMX](https://zenodo.org/records/13763756) symbolic music dataset into
 1. **Synthesis setup** — `python -m analysis.prepare_synthesis` (GM register + dense corrected MIDIs; **required before any ablation**)
 2. **Synthesis** — `python -m synthesis.synthesize` with `--render-mode {basic,slakh,ddsp_basic,ddsp_slakh}`
 3. **Realify** (optional) — same command with `--realify`
-4. **Full dataset** — `python -m synthesis.build_spdmx` (planned; calls `synthesize --full` internally)
+4. **Full dataset** — `python -m synthesis.final --only-pass {layout,fluidsynth,ddsp,mix}` (FLAC under `{OUTPUT_DIR}/SPDMX/`)
 5. **Analysis** — duration stats and SA3 model recommendation
 
 ## Install
@@ -28,7 +28,7 @@ For SA3 realify, submodule, flash-attention, and Hugging Face login, follow **Tr
 
 Default output root: `/deepfreeze/pnlong/SPDMX` (`OUTPUT_DIR` in [`shared/config.py`](shared/config.py)).
 
-Development artifacts (ablations, analysis, interim full stems) live under `{OUTPUT_DIR}/dev/`. The assembled dataset goes to `{OUTPUT_DIR}/SPDMX/` via `build_spdmx`.
+Development artifacts (ablations, analysis) live under `{OUTPUT_DIR}/dev/`. Production stems go to `{OUTPUT_DIR}/SPDMX/` via `synthesis.final`.
 
 ### Ablation (four conditions)
 
@@ -62,37 +62,31 @@ Output:
 └── slakh_realify/
 ```
 
-### Full PDMX (after listening test)
+### Full sPDMX (after listening test)
 
 ```bash
 # Step 0 (if not already): register + dense corrected MIDIs
 uv run python -m analysis.prepare_synthesis --subset all_valid -j 8
 
-uv run python -m synthesis.synthesize --render-mode basic --full
-uv run python -m synthesis.synthesize --render-mode basic --full --realify
+uv run python -m synthesis.final --only-pass layout
+uv run python -m synthesis.final --only-pass fluidsynth -j 8
+uv run python -m synthesis.final --only-pass ddsp
+uv run python -m synthesis.final --only-pass mix
+uv run python -m synthesis.package_midi
 ```
 
-Output: `{OUTPUT_DIR}/dev/stems/` and `{OUTPUT_DIR}/dev/stems_realify/`.
-`stems.csv` uses contiguous `track` plus `original_track` (PDMX index).
-
-### Assembled sPDMX dataset (planned)
-
-```bash
-uv run python -m synthesis.build_spdmx --render-mode basic
-```
-
-Will populate `{OUTPUT_DIR}/SPDMX/` with PDMX metadata plus synthesized stems in one pass.
+Writes FLAC stems to `{OUTPUT_DIR}/SPDMX/audio/` (PDMX `data/*.json` → a directory of `stem_N.flac`). Sanitized MIDIs go to `{OUTPUT_DIR}/SPDMX/mid/` via `python -m synthesis.package_midi`. Mix is `sum(stems)` (no `mixture.*`).
 
 ### Per-song layout
 
 ```
-{dataset}/
+{OUTPUT_DIR}/SPDMX/
 ├── data.csv
 ├── stems.csv
-└── data/<mirrored-path>/
-    ├── stem_0.flac
-    ├── stem_1.flac
-    └── …              # mix = sum(stems); no mixture file on disk
+├── audio/<mirrored-path>/
+│   ├── stem_0.flac
+│   └── …
+└── mid/<mirrored-path>.mid
 ```
 
 ### Analysis

@@ -24,7 +24,7 @@ CAPTIONS_FILE_NAME = "captions"
 # {OUTPUT_DIR}/dev/ — development artifacts (ablations, analysis, interim stems)
 DEV_DIR_NAME = "dev"
 
-# {OUTPUT_DIR}/dev/stems/ — full-scale stem synthesis (synthesize.py --full)
+# {OUTPUT_DIR}/dev/stems/ — full-scale stem synthesis (synthesize.py --full; ablations)
 STEMS_DIR_NAME = "stems"
 STEMS_REALIFY_DIR_NAME = "stems_realify"
 
@@ -45,8 +45,10 @@ EXPERIMENTS_DIR_NAME = "experiments"
 PRESET_SWEEP_DIR_NAME = "preset_sweep"
 PATCH_SWEEP_DIR_NAME = "patch_sweep"
 
-# {OUTPUT_DIR}/SPDMX/ — assembled sPDMX dataset (via build_spdmx.py, not implemented yet)
+# {OUTPUT_DIR}/SPDMX/ — production dataset (synthesis.final); audio/ + mid/
 SPDMX_DATASET_DIR_NAME = "SPDMX"
+SPDMX_AUDIO_DIR_NAME = "audio"
+SPDMX_MID_DIR_NAME = "mid"
 
 ABLATION_SUBSET_COLUMN = "subset:rated_deduplicated"
 # Safety cap for category-stratified ablation fill (not a fixed random N).

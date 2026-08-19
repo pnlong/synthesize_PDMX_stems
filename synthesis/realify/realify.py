@@ -1502,7 +1502,13 @@ def run_realify(
     presets_filepath = presets_filepath or DEFAULT_PRESETS_FILE
 
     if reset:
-        reset_realify_output(output_dir)
+        if source_dir.resolve() == output_dir.resolve():
+            print(
+                "Skipping realify --reset (in-place would delete source stems).",
+                flush=True,
+            )
+        else:
+            reset_realify_output(output_dir)
 
     if batch_size is not None and int(batch_size) < 0:
         raise ValueError(f"batch_size must be >= 0 (0=auto), got {batch_size}")

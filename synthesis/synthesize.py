@@ -26,6 +26,8 @@ from shared.config import (
     REALIFY_SILENCE_ENFORCE,
     SONGS_TABLE_COLUMNS,
     SOUNDFONT_DIR,
+    SPDMX_AUDIO_DIR_NAME,
+    SPDMX_MID_DIR_NAME,
     STEMS_FILE_NAME,
     STEMS_TABLE_COLUMNS,
 )
@@ -121,10 +123,30 @@ def parse_args(args=None, namespace=None):
     return parser.parse_args(args=args, namespace=namespace)
 
 
-def song_output_dir(output_dir: str, original_dataset_dir: str, json_path: str) -> str:
+def song_output_dir(
+    output_dir: str,
+    original_dataset_dir: str,
+    json_path: str,
+    *,
+    tree_dir_name: str = DATA_DIR_NAME,
+) -> str:
+    """Map a PDMX ``data/…/Qm.json`` path to a stem directory under ``output_dir``.
+
+    Hybrid production uses ``tree_dir_name="audio"`` so the dataset is
+    ``{SPDMX}/audio/…`` instead of ``data/``.
+    """
     rel = json_path[len(original_dataset_dir):]
     rel_no_ext = ".".join(rel.split(".")[:-1])
+    if tree_dir_name != DATA_DIR_NAME:
+        old = f"/{DATA_DIR_NAME}/"
+        new = f"/{tree_dir_name}/"
+        if old in rel_no_ext:
+            rel_no_ext = rel_no_ext.replace(old, new, 1)
     return f"{output_dir}{rel_no_ext}"
+
+
+def render_tree_dir_name(args) -> str:
+    return SPDMX_AUDIO_DIR_NAME if _hybrid_recipe(args) is not None else DATA_DIR_NAME
 
 
 def songs_missing_routing(songs: pd.DataFrame, routing: pd.DataFrame) -> set[str]:
@@ -777,6 +799,116 @@ def reset_synthesis_output(output_dir: str) -> None:
     makedirs(output_dir, exist_ok=True)
 
 
+def prepare_render_dataset(
+    args,
+    output_dir: str,
+    *,
+    register_df: pd.DataFrame | None = None,
+) -> pd.DataFrame:
+    """Load PDMX rows for this run and attach ``path_output`` song directories."""
+    dataset = pd.read_csv(args.dataset_filepath, sep=",", header=0, index_col=False)
+    dataset = dataset[dataset["subset:all_valid"]].reset_index(drop=True)
+    dataset = dataset.drop(
+        columns=["metadata", "mxl", "pdf", "version", "subset:all_valid"],
+        errors="ignore",
+    )
+    if args.full:
+        dataset = prepare_full_dataset(dataset)
+    else:
+        sample_file = listening_sample_path(args.output_dir)
+        dataset = prepare_ablation_dataset(
+            dataset,
+            sample_size=args.sample_size,
+            sample_seed=args.sample_seed,
+            min_stems_per_category=args.min_stems_per_category,
+            register_df=register_df,
+            listening_sample_file=sample_file,
+            persist_sample=True,
+        )
+        if sample_file.is_file():
+            print(f"Ablation sample: {sample_file} ({len(dataset)} songs)")
+    original_dataset_dir = dirname(args.dataset_filepath)
+    dataset["path"] = [original_dataset_dir + p[1:] for p in dataset["path"]]
+    dataset["mid"] = [original_dataset_dir + p[1:] for p in dataset["mid"]]
+    dataset["mid_pdmx"] = dataset["mid"]
+    dataset["path_output"] = [
+        song_output_dir(
+            output_dir,
+            original_dataset_dir,
+            p,
+            tree_dir_name=render_tree_dir_name(args),
+        )
+        for p in dataset["path"]
+    ]
+    return dataset.reset_index(drop=True)
+
+
+def ensure_synthesis_tables(output_dir: str, args) -> None:
+    """Create empty data/stems/routing/recipe CSVs when missing (or after ``--reset``)."""
+    output_filepath = f"{output_dir}/{DATA_DIR_NAME}.csv"
+    stems_output_filepath = f"{output_dir}/{STEMS_FILE_NAME}.csv"
+    if not exists(output_filepath) or args.reset:
+        pd.DataFrame(columns=SONGS_TABLE_COLUMNS).to_csv(
+            output_filepath, sep=",", na_rep=NA_STRING, header=True, index=False, mode="w",
+        )
+    if not exists(stems_output_filepath) or args.reset:
+        pd.DataFrame(columns=STEMS_TABLE_COLUMNS).to_csv(
+            stems_output_filepath, sep=",", na_rep=NA_STRING, header=True, index=False, mode="w",
+        )
+    routing_output_filepath = f"{output_dir}/{DDSP_ROUTING_FILE_NAME}"
+    if _needs_ddsp_routing(args) and (not exists(routing_output_filepath) or args.reset):
+        pd.DataFrame(columns=DDSP_ROUTING_COLUMNS).to_csv(
+            routing_output_filepath, sep=",", na_rep=NA_STRING, header=True, index=False, mode="w",
+        )
+    from synthesis.recipe import STEM_RECIPE_COLUMNS, STEM_RECIPE_FILE_NAME
+
+    recipe = _hybrid_recipe(args)
+    if recipe is not None:
+        recipe_output_filepath = f"{output_dir}/{STEM_RECIPE_FILE_NAME}"
+        if not exists(recipe_output_filepath) or args.reset:
+            pd.DataFrame(columns=STEM_RECIPE_COLUMNS).to_csv(
+                recipe_output_filepath,
+                sep=",",
+                na_rep=NA_STRING,
+                header=True,
+                index=False,
+                mode="w",
+            )
+
+
+def run_layout_pass(args, output_dir: str) -> pd.DataFrame:
+    """Pass 0: mkdir the PDMX-mirrored audio (and mid) tree, no media yet."""
+    if args.reset:
+        reset_synthesis_output(output_dir)
+    else:
+        makedirs(output_dir, exist_ok=True)
+    leaf = render_tree_dir_name(args)
+    makedirs(f"{output_dir}/{leaf}", exist_ok=True)
+    if _hybrid_recipe(args) is not None:
+        makedirs(f"{output_dir}/{SPDMX_MID_DIR_NAME}", exist_ok=True)
+
+    register_df = None
+    if not args.full and not getattr(args, "no_register", False):
+        register_path = getattr(args, "register", None) or default_gm_register_path(args.output_dir)
+        if exists(register_path):
+            register_df = pd.read_csv(register_path)
+
+    dataset = prepare_render_dataset(args, output_dir, register_df=register_df)
+    for song_dir in dataset["path_output"]:
+        makedirs(song_dir, exist_ok=True)
+    if _hybrid_recipe(args) is not None:
+        pdmx_root = Path(dirname(args.dataset_filepath)).resolve()
+        for mid in dataset["mid"]:
+            rel = Path(mid).resolve().relative_to(pdmx_root)
+            (Path(output_dir) / rel).parent.mkdir(parents=True, exist_ok=True)
+    ensure_synthesis_tables(output_dir, args)
+    print(
+        f"Pass 0 layout: {len(dataset)} song directories under {output_dir}/{leaf}",
+        flush=True,
+    )
+    return dataset
+
+
 def _run_hybrid_synthesis(
     *,
     args,
@@ -850,7 +982,7 @@ def run_synthesis(args, output_dir: str):
         makedirs(output_dir, exist_ok=True)
     output_filepath = f"{output_dir}/{DATA_DIR_NAME}.csv"
     stems_output_filepath = f"{output_dir}/{STEMS_FILE_NAME}.csv"
-    makedirs(f"{output_dir}/{DATA_DIR_NAME}", exist_ok=True)
+    makedirs(f"{output_dir}/{render_tree_dir_name(args)}", exist_ok=True)
 
     if args.soundfont_filepath is None:
         args.soundfont_filepath = f"{expanduser('~')}/.muspy/musescore-general/MuseScore_General.sf3"
@@ -880,35 +1012,12 @@ def run_synthesis(args, output_dir: str):
         if _hybrid_recipe(args) is None:
             require_donor_ablation(args, realify=False)
 
-    dataset = pd.read_csv(args.dataset_filepath, sep=",", header=0, index_col=False)
-    dataset = dataset[dataset["subset:all_valid"]].reset_index(drop=True)
-    dataset = dataset.drop(columns=["metadata", "mxl", "pdf", "version", "subset:all_valid"])
-    if args.full:
-        dataset = prepare_full_dataset(dataset)
-    else:
-        sample_file = listening_sample_path(args.output_dir)
-        dataset = prepare_ablation_dataset(
-            dataset,
-            sample_size=args.sample_size,
-            sample_seed=args.sample_seed,
-            min_stems_per_category=args.min_stems_per_category,
-            register_df=register_df,
-            listening_sample_file=sample_file,
-            persist_sample=True,
-        )
-        if sample_file.is_file():
-            print(f"Ablation sample: {sample_file} ({len(dataset)} songs)")
-    original_dataset_dir = dirname(args.dataset_filepath)
-    dataset["path"] = [original_dataset_dir + p[1:] for p in dataset["path"]]
-    dataset["mid"] = [original_dataset_dir + p[1:] for p in dataset["mid"]]
-    dataset["mid_pdmx"] = dataset["mid"]
-    dataset["path_output"] = [
-        song_output_dir(output_dir, original_dataset_dir, p) for p in dataset["path"]
-    ]
-    dataset = dataset.reset_index(drop=True)
+    dataset = prepare_render_dataset(args, output_dir, register_df=register_df)
 
     from analysis.corrected_midi import load_track_map, resolve_corrected_midi_path
     from synthesis.dense_midi import default_corrected_midi_dir
+
+    original_dataset_dir = dirname(args.dataset_filepath)
 
     corrected_root = Path(
         getattr(args, "corrected_midi_dir", None)
@@ -938,24 +1047,12 @@ def run_synthesis(args, output_dir: str):
     for song_dir in set(dataset["path_output"]):
         makedirs(song_dir, exist_ok=True)
 
-    if not exists(output_filepath) or args.reset:
-        pd.DataFrame(columns=SONGS_TABLE_COLUMNS).to_csv(
-            output_filepath, sep=",", na_rep=NA_STRING, header=True, index=False, mode="w",
-        )
-    if not exists(stems_output_filepath) or args.reset:
-        pd.DataFrame(columns=STEMS_TABLE_COLUMNS).to_csv(
-            stems_output_filepath, sep=",", na_rep=NA_STRING, header=True, index=False, mode="w",
-        )
+    ensure_synthesis_tables(output_dir, args)
+    output_filepath = f"{output_dir}/{DATA_DIR_NAME}.csv"
+    stems_output_filepath = f"{output_dir}/{STEMS_FILE_NAME}.csv"
     routing_output_filepath = f"{output_dir}/{DDSP_ROUTING_FILE_NAME}"
     needs_routing = _needs_ddsp_routing(args)
-    if needs_routing and (
-        not exists(routing_output_filepath) or args.reset
-    ):
-        pd.DataFrame(columns=DDSP_ROUTING_COLUMNS).to_csv(
-            routing_output_filepath, sep=",", na_rep=NA_STRING, header=True, index=False, mode="w",
-        )
     from synthesis.recipe import (
-        STEM_RECIPE_COLUMNS,
         STEM_RECIPE_FILE_NAME,
         load_stem_recipe_index,
         require_recipe_conflicts_ok,
@@ -965,10 +1062,6 @@ def run_synthesis(args, output_dir: str):
     recipe_output_filepath = (
         f"{output_dir}/{STEM_RECIPE_FILE_NAME}" if recipe is not None else None
     )
-    if recipe is not None and (not exists(recipe_output_filepath) or args.reset):
-        pd.DataFrame(columns=STEM_RECIPE_COLUMNS).to_csv(
-            recipe_output_filepath, sep=",", na_rep=NA_STRING, header=True, index=False, mode="w",
-        )
     audio_format = synthesis_audio_format(args.flac)
     if recipe is not None and not args.reset:
         require_recipe_conflicts_ok(
@@ -1195,6 +1288,7 @@ def run_realify_pass(args, source_dir: str, dest_dir: str):
     if getattr(args, "no_content_fidelity_enforce", False):
         content_fidelity_enforce = False
 
+    in_place = Path(source_dir).resolve() == Path(dest_dir).resolve()
     run_realify(
         source_dir=source_dir,
         output_dir=dest_dir,
@@ -1208,7 +1302,7 @@ def run_realify_pass(args, source_dir: str, dest_dir: str):
         ),
         audio_format=audio_format,
         sample_seed=args.sample_seed,
-        reset=args.reset,
+        reset=bool(args.reset) and not in_place,
         silence_enforce=REALIFY_SILENCE_ENFORCE and not args.no_silence_enforce,
         content_fidelity_enforce=content_fidelity_enforce,
         output_root=args.output_dir,
