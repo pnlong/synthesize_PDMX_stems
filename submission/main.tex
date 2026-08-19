@@ -65,7 +65,8 @@ sPDMX targets Slakh-like stem structure from open symbolic data and redistributa
 
 \textbf{Neural MIDI-to-audio.}
 DDSP~\cite{engel2020ddsp} enables differentiable synthesis; MIDI-DDSP~\cite{wu2022midi} (trained on URMP~\cite{li2018creating}) and DDSP-Piano~\cite{renault2022diffpiano,renault2023ddsp_piano} (MAESTRO~\cite{hawthorne2018enabling}) provide neural stems for selected instruments.
-We treat these as optional render paths within a broader factorial design rather than a single end-to-end synthesizer.
+The Chamber Ensemble Generator~\cite{wu2022chamber} uses MIDI-DDSP to synthesize large-scale chamber-ensemble audio for MIR, pairing generated scores with neural renders.
+We treat MIDI-DDSP as one optional render path in a broader factorial design (PDMX-scale GM families, with soundfont fallbacks) rather than a single end-to-end synthesizer.
 
 \textbf{Generative audio and evaluation.}
 Stable Audio Open~\cite{evans2024stable} is our downstream training target; SA3~\cite{evans2026stable} supplies audio-to-audio realify.
