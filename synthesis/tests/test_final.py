@@ -90,6 +90,7 @@ def test_layout_pass_creates_song_dirs(tmp_path: Path):
         "-o", str(out),
         "-df", str(csv_path),
         "--no-register",
+        "-j", "2",
     ])
     args.recipe = CategoryRecipe(
         specs={"piano": CategorySpec("basic", False, "basic", "basic")},

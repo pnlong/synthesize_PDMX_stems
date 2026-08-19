@@ -803,6 +803,32 @@ def _run_song_pool(
             )
 
 
+def _jobs(args, default: int = 1) -> int:
+    return max(1, int(getattr(args, "jobs", default) or default))
+
+
+def _parallel_map(fn, items, *, jobs: int, desc: str, unit: str = "song"):
+    """Map ``fn`` over ``items`` with a thread pool when ``jobs > 1``.
+
+    Used for mkdir / exists I/O. Process pools are a poor fit (tiny tasks, NFS).
+    """
+    items = list(items)
+    n_jobs = max(1, int(jobs))
+    label = desc if n_jobs <= 1 else f"{desc} (-j {n_jobs})"
+    if n_jobs <= 1 or len(items) <= 1:
+        return [fn(item) for item in tqdm(items, total=len(items), desc=label, unit=unit)]
+    chunksize = max(8, min(64, len(items) // (n_jobs * 4) or 8))
+    with ThreadPoolExecutor(max_workers=n_jobs) as executor:
+        return list(
+            tqdm(
+                executor.map(fn, items, chunksize=chunksize),
+                total=len(items),
+                desc=label,
+                unit=unit,
+            )
+        )
+
+
 def reset_synthesis_output(output_dir: str) -> None:
     """Remove all prior synthesis artifacts under output_dir."""
     if exists(output_dir):
@@ -922,16 +948,19 @@ def run_layout_pass(
     dataset = prepare_render_dataset(args, media_dir, register_df=register_df)
     hybrid = _hybrid_recipe(args) is not None
     pdmx_root = Path(dirname(args.dataset_filepath)).resolve() if hybrid else None
-    for row in tqdm(
-        dataset.itertuples(index=False),
-        total=len(dataset),
-        desc="Pass 0 layout",
-        unit="song",
-    ):
-        makedirs(row.path_output, exist_ok=True)
+    dirs: list[str] = []
+    for row in dataset.itertuples(index=False):
+        dirs.append(row.path_output)
         if pdmx_root is not None:
             rel = Path(row.mid).resolve().relative_to(pdmx_root)
-            (Path(media_dir) / rel).parent.mkdir(parents=True, exist_ok=True)
+            dirs.append(str((Path(media_dir) / rel).parent))
+    seen: set[str] = set()
+    unique_dirs: list[str] = []
+    for path in dirs:
+        if path not in seen:
+            seen.add(path)
+            unique_dirs.append(path)
+    _parallel_map(lambda path: makedirs(path, exist_ok=True), unique_dirs, jobs=_jobs(args), desc="Pass 0 layout")
     ensure_synthesis_tables(output_dir, args)
     if _hybrid_recipe(args) is not None:
         from synthesis.spdmx_release import maybe_write_spdmx_release_docs
@@ -1071,13 +1100,8 @@ def run_synthesis(args, output_dir: str, *, media_dir: str | None = None):
     )
     print(f"Using dense corrected midis under {corrected_root}")
     track_maps = load_track_maps(resolve_track_map_csv(corrected_root))
-    new_mids = []
-    new_n_tracks = []
-    for mid in tqdm(
-        dataset["mid_pdmx"],
-        desc="Resolving corrected MIDI",
-        unit="song",
-    ):
+
+    def _resolve_one(mid: str) -> tuple[str, int]:
         corrected = resolve_corrected_midi_path(
             mid,
             pdmx_root=original_dataset_dir,
@@ -1092,13 +1116,23 @@ def run_synthesis(args, output_dir: str, *, media_dir: str | None = None):
         tmap = load_track_map(
             corrected, corrected_midi_dir=corrected_root, track_maps=track_maps
         )
-        new_mids.append(str(corrected))
-        new_n_tracks.append(len(tmap))
-    dataset["mid"] = new_mids
-    dataset["n_tracks"] = new_n_tracks
+        return str(corrected), len(tmap)
 
-    for song_dir in set(dataset["path_output"]):
-        makedirs(song_dir, exist_ok=True)
+    resolved = _parallel_map(
+        _resolve_one,
+        dataset["mid_pdmx"].tolist(),
+        jobs=_jobs(args),
+        desc="Resolving corrected MIDI",
+    )
+    dataset["mid"] = [mid for mid, _ in resolved]
+    dataset["n_tracks"] = [n for _, n in resolved]
+
+    _parallel_map(
+        lambda path: makedirs(path, exist_ok=True),
+        list(dict.fromkeys(dataset["path_output"])),
+        jobs=_jobs(args),
+        desc="Ensuring song directories",
+    )
 
     ensure_synthesis_tables(output_dir, args)
     output_filepath = f"{output_dir}/{DATA_DIR_NAME}.csv"
