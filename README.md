@@ -72,21 +72,21 @@ uv run python -m synthesis.final --only-pass layout
 uv run python -m synthesis.final --only-pass fluidsynth -j 8
 uv run python -m synthesis.final --only-pass ddsp
 uv run python -m synthesis.final --only-pass mix
-uv run python -m synthesis.package_midi
 ```
 
-Writes FLAC stems to `{OUTPUT_DIR}/SPDMX/audio/` (PDMX `data/*.json` → a directory of `stem_N.flac`). Sanitized MIDIs go to `{OUTPUT_DIR}/SPDMX/mid/` via `python -m synthesis.package_midi`. Mix is `sum(stems)` (no `mixture.*`).
+Writes FLAC stems to `{OUTPUT_DIR}/SPDMX/audio/` (PDMX `data/*.json` → a directory of `0.flac`, `1.flac`, …). Sanitized MIDIs, `track_map.csv`, `LICENSE`, and `README.md` come from `prepare_synthesis` / layout. Mix is `sum(stems)` (no `mixture.*`). Pipeline tables (`data.csv`, `stems.csv`) live under `{OUTPUT_DIR}/dev/final/`.
 
 ### Per-song layout
 
 ```
 {OUTPUT_DIR}/SPDMX/
-├── data.csv
-├── stems.csv
-├── audio/<mirrored-path>/
-│   ├── stem_0.flac
+├── LICENSE
+├── README.md
+├── track_map.csv                 # join to PDMX.csv on song_id; row key (song_id, track)
+├── audio/<song_id>/
+│   ├── 0.flac
 │   └── …
-└── mid/<mirrored-path>.mid
+└── mid/<song_id>.mid
 ```
 
 ### Analysis

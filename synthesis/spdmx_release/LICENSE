@@ -1,0 +1,20 @@
+sPDMX dataset license
+=====================
+
+The contents of this directory (dense MIDI under mid/, audio stems under
+audio/, and track_map.csv) are released under the Creative Commons
+Attribution 4.0 International License (CC BY 4.0):
+
+    https://creativecommons.org/licenses/by/4.0/
+
+You are free to share and adapt the material for any purpose, including
+commercially, provided you give appropriate credit.
+
+Underlying symbolic scores come from PDMX, a public-domain MusicXML/MIDI
+collection (Long et al., ICASSP 2025). Join this package to PDMX.csv on
+song_id: PDMX path is ./data/{song_id}.json and PDMX MIDI is
+./mid/{song_id}.mid.
+
+If any audio stems were produced with Stable Audio 3, those files are
+additionally subject to the Stability AI Community License
+(https://stability.ai/license). See README.md in this directory.

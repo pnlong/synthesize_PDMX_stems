@@ -12,6 +12,7 @@ import soundfile as sf
 from tqdm import tqdm
 
 from shared.config import CHUNK_SIZE, OUTPUT_DIR, RENDER_MODE_BASIC, STEMS_FILE_NAME
+from synthesis.audio import stem_path
 from synthesis.paths import ablation_raw_dir
 
 
@@ -34,7 +35,7 @@ def stem_duration_seconds(flac_path: Path) -> float:
 
 def analyze_stem_row(row: pd.Series) -> dict:
     song_dir = Path(row["path"])
-    flac = song_dir / f"stem_{int(row['track'])}.flac"
+    flac = stem_path(song_dir, int(row["track"]), "flac")
     duration = stem_duration_seconds(flac) if flac.exists() else float("nan")
     return {
         "path": row["path"],

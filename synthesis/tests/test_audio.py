@@ -23,7 +23,9 @@ from synthesis.audio import (
     pad_and_loudness_normalize,
     save_stem,
     song_is_complete,
+    stem_filename,
     stem_flac_is_valid,
+    stem_path,
     to_mono_numpy,
     truncate_waveform,
     write_flac,
@@ -213,8 +215,8 @@ def test_write_stems_and_mixture_rewrites_peak_scaled_stems(tmp_path: Path):
     )
     assert mix_path is None  # mixture not written by default
     assert not (song_dir / "mixture.flac").exists()
-    stem0 = load_stem(song_dir / "stem_0.flac")
-    stem1 = load_stem(song_dir / "stem_1.flac")
+    stem0 = load_stem(song_dir / "0.flac")
+    stem1 = load_stem(song_dir / "1.flac")
     summed = stem0 + stem1
     assert summed.abs().max().item() <= 1.0 + 1e-4
     np.testing.assert_allclose(
@@ -336,7 +338,17 @@ def test_save_stem_mp3_uses_mp3_extension(tmp_path: Path, monkeypatch):
 
     monkeypatch.setattr("torchaudio.save", lambda *args, **kwargs: None)
     out = save_stem(torch.ones(1, 100), tmp_path, 0, DEFAULT_AUDIO_FORMAT)
-    assert out.name == "stem_0.mp3"
+    assert out.name == "0.mp3"
+
+
+def test_stem_path_falls_back_to_legacy_stem_prefix(tmp_path: Path):
+    legacy = tmp_path / "stem_0.flac"
+    legacy.write_bytes(b"x")
+    assert stem_path(tmp_path, 0, "flac") == legacy
+    assert stem_filename(0, "flac") == "0.flac"
+    numbered = tmp_path / "0.flac"
+    numbered.write_bytes(b"y")
+    assert stem_path(tmp_path, 0, "flac") == numbered
 
 
 def test_write_flac_uses_pcm_16_subtype(tmp_path: Path, monkeypatch):

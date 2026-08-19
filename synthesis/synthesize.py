@@ -407,6 +407,7 @@ def synthesize_song_at_index(
         if hybrid and ddsp_pass == "fluidsynth":
             from synthesis.recipe import BACKEND_FLUIDSYNTH
 
+            rendered_stem_rows: list[dict] = []
             for j, track_path in enumerate(track_paths):
                 meta = track_render_meta[j]
                 backend = meta.get("ddsp_backend")
@@ -427,6 +428,7 @@ def synthesize_song_at_index(
                     track_path, meta, args, path_output,
                 )
                 save_stem(waveform, song_dir, j, audio_format)
+                rendered_stem_rows.append(stem_rows[j])
                 if plan is not None:
                     recipe_rows.append(plan.sidecar_row(
                         path=path_output, track=j, backend=BACKEND_FLUIDSYNTH,
@@ -435,7 +437,7 @@ def synthesize_song_at_index(
                 if exists(path):
                     remove(path)
             temp_dir.cleanup()
-            return None, [], [], recipe_rows
+            return None, rendered_stem_rows, [], recipe_rows
 
         ddsp_like = uses_ddsp(getattr(args, "render_mode", "") or "") or (
             hybrid and ddsp_pass in ("ddsp_piano", "midi_ddsp", "finalize")
@@ -448,6 +450,7 @@ def synthesize_song_at_index(
             # Global two-pass: neural phases only render one backend; finalize does the rest.
             if ddsp_pass in ("ddsp_piano", "midi_ddsp"):
                 neural_jobs: list[tuple[int, str, StemRoute]] = []
+                rendered_stem_rows: list[dict] = []
                 for j, track_path in enumerate(track_paths):
                     meta = track_render_meta[j]
                     if hybrid and not meta.get("neural_ok"):
@@ -491,6 +494,7 @@ def synthesize_song_at_index(
                         for fut in as_completed(futures):
                             idx, waveform = fut.result()
                             save_stem(waveform, song_dir, idx, audio_format)
+                            rendered_stem_rows.append(stem_rows[idx])
                             plan = track_render_meta[idx].get("plan")
                             if plan is not None:
                                 recipe_rows.append(plan.sidecar_row(
@@ -501,8 +505,9 @@ def synthesize_song_at_index(
                     if exists(path):
                         remove(path)
                 temp_dir.cleanup()
-                # CSV rows only on finalize pass.
-                return None, [], [], recipe_rows
+                # Stem/recipe CSVs are upserted per rendered track; song-level
+                # data.csv still waits for finalize.
+                return None, rendered_stem_rows, [], recipe_rows
 
             # Finalize (default when ddsp_pass is None or "finalize"): non-neural stems.
             for j, track_path in enumerate(track_paths):
@@ -771,20 +776,26 @@ def _run_song_pool(
                     recipe_rows,
                     key_cols=["path", "track"],
                 )
-            if not write_tables or song_info is None:
-                continue
+                index = getattr(args, "stem_recipe_index", None)
+                if isinstance(index, dict):
+                    for row in recipe_rows:
+                        index[(str(row["path"]), int(row["track"]))] = row
             if stem_rows:
                 append_rows_deduped(
                     stems_output_filepath,
                     STEMS_TABLE_COLUMNS,
                     stem_rows,
+                    key_cols=["path", "track"],
                 )
             if routing_rows and routing_output_filepath is not None:
                 append_rows_deduped(
                     routing_output_filepath,
                     DDSP_ROUTING_COLUMNS,
                     routing_rows,
+                    key_cols=["path", "track"],
                 )
+            if not write_tables or song_info is None:
+                continue
             append_rows_deduped(
                 output_filepath,
                 SONGS_TABLE_COLUMNS,
@@ -876,16 +887,31 @@ def ensure_synthesis_tables(output_dir: str, args) -> None:
             )
 
 
-def run_layout_pass(args, output_dir: str) -> pd.DataFrame:
-    """Pass 0: mkdir the PDMX-mirrored audio (and mid) tree, no media yet."""
+def run_layout_pass(
+    args,
+    output_dir: str,
+    *,
+    media_dir: str | None = None,
+) -> pd.DataFrame:
+    """Pass 0: mkdir the PDMX-mirrored audio (and mid) tree, no media yet.
+
+    ``output_dir`` holds data/stems/recipe CSVs. Hybrid ``--full`` uses
+    ``media_dir={SPDMX}`` so those tables stay out of the released tree.
+    """
+    media_dir = media_dir or output_dir
     if args.reset:
         reset_synthesis_output(output_dir)
+        if Path(media_dir).resolve() != Path(output_dir).resolve():
+            audio_root = Path(media_dir) / SPDMX_AUDIO_DIR_NAME
+            if audio_root.exists():
+                shutil.rmtree(audio_root)
     else:
         makedirs(output_dir, exist_ok=True)
+        makedirs(media_dir, exist_ok=True)
     leaf = render_tree_dir_name(args)
-    makedirs(f"{output_dir}/{leaf}", exist_ok=True)
+    makedirs(f"{media_dir}/{leaf}", exist_ok=True)
     if _hybrid_recipe(args) is not None:
-        makedirs(f"{output_dir}/{SPDMX_MID_DIR_NAME}", exist_ok=True)
+        makedirs(f"{media_dir}/{SPDMX_MID_DIR_NAME}", exist_ok=True)
 
     register_df = None
     if not args.full and not getattr(args, "no_register", False):
@@ -893,17 +919,26 @@ def run_layout_pass(args, output_dir: str) -> pd.DataFrame:
         if exists(register_path):
             register_df = pd.read_csv(register_path)
 
-    dataset = prepare_render_dataset(args, output_dir, register_df=register_df)
-    for song_dir in dataset["path_output"]:
-        makedirs(song_dir, exist_ok=True)
-    if _hybrid_recipe(args) is not None:
-        pdmx_root = Path(dirname(args.dataset_filepath)).resolve()
-        for mid in dataset["mid"]:
-            rel = Path(mid).resolve().relative_to(pdmx_root)
-            (Path(output_dir) / rel).parent.mkdir(parents=True, exist_ok=True)
+    dataset = prepare_render_dataset(args, media_dir, register_df=register_df)
+    hybrid = _hybrid_recipe(args) is not None
+    pdmx_root = Path(dirname(args.dataset_filepath)).resolve() if hybrid else None
+    for row in tqdm(
+        dataset.itertuples(index=False),
+        total=len(dataset),
+        desc="Pass 0 layout",
+        unit="song",
+    ):
+        makedirs(row.path_output, exist_ok=True)
+        if pdmx_root is not None:
+            rel = Path(row.mid).resolve().relative_to(pdmx_root)
+            (Path(media_dir) / rel).parent.mkdir(parents=True, exist_ok=True)
     ensure_synthesis_tables(output_dir, args)
+    if _hybrid_recipe(args) is not None:
+        from synthesis.spdmx_release import maybe_write_spdmx_release_docs
+
+        maybe_write_spdmx_release_docs(media_dir)
     print(
-        f"Pass 0 layout: {len(dataset)} song directories under {output_dir}/{leaf}",
+        f"Pass 0 layout: {len(dataset)} song directories under {media_dir}/{leaf}",
         flush=True,
     )
     return dataset
@@ -975,14 +1010,20 @@ def _run_hybrid_synthesis(
     args.ddsp_pass = None
 
 
-def run_synthesis(args, output_dir: str):
+def run_synthesis(args, output_dir: str, *, media_dir: str | None = None):
+    media_dir = media_dir or output_dir
     if args.reset and not getattr(args, "skip_output_reset", False):
         reset_synthesis_output(output_dir)
+        if Path(media_dir).resolve() != Path(output_dir).resolve():
+            audio_root = Path(media_dir) / SPDMX_AUDIO_DIR_NAME
+            if audio_root.exists():
+                shutil.rmtree(audio_root)
     else:
         makedirs(output_dir, exist_ok=True)
+        makedirs(media_dir, exist_ok=True)
     output_filepath = f"{output_dir}/{DATA_DIR_NAME}.csv"
     stems_output_filepath = f"{output_dir}/{STEMS_FILE_NAME}.csv"
-    makedirs(f"{output_dir}/{render_tree_dir_name(args)}", exist_ok=True)
+    makedirs(f"{media_dir}/{render_tree_dir_name(args)}", exist_ok=True)
 
     if args.soundfont_filepath is None:
         args.soundfont_filepath = f"{expanduser('~')}/.muspy/musescore-general/MuseScore_General.sf3"
@@ -1012,9 +1053,14 @@ def run_synthesis(args, output_dir: str):
         if _hybrid_recipe(args) is None:
             require_donor_ablation(args, realify=False)
 
-    dataset = prepare_render_dataset(args, output_dir, register_df=register_df)
+    dataset = prepare_render_dataset(args, media_dir, register_df=register_df)
 
-    from analysis.corrected_midi import load_track_map, resolve_corrected_midi_path
+    from analysis.corrected_midi import (
+        load_track_map,
+        load_track_maps,
+        resolve_corrected_midi_path,
+        resolve_track_map_csv,
+    )
     from synthesis.dense_midi import default_corrected_midi_dir
 
     original_dataset_dir = dirname(args.dataset_filepath)
@@ -1024,9 +1070,14 @@ def run_synthesis(args, output_dir: str):
         or default_corrected_midi_dir(args.output_dir)
     )
     print(f"Using dense corrected midis under {corrected_root}")
+    track_maps = load_track_maps(resolve_track_map_csv(corrected_root))
     new_mids = []
     new_n_tracks = []
-    for mid in dataset["mid_pdmx"]:
+    for mid in tqdm(
+        dataset["mid_pdmx"],
+        desc="Resolving corrected MIDI",
+        unit="song",
+    ):
         corrected = resolve_corrected_midi_path(
             mid,
             pdmx_root=original_dataset_dir,
@@ -1038,7 +1089,9 @@ def run_synthesis(args, output_dir: str):
                 "Generate corrected midis first:\n"
                 "  uv run python -m analysis.prepare_synthesis --subset all_valid -j 8"
             )
-        tmap = load_track_map(corrected)
+        tmap = load_track_map(
+            corrected, corrected_midi_dir=corrected_root, track_maps=track_maps
+        )
         new_mids.append(str(corrected))
         new_n_tracks.append(len(tmap))
     dataset["mid"] = new_mids

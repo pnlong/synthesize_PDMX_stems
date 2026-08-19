@@ -110,8 +110,8 @@ def test_no_overwrite_writes_dest_and_mixture(tmp_path: Path):
     assert not (song / "mixture.flac").exists()
 
     out_song = dest / "data" / "song"
-    stem0 = load_stem(out_song / "stem_0.flac")
-    stem1 = load_stem(out_song / "stem_1.flac")
+    stem0 = load_stem(out_song / "0.flac")
+    stem1 = load_stem(out_song / "1.flac")
     mixture = load_stem(out_song / "mixture.flac")
     assert (stem0 + stem1).abs().max().item() <= 1.0 + 1e-4
     np.testing.assert_allclose(

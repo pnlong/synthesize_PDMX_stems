@@ -250,6 +250,34 @@ def test_scan_recipe_conflicts_empty_when_current(tmp_path: Path):
     ) == []
 
 
+def test_recipe_sidecar_upsert_clears_method_conflict(tmp_path: Path):
+    root = tmp_path / "stems"
+    song_dir = _write_stem_tree(root, method="basic")
+    recipe = load_recipe({**_all_basic(), "piano": "slakh"})
+    assert scan_recipe_conflicts(
+        root, recipe, audio_format=DEFAULT_AUDIO_FORMAT, stage="raw",
+    )
+    spec = recipe.spec_for_category("piano")
+    append_rows_deduped(
+        str(root / "stem_recipe.csv"),
+        STEM_RECIPE_COLUMNS,
+        [{
+            "path": str(song_dir),
+            "track": 0,
+            "category": "piano",
+            "ablation": spec.ablation,
+            "method": spec.method,
+            "fallback": spec.fallback,
+            "backend": "fluidsynth",
+            "realify": False,
+        }],
+        key_cols=["path", "track"],
+    )
+    assert scan_recipe_conflicts(
+        root, recipe, audio_format=DEFAULT_AUDIO_FORMAT, stage="raw",
+    ) == []
+
+
 def test_confirm_recipe_conflicts_yes_flag():
     from synthesis.recipe import RecipeConflict
 

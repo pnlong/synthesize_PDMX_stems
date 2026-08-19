@@ -49,6 +49,7 @@ def add_synthesis_args(
     include_realify: bool = True,
     full_default: bool = False,
     flac_default: bool = False,
+    include_audio_format: bool = True,
 ):
     parser.add_argument("-df", "--dataset_filepath", default=PDMX_FILEPATH, type=str)
     parser.add_argument("-o", "--output_dir", default=OUTPUT_DIR, type=str)
@@ -135,7 +136,8 @@ def add_synthesis_args(
             "DDSP modes: if a donor soundfont stem is missing, render Fluidsynth instead of erroring."
         ),
     )
-    add_audio_format_arg(parser, flac_default=flac_default)
+    if include_audio_format:
+        add_audio_format_arg(parser, flac_default=flac_default)
     parser.add_argument(
         "--no-silence-enforce",
         action="store_true",
@@ -173,6 +175,6 @@ def add_synthesis_args(
         type=str,
         help=(
             "Root of dense corrected MIDI copies "
-            "(default: {output_dir}/dev/mid_corrected/)."
+            f"(default: {OUTPUT_DIR}/SPDMX/mid/)."
         ),
     )

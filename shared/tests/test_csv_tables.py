@@ -58,3 +58,32 @@ def test_append_rows_deduped_composite_key(tmp_path):
     assert len(df) == 2
     assert df[df["track"] == 0].iloc[0]["method"] == "midi-ddsp"
     assert df[df["track"] == 1].iloc[0]["method"] == "slakh"
+
+
+def test_append_rows_deduped_stem_track_keeps_siblings(tmp_path):
+    csv_path = tmp_path / "stems.csv"
+    path = "/songs/a"
+    rows = [
+        {
+            "path": path, "track": 0, "original_track": 0, "program": 0,
+            "is_drum": False, "name": "Piano", "has_lyrics": False,
+            "max_velocity": 64, "velocity_scale": 0.5,
+        },
+        {
+            "path": path, "track": 1, "original_track": 1, "program": 48,
+            "is_drum": False, "name": "Strings", "has_lyrics": False,
+            "max_velocity": 90, "velocity_scale": 0.7,
+        },
+    ]
+    append_rows_deduped(str(csv_path), STEMS_TABLE_COLUMNS, rows, key_cols=["path", "track"])
+    append_rows_deduped(
+        str(csv_path),
+        STEMS_TABLE_COLUMNS,
+        [{**rows[0], "program": 1, "name": "Slakh Piano"}],
+        key_cols=["path", "track"],
+    )
+    stems = pd.read_csv(csv_path)
+    assert len(stems) == 2
+    assert stems[stems["track"] == 0].iloc[0]["name"] == "Slakh Piano"
+    assert int(stems[stems["track"] == 0].iloc[0]["program"]) == 1
+    assert stems[stems["track"] == 1].iloc[0]["name"] == "Strings"

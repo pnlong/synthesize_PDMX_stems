@@ -8,10 +8,13 @@ import mido
 import pandas as pd
 
 from analysis.corrected_midi import (
+    TRACK_MAP_COLUMNS,
     load_track_map,
     note_on_count,
     resolve_corrected_midi_path,
+    track_map_csv_path,
     write_corrected_midi,
+    write_corrected_midis_from_register,
 )
 from synthesis.dense_midi import stem_original_track
 
@@ -41,7 +44,8 @@ def _song_with_empty_stub(tmp_path: Path) -> Path:
 
 def test_write_corrected_midi_drops_empty_and_applies_register(tmp_path: Path):
     src = _song_with_empty_stub(tmp_path)
-    dest = tmp_path / "out" / "song.mid"
+    mid_dir = tmp_path / "SPDMX" / "mid"
+    dest = mid_dir / "x.mid"
     rows = write_corrected_midi(
         src,
         dest,
@@ -49,7 +53,11 @@ def test_write_corrected_midi_drops_empty_and_applies_register(tmp_path: Path):
         mid_rel="./mid/x.mid",
     )
     assert dest.is_file()
+    assert not dest.with_suffix(dest.suffix + ".track_map.csv").is_file()
     assert len(rows) == 1
+    assert rows[0]["song_id"] == "x"
+    assert rows[0]["path"] == "./audio/x"
+    assert rows[0]["mid"] == "./mid/x.mid"
     assert rows[0]["track"] == 0
     assert rows[0]["original_track"] == 2
     assert rows[0]["program"] == 12
@@ -60,7 +68,63 @@ def test_write_corrected_midi_drops_empty_and_applies_register(tmp_path: Path):
     programs = [m.program for m in out.tracks[0] if m.type == "program_change"]
     assert programs and programs[0] == 12
     assert any(m.type == "set_tempo" for m in out.tracks[0])
-    assert load_track_map(dest)[0]["original_track"] == 2
+
+    csv_path = track_map_csv_path(mid_dir)
+    pd.DataFrame(rows, columns=TRACK_MAP_COLUMNS).to_csv(csv_path, index=False)
+    assert csv_path == tmp_path / "SPDMX" / "track_map.csv"
+    assert load_track_map(dest, corrected_midi_dir=mid_dir)[0]["original_track"] == 2
+
+
+def test_write_corrected_midis_writes_global_track_map(tmp_path: Path):
+    pdmx_root = tmp_path / "PDMX"
+    pdmx_root.mkdir()
+    pd.DataFrame({
+        "path": ["./data/8/44/Qm.json"],
+        "mid": ["./mid/8/44/Qm.mid"],
+    }).to_csv(pdmx_root / "PDMX.csv", index=False)
+    src = pdmx_root / "mid" / "8" / "44" / "Qm.mid"
+    src.parent.mkdir(parents=True)
+    stub = _song_with_empty_stub(tmp_path)
+    stub.replace(src)
+    register = pd.DataFrame(
+        [
+            {
+                "mid": "./mid/8/44/Qm.mid",
+                "track": 2,
+                "program_corrected": 12,
+            }
+        ]
+    )
+    corrected_root = tmp_path / "SPDMX" / "mid"
+    ok, failed = write_corrected_midis_from_register(
+        register,
+        pdmx_root=pdmx_root,
+        corrected_midi_dir=corrected_root,
+    )
+    assert (ok, failed) == (1, 0)
+    csv_path = tmp_path / "SPDMX" / "track_map.csv"
+    assert csv_path.is_file()
+    assert not (corrected_root / "track_map.csv").is_file()
+    dest = corrected_root / "8" / "44" / "Qm.mid"
+    assert dest.is_file()
+    assert not dest.with_name(dest.name + ".track_map.csv").is_file()
+    mapped = load_track_map(dest, corrected_midi_dir=corrected_root)
+    assert mapped[0]["program"] == 12
+    table = pd.read_csv(csv_path)
+    assert list(table.columns[:4]) == ["song_id", "path", "mid", "track"]
+    assert table.iloc[0]["song_id"] == "8/44/Qm"
+    assert table.iloc[0]["path"] == "./audio/8/44/Qm"
+    assert table.iloc[0]["mid"] == "./mid/8/44/Qm.mid"
+    assert (tmp_path / "SPDMX" / "LICENSE").is_file()
+    assert (tmp_path / "SPDMX" / "README.md").is_file()
+
+
+def test_song_id_from_mid():
+    from analysis.corrected_midi import pdmx_path_from_mid, song_id_from_mid, song_id_from_pdmx_path
+
+    assert song_id_from_mid("./mid/8/44/Qm.mid") == "8/44/Qm"
+    assert song_id_from_pdmx_path("./data/8/44/Qm.json") == "8/44/Qm"
+    assert pdmx_path_from_mid("./mid/8/44/Qm.mid") == "./data/8/44/Qm.json"
 
 
 def test_resolve_corrected_midi_path_strips_mid_prefix(tmp_path: Path):
@@ -68,11 +132,27 @@ def test_resolve_corrected_midi_path_strips_mid_prefix(tmp_path: Path):
     src = pdmx_root / "mid" / "8" / "44" / "Qm.mid"
     src.parent.mkdir(parents=True)
     src.write_bytes(b"mthd")
-    corrected_root = tmp_path / "mid_corrected"
+    corrected_root = tmp_path / "SPDMX" / "mid"
     path = resolve_corrected_midi_path(
         src, pdmx_root=pdmx_root, corrected_midi_dir=corrected_root
     )
     assert path == corrected_root / "8" / "44" / "Qm.mid"
+
+
+def test_resolve_corrected_midi_path_falls_back_to_legacy_dev_tree(tmp_path: Path):
+    pdmx_root = tmp_path / "PDMX"
+    src = pdmx_root / "mid" / "8" / "44" / "Qm.mid"
+    src.parent.mkdir(parents=True)
+    src.write_bytes(b"mthd")
+    output_root = tmp_path / "out"
+    legacy = output_root / "dev" / "mid_corrected" / "8" / "44" / "Qm.mid"
+    legacy.parent.mkdir(parents=True)
+    legacy.write_bytes(b"legacy")
+    canonical = output_root / "SPDMX" / "mid"
+    path = resolve_corrected_midi_path(
+        src, pdmx_root=pdmx_root, corrected_midi_dir=canonical
+    )
+    assert path == legacy
 
 
 def test_stem_original_track_fallback():

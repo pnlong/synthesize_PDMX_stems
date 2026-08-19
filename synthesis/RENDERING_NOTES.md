@@ -28,15 +28,17 @@ If an older `slakh_ddsp/` tree exists, rename it to `ddsp_slakh/` (and `*_realif
 
 ```
 {OUTPUT_DIR}/SPDMX/
-├── data.csv
-├── stems.csv
-├── stem_recipe.csv
-├── audio/<shard>/<shard>/Qm…/   # FLAC stems (PDMX data/*.json → directory)
-│   ├── stem_0.flac
+├── LICENSE
+├── README.md
+├── track_map.csv                 # PDMX song_id (./data/{song_id}.json)
+├── audio/<song_id>/             # FLAC stems (0.flac, 1.flac, …)
+│   ├── 0.flac
 │   └── …
-└── mid/<shard>/<shard>/Qm….mid  # sanitized dense MIDI (+ .track_map.csv)
-    # packaged by python -m synthesis.package_midi
+└── mid/<song_id>.mid            # sanitized dense MIDI
+                                 # written by analysis.prepare_synthesis
 ```
+
+Production bookkeeping (`data.csv`, `stems.csv`, `stem_recipe.csv`) is `{OUTPUT_DIR}/dev/final/`, not the released tree.
 
 Ablation-style full stems (`synthesize --full`) still use `{OUTPUT_DIR}/dev/stems/` (and `stems_realify/` when `--realify` uses a separate tree).
 
@@ -78,9 +80,9 @@ Then run A1/B1/… as usual.
 
 ```
 data/<mirrored-song-path>/
-├── stem_0.mp3    # or stem_0.flac with --flac
-├── stem_1.mp3
-└── ...           # mix = sum(stems); no mixture.* on disk
+├── 0.mp3    # or 0.flac with --flac
+├── 1.mp3
+└── ...      # mix = sum(stems); no mixture.* on disk
 ```
 
 Default on-disk format is **MP3**. Pass `--flac` to write FLAC stems (PCM_16). Use the same `--flac` flag for realify / mix so they read and write the matching format.
@@ -101,7 +103,7 @@ Constant across all ablations (A1–B2), basic and slakh, synthesis and realify:
 2. Multiply each stem by MIDI velocity dynamics \(s_i = v_i^{\max} / v_{\mathrm{song}}^{\max}\) (note-ons with velocity \(> 0\)).
 3. Sum stems sample-wise (in memory).
 4. If mixture peak > `MIXTURE_PEAK_LIMIT` (1.0), apply uniform gain `limit / peak` to every stem (same factor), so released stems remain linearly summable.
-5. Overwrite `stem_*.mp3` / `stem_*.flac` with the scaled waveforms. **No `mixture.*` is written by default** — the mix is just `sum(stems)` (`--write-mixture` to also write it).
+5. Overwrite `N.mp3` / `N.flac` with the scaled waveforms. **No `mixture.*` is written by default** — the mix is just `sum(stems)` (`--write-mixture` to also write it).
 
 **Synthesis and realify write raw stems** (no LUFS). Summability normalization is a separate pass:
 
@@ -196,7 +198,7 @@ After the ablation listening test, edit [`recipe.yaml`](recipe.yaml) with the wi
 
 `python -m synthesis.final --only-pass …` renders **one** mixed stem tree (not eight ablation dirs). Passes are **one method at a time** (do not omit `--only-pass`):
 
-0. **layout** — mkdir `{OUTPUT_DIR}/SPDMX/audio/<shard>/<hash>/` for every valid PDMX song, plus `mid/` parent dirs. Empty `data.csv` / `stems.csv` / `stem_recipe.csv`.
+0. **layout** — mkdir `{OUTPUT_DIR}/SPDMX/audio/<shard>/<hash>/` for every valid PDMX song, plus `mid/` parent dirs. Empty `data.csv` / `stems.csv` / `stem_recipe.csv` under `{OUTPUT_DIR}/dev/final/`.
 1. **Fluidsynth** — categories whose recipe is `basic` / `slakh` (and DDSP-ineligible fallbacks). Per-track slakh recipes vs default GM. `-j` workers.
 2. **DDSP** — categories whose recipe is `ddsp_*`: global `ddsp_piano` then `midi_ddsp`. No donor copies; Fluidsynth already filled fallbacks.
 3. **SA3 realify** — only if the recipe sets `*_realify`; overwrites those stems in place. Locked preset bypasses (`realify: false`) still apply.
@@ -211,9 +213,6 @@ uv run python -m synthesis.final --only-pass fluidsynth -j 8
 uv run python -m synthesis.final --only-pass ddsp
 uv run python -m synthesis.final --only-pass mix
 
-# Sanitized MIDI (separate from audio renders):
-uv run python -m synthesis.package_midi
-
 # If the recipe uses *_realify, insert before mix:
 uv run python -m synthesis.final --only-pass realify
 
@@ -222,14 +221,11 @@ uv run python -m synthesis.final --only-pass fluidsynth -y -j 8
 
 # Stratified sample instead of all valid PDMX (writes dev/ablations/final/):
 uv run python -m synthesis.final --only-pass layout --ablation-sample
-
-# MP3 instead of FLAC:
-uv run python -m synthesis.final --only-pass fluidsynth --mp3 -j 8
 ```
 
-`--only-pass` is required. `--full` and FLAC are the defaults. Audio: `{OUTPUT_DIR}/SPDMX/audio/…/stem_N.flac`. MIDI: `{OUTPUT_DIR}/SPDMX/mid/…` via `synthesis.package_midi`. If the recipe sets `*_realify`, SA3 overwrites those stems in the same directory. Do not add `final` to listening `CONDITION_ORDER`. Each stem tree writes `stem_recipe.csv` beside `stems.csv` (`path`, `track`, `category`, `ablation`, `method`, `fallback`, `backend`, `realify`).
+`--only-pass` is required. `--full` is the default. Stems are always FLAC (`N.flac`). MIDI + `track_map.csv` + `LICENSE` + `README.md`: `{OUTPUT_DIR}/SPDMX/` from `prepare_synthesis` (`song_id` joins to PDMX.csv; `path`/`mid` are dataset-relative). Tables: `{OUTPUT_DIR}/dev/final/`. If the recipe sets `*_realify`, SA3 overwrites those stems in the same directory. Do not add `final` to listening `CONDITION_ORDER`. Each stem tree writes `stem_recipe.csv` beside `stems.csv` (`path`, `track`, `category`, `ablation`, `method`, `fallback`, `backend`, `realify`).
 
-Synthesize always uses dense corrected MIDIs from `dev/mid_corrected/` (`prepare_synthesis` is the step-0 setup).
+Synthesize always uses those dense corrected MIDIs (`prepare_synthesis` is the step-0 setup).
 
 Song-length analysis (no synthesis required):
 
@@ -258,7 +254,6 @@ python -m synthesis.realify.realify --source-dir .../dev/ablations/basic --outpu
 synthesis/
 ├── synthesize.py       # ablation CLI (--render-mode, --full, --realify)
 ├── final.py            # hybrid production CLI (per-category recipe.yaml)
-├── package_midi.py     # copy sanitized MIDIs into {OUTPUT_DIR}/SPDMX/mid/
 ├── recipe.yaml         # per-category synthesis recipe (edit this)
 ├── recipe.py           # parse recipe → per-track plan + stem_recipe.csv
 ├── build_spdmx.py      # assemble {OUTPUT_DIR}/SPDMX/ (stub)

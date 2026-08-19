@@ -34,7 +34,7 @@ def parse_args(args=None, namespace=None):
         description=(
             "Step-0 synthesis setup: correct GM program ids from MIDI track names, "
             "write register.csv, and (by default) write dense corrected MIDI copies "
-            "under dev/mid_corrected/ (empty tracks dropped). "
+            f"under {OUTPUT_DIR}/SPDMX/mid/ (empty tracks dropped). "
             "Prefer: python -m analysis.prepare_synthesis"
         ),
     )
@@ -99,7 +99,7 @@ def parse_args(args=None, namespace=None):
         "--corrected-midi-dir",
         default=None,
         type=str,
-        help="Output root for corrected MIDIs (default: {OUTPUT_DIR}/dev/mid_corrected/).",
+        help=f"Output root for corrected MIDIs (default: {OUTPUT_DIR}/SPDMX/mid/).",
     )
     return parser.parse_args(args=args, namespace=namespace)
 
@@ -146,10 +146,7 @@ def analyze_gm_register(
 
     if jobs <= 1:
         _init_worker(aliases)
-        iterator = worker_args
-        if n_songs > 1:
-            iterator = tqdm(worker_args, total=n_songs, desc="Building register", unit="song")
-        for item in iterator:
+        for item in tqdm(worker_args, total=n_songs, desc="Building register", unit="song"):
             rows, failed = _worker(item)
             register_rows.extend(rows)
             n_songs_failed += int(failed)

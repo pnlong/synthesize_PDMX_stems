@@ -12,7 +12,7 @@ from synthesis.final import (
     parse_args,
     pass_sequence,
 )
-from synthesis.paths import ablation_raw_dir, spdmx_dataset_dir
+from synthesis.paths import ablation_raw_dir, production_tables_dir, spdmx_dataset_dir
 from synthesis.recipe import (
     DEFAULT_RECIPE_PATH,
     STEM_RECIPE_FILE_NAME,
@@ -36,10 +36,12 @@ def test_parse_args_layout_defaults_full_flac():
     assert args.yes is False
 
 
-def test_parse_args_mp3_and_only_pass():
-    args = parse_args(["--ablation-sample", "--only-pass", "fluidsynth", "--mp3", "-j", "4", "-y"])
+def test_parse_args_mp3_rejected_flac_always():
+    with pytest.raises(SystemExit):
+        parse_args(["--only-pass", "fluidsynth", "--mp3"])
+    args = parse_args(["--ablation-sample", "--only-pass", "fluidsynth", "-j", "4", "-y"])
     assert args.full is False
-    assert args.flac is False
+    assert args.flac is True
     assert args.only_pass == "fluidsynth"
     assert args.jobs == 4
     assert args.yes is True
@@ -49,7 +51,7 @@ def test_hybrid_dirs_write_one_tree():
     full = parse_args(["-o", "/tmp/spdmx", "--only-pass", "layout"])
     sample = parse_args(["-o", "/tmp/spdmx", "--ablation-sample", "--only-pass", "layout"])
     assert hybrid_dirs(full) == (
-        spdmx_dataset_dir("/tmp/spdmx"),
+        production_tables_dir("/tmp/spdmx"),
         spdmx_dataset_dir("/tmp/spdmx"),
     )
     dest = ablation_raw_dir("/tmp/spdmx", FINAL_CONDITION)
@@ -93,11 +95,15 @@ def test_layout_pass_creates_song_dirs(tmp_path: Path):
         specs={"piano": CategorySpec("basic", False, "basic", "basic")},
     )
     dest = spdmx_dataset_dir(str(out))
-    dataset = run_layout_pass(args, dest)
+    tables = production_tables_dir(str(out))
+    dataset = run_layout_pass(args, tables, media_dir=dest)
     song_dir = Path(dataset.iloc[0]["path_output"])
     assert song_dir.is_dir()
     assert song_dir == Path(dest) / "audio" / "1" / "11" / "QmTestSong"
     assert (Path(dest) / "mid" / "1" / "11").is_dir()
-    assert (Path(dest) / f"{DATA_DIR_NAME}.csv").is_file()
-    assert (Path(dest) / f"{STEMS_FILE_NAME}.csv").is_file()
-    assert (Path(dest) / STEM_RECIPE_FILE_NAME).is_file()
+    assert not (Path(dest) / f"{DATA_DIR_NAME}.csv").is_file()
+    assert (Path(tables) / f"{DATA_DIR_NAME}.csv").is_file()
+    assert (Path(tables) / f"{STEMS_FILE_NAME}.csv").is_file()
+    assert (Path(tables) / STEM_RECIPE_FILE_NAME).is_file()
+    assert (Path(dest) / "LICENSE").is_file()
+    assert (Path(dest) / "README.md").is_file()

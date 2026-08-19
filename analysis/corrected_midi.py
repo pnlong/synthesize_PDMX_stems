@@ -7,9 +7,20 @@ from pathlib import Path
 import mido
 import pandas as pd
 
+from shared.config import (
+    DEV_DIR_NAME,
+    MID_CORRECTED_DIR_NAME,
+    SPDMX_DATASET_DIR_NAME,
+    SPDMX_MID_DIR_NAME,
+)
 from synthesis.patches import PatchAssignment, apply_patch_to_midi_track
 
+TRACK_MAP_FILE_NAME = "track_map.csv"
+# ``song_id`` is ``<shard>/<shard>/<hash>`` (PDMX ``./data/{song_id}.json``).
+# Row identity in this table is (song_id, track).
 TRACK_MAP_COLUMNS = [
+    "song_id",
+    "path",
     "mid",
     "track",
     "original_track",
@@ -17,6 +28,8 @@ TRACK_MAP_COLUMNS = [
     "is_drum",
     "name",
 ]
+
+_TRACK_MAPS_CACHE: dict[str, dict[str, dict[int, dict]]] = {}
 
 _CONDUCTOR_META_TYPES = frozenset({
     "set_tempo",
@@ -35,9 +48,153 @@ def note_on_count(track) -> int:
     )
 
 
-def track_map_path_for_midi(midi_path: str | Path) -> Path:
-    path = Path(midi_path)
-    return path.with_suffix(path.suffix + ".track_map.csv")
+def dest_rel_from_mid_col(mid_rel: str) -> str:
+    """``./mid/a/b/Qm.mid`` → ``a/b/Qm.mid`` (path under the corrected mid tree)."""
+    text = str(mid_rel).lstrip("./")
+    if text.startswith("mid/"):
+        text = text[len("mid/"):]
+    return text
+
+
+def song_id_from_mid(mid_rel: str) -> str:
+    """PDMX/sPDMX song id: ``./mid/a/b/Qm.mid`` → ``a/b/Qm``."""
+    rel = dest_rel_from_mid_col(mid_rel)
+    if rel.endswith(".mid"):
+        rel = rel[: -len(".mid")]
+    return rel
+
+
+def song_id_from_pdmx_path(path_rel: str) -> str:
+    """``./data/a/b/Qm.json`` → ``a/b/Qm``."""
+    text = str(path_rel).replace("\\", "/").lstrip("./")
+    if text.startswith("data/"):
+        text = text[len("data/") :]
+    if text.endswith(".json"):
+        text = text[: -len(".json")]
+    return text
+
+
+def pdmx_path_from_mid(mid_rel: str) -> str:
+    """PDMX metadata path: ``./mid/a/b/Qm.mid`` → ``./data/a/b/Qm.json``."""
+    return f"./data/{song_id_from_mid(mid_rel)}.json"
+
+
+def spdmx_audio_rel(song_id: str) -> str:
+    """Dataset-relative audio directory: ``./audio/a/b/Qm``."""
+    return f"./audio/{song_id}"
+
+
+def spdmx_mid_rel(song_id: str) -> str:
+    """Dataset-relative dense MIDI: ``./mid/a/b/Qm.mid``."""
+    return f"./mid/{song_id}.mid"
+
+
+def track_map_csv_path(corrected_midi_dir: str | Path) -> Path:
+    """Preferred global track map: ``{SPDMX}/track_map.csv`` when mid is ``{SPDMX}/mid/``."""
+    root = Path(corrected_midi_dir)
+    if root.name == SPDMX_MID_DIR_NAME:
+        return root.parent / TRACK_MAP_FILE_NAME
+    return root / TRACK_MAP_FILE_NAME
+
+
+def track_map_csv_candidates(corrected_midi_dir: str | Path) -> list[Path]:
+    root = Path(corrected_midi_dir)
+    primary = track_map_csv_path(root)
+    candidates = [primary]
+    nested = root / TRACK_MAP_FILE_NAME
+    if nested.resolve() != primary.resolve():
+        candidates.append(nested)
+    if (
+        root.name == SPDMX_MID_DIR_NAME
+        and root.parent.name == SPDMX_DATASET_DIR_NAME
+    ):
+        candidates.append(
+            root.parent.parent
+            / DEV_DIR_NAME
+            / MID_CORRECTED_DIR_NAME
+            / TRACK_MAP_FILE_NAME
+        )
+    return candidates
+
+
+def resolve_track_map_csv(corrected_midi_dir: str | Path) -> Path:
+    """First existing candidate, else the preferred path (for error messages)."""
+    root = Path(corrected_midi_dir)
+    for path in track_map_csv_candidates(root):
+        if path.is_file():
+            return path
+    return track_map_csv_path(root)
+
+
+def dest_rel_for_midi(midi_path: str | Path, corrected_midi_dir: str | Path) -> str:
+    """Song id for a dense MIDI file (``a/b/Qm``)."""
+    midi_path = Path(midi_path).resolve()
+    corrected_midi_dir = Path(corrected_midi_dir).resolve()
+    try:
+        rel = str(midi_path.relative_to(corrected_midi_dir))
+    except ValueError:
+        rel = None
+        parts = midi_path.parts
+        for marker in (SPDMX_MID_DIR_NAME, MID_CORRECTED_DIR_NAME):
+            if marker in parts:
+                idx = parts.index(marker)
+                rel = str(Path(*parts[idx + 1 :]))
+                break
+        if rel is None:
+            rel = midi_path.name
+    return song_id_from_mid(rel)
+
+
+def clear_track_map_cache() -> None:
+    _TRACK_MAPS_CACHE.clear()
+
+
+def load_track_maps(track_map_csv: str | Path) -> dict[str, dict[int, dict]]:
+    """Load the global track map. Keys are ``song_id`` (``a/b/Qm``)."""
+    path = Path(track_map_csv).resolve()
+    cache_key = str(path)
+    cached = _TRACK_MAPS_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+    if not path.is_file():
+        raise FileNotFoundError(
+            f"Dense MIDI track map not found: {path}\n"
+            "Re-run: uv run python -m analysis.prepare_synthesis --subset all_valid -j 8"
+        )
+    df = pd.read_csv(path)
+    maps: dict[str, dict[int, dict]] = {}
+    for _, row in df.iterrows():
+        if "song_id" in df.columns and pd.notna(row.get("song_id")):
+            key = str(row["song_id"])
+        elif "path" in df.columns and pd.notna(row.get("path")):
+            key = song_id_from_pdmx_path(row["path"])
+        else:
+            key = song_id_from_mid(row["mid"])
+        maps.setdefault(key, {})[int(row["track"])] = {
+            "original_track": int(row["original_track"]),
+            "program": int(row["program"]) if pd.notna(row.get("program")) else 0,
+            "is_drum": bool(row.get("is_drum", False)),
+            "name": None if pd.isna(row.get("name")) else str(row["name"]),
+        }
+    _TRACK_MAPS_CACHE[cache_key] = maps
+    return maps
+
+
+def load_track_map(
+    midi_path: str | Path,
+    *,
+    corrected_midi_dir: str | Path,
+    track_maps: dict[str, dict[int, dict]] | None = None,
+) -> dict[int, dict]:
+    """Map dense ``track`` → row dict from the global ``track_map.csv``."""
+    csv_path = resolve_track_map_csv(corrected_midi_dir)
+    key = dest_rel_for_midi(midi_path, corrected_midi_dir)
+    maps = track_maps if track_maps is not None else load_track_maps(csv_path)
+    if key not in maps:
+        raise FileNotFoundError(
+            f"No track map rows for {midi_path} (key {key!r}) in {csv_path}"
+        )
+    return maps[key]
 
 
 def _conductor_meta_prefix(midi: mido.MidiFile) -> list:
@@ -104,13 +261,14 @@ def write_corrected_midi(
     single-track stem exports still have correct wall-clock duration. Empty
     grand-staff / conductor stubs are omitted.
 
-    Returns sidecar rows (``TRACK_MAP_COLUMNS``) and writes
-    ``{dest}.track_map.csv`` next to the MIDI.
+    Returns track-map rows (``TRACK_MAP_COLUMNS``). The batch writer stores them
+    in a single ``track_map.csv``; this function does not write a per-file map.
     """
     src_mid = Path(src_mid)
     dest_mid = Path(dest_mid)
     program_by_original_track = program_by_original_track or {}
     rel = mid_rel if mid_rel is not None else str(src_mid)
+    song_id = song_id_from_mid(rel)
 
     midi = mido.MidiFile(filename=str(src_mid), charset="utf8")
     meta_prefix = _conductor_meta_prefix(midi)
@@ -136,7 +294,9 @@ def write_corrected_midi(
         )
         out.tracks.append(new_track)
         map_rows.append({
-            "mid": rel,
+            "song_id": song_id,
+            "path": spdmx_audio_rel(song_id),
+            "mid": spdmx_mid_rel(song_id),
             "track": dense_idx,
             "original_track": original_idx,
             "program": program,
@@ -155,30 +315,7 @@ def write_corrected_midi(
 
     dest_mid.parent.mkdir(parents=True, exist_ok=True)
     out.save(str(dest_mid))
-
-    map_path = track_map_path_for_midi(dest_mid)
-    pd.DataFrame(map_rows, columns=TRACK_MAP_COLUMNS).to_csv(map_path, index=False)
     return map_rows
-
-
-def load_track_map(midi_path: str | Path) -> dict[int, dict]:
-    """Map dense ``track`` → row dict from the sidecar next to ``midi_path``."""
-    map_path = track_map_path_for_midi(midi_path)
-    if not map_path.is_file():
-        raise FileNotFoundError(
-            f"Dense MIDI track map not found: {map_path}\n"
-            "Re-run: uv run python -m analysis.prepare_synthesis --subset all_valid -j 8"
-        )
-    df = pd.read_csv(map_path)
-    out: dict[int, dict] = {}
-    for _, row in df.iterrows():
-        out[int(row["track"])] = {
-            "original_track": int(row["original_track"]),
-            "program": int(row["program"]) if pd.notna(row.get("program")) else 0,
-            "is_drum": bool(row.get("is_drum", False)),
-            "name": None if pd.isna(row.get("name")) else str(row["name"]),
-        }
-    return out
 
 
 def write_corrected_midis_from_register(
@@ -201,11 +338,9 @@ def write_corrected_midis_from_register(
     global_rows: list[dict] = []
 
     items = list(grouped)
-    iterator = items
-    if len(items) > 1:
-        from tqdm import tqdm
+    from tqdm import tqdm
 
-        iterator = tqdm(items, total=len(items), desc="Writing corrected MIDI", unit="song")
+    iterator = tqdm(items, total=len(items), desc="Writing corrected MIDI", unit="song")
 
     for mid_rel, group in iterator:
         src = mid_path_for_row(str(mid_rel), pdmx_root)
@@ -237,10 +372,12 @@ def write_corrected_midis_from_register(
         ok += 1
 
     if global_rows:
-        pd.DataFrame(global_rows, columns=TRACK_MAP_COLUMNS).to_csv(
-            corrected_midi_dir / "track_map.csv",
-            index=False,
-        )
+        out_csv = track_map_csv_path(corrected_midi_dir)
+        pd.DataFrame(global_rows, columns=TRACK_MAP_COLUMNS).to_csv(out_csv, index=False)
+        clear_track_map_cache()
+        from synthesis.spdmx_release import maybe_write_spdmx_release_docs
+
+        maybe_write_spdmx_release_docs(out_csv.parent)
     return ok, failed
 
 
@@ -267,4 +404,19 @@ def resolve_corrected_midi_path(
     rel_s = str(rel).lstrip("./")
     if rel_s.startswith("mid/"):
         rel_s = rel_s[len("mid/"):]
-    return corrected_midi_dir / rel_s
+    primary = corrected_midi_dir / rel_s
+    if primary.is_file():
+        return primary
+    if (
+        corrected_midi_dir.name == SPDMX_MID_DIR_NAME
+        and corrected_midi_dir.parent.name == SPDMX_DATASET_DIR_NAME
+    ):
+        legacy = (
+            corrected_midi_dir.parent.parent
+            / DEV_DIR_NAME
+            / MID_CORRECTED_DIR_NAME
+            / rel_s
+        )
+        if legacy.is_file():
+            return legacy
+    return primary

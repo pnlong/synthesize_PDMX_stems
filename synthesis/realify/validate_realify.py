@@ -48,7 +48,7 @@ def load_clip_manifest(clips_dir: Path) -> list[dict]:
 
     stems = []
     for path in sorted(clips_dir.glob("**/*.flac")) + sorted(clips_dir.glob("**/*.mp3")):
-        if path.name.startswith("stem_"):
+        if path.name.startswith("stem_") or path.stem.isdigit():
             stems.append({
                 "id": path.stem,
                 "path": str(path),
@@ -322,7 +322,9 @@ def build_rows_for_stems(
                 clip_path = clips_dir / clip_path.name
             song_path = clip_path.parent
             track = 0
-            if clip_path.stem.startswith("stem_"):
+            if clip_path.stem.isdigit():
+                track = int(clip_path.stem)
+            elif clip_path.stem.startswith("stem_"):
                 track = int(clip_path.stem.split("_", 1)[1])
 
         if not clip_path.is_file():

@@ -10,7 +10,7 @@ import pandas as pd
 from experiments.listening.aggregate import load_responses, ratings_dataframe
 from experiments.preset_sweep.sweep import MANIFEST_FILENAME
 from shared.config import REALIFY_CONTENT_FIDELITY_THRESHOLD
-from synthesis.audio import load_stem
+from synthesis.audio import load_stem, stem_path
 from synthesis.realify.content_fidelity import score_content_fidelity
 
 
@@ -80,7 +80,7 @@ def reference_path_for_row(
 
     song_path = Path(row["path"])
     for ext in ("flac", "mp3", "wav"):
-        candidate = song_path / f"stem_{track}.{ext}"
+        candidate = stem_path(song_path, track, ext)
         if candidate.is_file():
             return candidate
     raise FileNotFoundError(f"No reference audio found for manifest row stem_id={stem_id!r}")

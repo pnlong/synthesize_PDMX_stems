@@ -256,7 +256,12 @@ def synthesis_audio_format(use_flac: bool = False) -> str:
 
 
 def stem_filename(track: int, audio_format: str = DEFAULT_AUDIO_FORMAT) -> str:
-    return f"stem_{track}.{audio_format}"
+    return f"{int(track)}.{audio_format}"
+
+
+def legacy_stem_filename(track: int, audio_format: str = DEFAULT_AUDIO_FORMAT) -> str:
+    """Previous on-disk name ``stem_{track}.{ext}``."""
+    return f"stem_{int(track)}.{audio_format}"
 
 
 def mixture_filename(audio_format: str = DEFAULT_AUDIO_FORMAT) -> str:
@@ -264,11 +269,30 @@ def mixture_filename(audio_format: str = DEFAULT_AUDIO_FORMAT) -> str:
 
 
 def stem_path(song_dir: Path, track: int, audio_format: str = DEFAULT_AUDIO_FORMAT) -> Path:
-    return song_dir / stem_filename(track, audio_format)
+    canonical = Path(song_dir) / stem_filename(track, audio_format)
+    if canonical.is_file():
+        return canonical
+    legacy = Path(song_dir) / legacy_stem_filename(track, audio_format)
+    if legacy.is_file():
+        return legacy
+    return canonical
 
 
 def mixture_path(song_dir: Path, audio_format: str = DEFAULT_AUDIO_FORMAT) -> Path:
     return song_dir / mixture_filename(audio_format)
+
+
+def track_index_from_stem_name(name: str, audio_format: str) -> int | None:
+    """Parse ``N.ext`` or ``stem_N.ext``; ignore mixture and other files."""
+    suffix = f".{audio_format}"
+    if not name.endswith(suffix):
+        return None
+    stem = name[: -len(suffix)]
+    if stem.isdigit():
+        return int(stem)
+    if stem.startswith("stem_") and stem[len("stem_") :].isdigit():
+        return int(stem[len("stem_") :])
+    return None
 
 
 def _stem_frame_count(path: Path) -> tuple[int, int]:
@@ -345,10 +369,20 @@ def list_stem_paths(
     *,
     require_valid: bool = True,
 ) -> list[Path]:
-    """Sorted ``stem_*.{ext}`` paths under ``song_dir`` (missing dir → empty)."""
+    """Sorted stem paths under ``song_dir`` (``N.ext`` or legacy ``stem_N.ext``)."""
     if not song_dir.is_dir():
         return []
-    paths = sorted(song_dir.glob(f"stem_*.{audio_format}"))
+    by_track: dict[int, Path] = {}
+    for path in song_dir.iterdir():
+        if not path.is_file():
+            continue
+        track = track_index_from_stem_name(path.name, audio_format)
+        if track is None:
+            continue
+        current = by_track.get(track)
+        if current is None or path.name == stem_filename(track, audio_format):
+            by_track[track] = path
+    paths = [by_track[t] for t in sorted(by_track)]
     if require_valid:
         return [p for p in paths if stem_is_valid(p)]
     return paths

@@ -37,7 +37,7 @@ SONG_LENGTHS_DIR_NAME = "song_lengths"
 INSTRUMENTS_DIR_NAME = "instruments"
 TRACK_NAMES_DIR_NAME = "track_names"
 
-# {OUTPUT_DIR}/dev/mid_corrected/ — dense register-corrected MIDI copies (empty tracks dropped)
+# {OUTPUT_DIR}/dev/mid_corrected/ — legacy dense MIDI tree (now {OUTPUT_DIR}/SPDMX/mid/)
 MID_CORRECTED_DIR_NAME = "mid_corrected"
 
 # {OUTPUT_DIR}/dev/experiments/ — experiment outputs (preset sweep, etc.)
@@ -45,7 +45,7 @@ EXPERIMENTS_DIR_NAME = "experiments"
 PRESET_SWEEP_DIR_NAME = "preset_sweep"
 PATCH_SWEEP_DIR_NAME = "patch_sweep"
 
-# {OUTPUT_DIR}/SPDMX/ — production dataset (synthesis.final); audio/ + mid/
+# {OUTPUT_DIR}/SPDMX/ — released dataset: LICENSE, README, track_map.csv, audio/, mid/
 SPDMX_DATASET_DIR_NAME = "SPDMX"
 SPDMX_AUDIO_DIR_NAME = "audio"
 SPDMX_MID_DIR_NAME = "mid"
@@ -90,7 +90,7 @@ SAMPLE_RATE = 44100
 # 1 = mono (downmix fluidsynth stereo). 2 = stereo (keep fluidsynth L/R).
 STEM_CHANNELS = 1
 GAIN = 1.0
-STEM_FILE_PATTERN = "stem_{track}.mp3"
+STEM_FILE_PATTERN = "{track}.mp3"
 MIXTURE_FILE_NAME = "mixture.mp3"
 MIXTURE_PEAK_LIMIT = 1.0
 FLAC_SUBTYPE = "PCM_16"  # on-disk stems/mixtures; processing uses float32 internally

@@ -21,7 +21,9 @@ from synthesis.audio import (
     list_stem_paths,
     mixture_filename,
     stem_filename,
+    stem_path,
     sum_stems_in_song_dir,
+    track_index_from_stem_name,
 )
 from synthesis.patches import LISTENING_CATEGORY_GM_CLASSES, resolve_probe_category
 from synthesis.paths import ablations_root
@@ -98,7 +100,7 @@ def detect_audio_format(song_dir: Path) -> str | None:
 
     for fmt in (DEFAULT_AUDIO_FORMAT, FLAC_AUDIO_FORMAT):
         # Prefer stems (mixtures are written separately via synthesis.mix).
-        if any(song_dir.glob(f"stem_*.{fmt}")):
+        if any(list_stem_paths(song_dir, fmt, require_valid=False)):
             return fmt
         if (song_dir / mixture_filename(fmt)).exists():
             return fmt
@@ -157,12 +159,14 @@ def _audio_cell(
     reference_condition: str,
     song_path: str | Path,
     target_condition: str,
-    filename: str,
+    track: int,
+    audio_format: str,
 ) -> dict:
     song_dir = _song_dir_for_condition(
         ablations_dir, reference_condition, song_path, target_condition
     )
-    audio_path = song_dir / filename
+    audio_path = stem_path(song_dir, track, audio_format)
+    filename = audio_path.name if audio_path.is_file() else stem_filename(track, audio_format)
     available = audio_path.is_file()
     song_id = song_id_from_path(song_path)
     return {
@@ -406,13 +410,13 @@ class AblationCatalog:
                     original_track=original_track,
                     fallback_track=track,
                 )
-                stem_filename_str = stem_filename(file_track, audio_format)
                 conditions[condition] = _audio_cell(
                     self.ablations_dir,
                     self.reference_condition,
                     song_path,
                     condition,
-                    stem_filename_str,
+                    file_track,
+                    audio_format,
                 )
             caption = None
             if not self._captions_df.empty:
@@ -496,7 +500,16 @@ class AblationCatalog:
                 audio_path = (song_dir / filename).resolve()
                 if not str(audio_path).startswith(str(self.ablations_dir)):
                     return None
-                return audio_path if audio_path.is_file() else None
+                if audio_path.is_file():
+                    return audio_path
+                fmt = Path(filename).suffix.lstrip(".")
+                track = track_index_from_stem_name(filename, fmt)
+                if track is None:
+                    return None
+                alt = stem_path(song_dir, track, fmt).resolve()
+                if not str(alt).startswith(str(self.ablations_dir)):
+                    return None
+                return alt if alt.is_file() else None
         return None
 
     def resolve_song_dir(self, condition: str, song_id: str) -> Path | None:

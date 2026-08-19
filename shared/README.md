@@ -14,4 +14,5 @@ Key paths (see `config.py` for full list):
 
 - `OUTPUT_DIR` — `/deepfreeze/pnlong/SPDMX`
 - `{OUTPUT_DIR}/dev/` — development artifacts (ablations, analysis, interim stems)
-- `{OUTPUT_DIR}/SPDMX/` — final assembled dataset (via `build_spdmx`)
+- `{OUTPUT_DIR}/SPDMX/` — released dataset (`LICENSE`, `README.md`, `track_map.csv`, `audio/`, `mid/`; join to PDMX.csv on `song_id`)
+- `{OUTPUT_DIR}/dev/final/` — production synthesis tables (`data.csv`, `stems.csv`, `stem_recipe.csv`)

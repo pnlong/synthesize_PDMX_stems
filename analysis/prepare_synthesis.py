@@ -6,7 +6,7 @@ Preferred entrypoint (broader than ``analyze_gm_register``)::
 
 Writes:
   - ``{OUTPUT_DIR}/dev/analysis/instruments/<subset>/register.csv``
-  - ``{OUTPUT_DIR}/dev/mid_corrected/`` (default; disable with ``--no-write-corrected-midi``)
+  - ``{OUTPUT_DIR}/SPDMX/``: ``mid/``, ``track_map.csv``, ``LICENSE``, ``README.md`` (disable MIDI with ``--no-write-corrected-midi``)
 
 ``analyze_gm_register`` remains a thin alias for the same CLI.
 """

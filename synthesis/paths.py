@@ -19,6 +19,9 @@ from shared.config import (
     TRACK_NAMES_DIR_NAME,
 )
 
+# {OUTPUT_DIR}/dev/final/ — production data.csv / stems.csv / stem_recipe.csv
+PRODUCTION_TABLES_DIR_NAME = "final"
+
 
 def condition_name(render_mode: str, realify: bool = False) -> str:
     return f"{render_mode}_realify" if realify else render_mode
@@ -57,6 +60,12 @@ def analysis_root(output_dir: str) -> str:
 
 
 def mid_corrected_dir(output_dir: str) -> str:
+    """Dense corrected MIDI tree (same as released ``SPDMX/mid/``)."""
+    return spdmx_mid_dir(output_dir)
+
+
+def legacy_mid_corrected_dir(output_dir: str) -> str:
+    """Previous location: ``{OUTPUT_DIR}/dev/mid_corrected/``."""
     return f"{dev_root(output_dir)}/{MID_CORRECTED_DIR_NAME}"
 
 
@@ -70,6 +79,11 @@ def instruments_dir(output_dir: str) -> str:
 
 def track_names_dir(output_dir: str) -> str:
     return f"{analysis_root(output_dir)}/{TRACK_NAMES_DIR_NAME}"
+
+
+def production_tables_dir(output_dir: str) -> str:
+    """Bookkeeping CSVs for hybrid ``synthesis.final --full`` (not the released tree)."""
+    return f"{dev_root(output_dir)}/{PRODUCTION_TABLES_DIR_NAME}"
 
 
 def spdmx_dataset_dir(output_dir: str) -> str:

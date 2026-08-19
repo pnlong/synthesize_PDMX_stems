@@ -96,6 +96,20 @@ def test_spdmx_dataset_dir():
     assert spdmx_dataset_dir("/out") == f"/out/{SPDMX_DATASET_DIR_NAME}"
     assert spdmx_audio_dir("/out") == f"/out/{SPDMX_DATASET_DIR_NAME}/{SPDMX_AUDIO_DIR_NAME}"
     assert spdmx_mid_dir("/out") == f"/out/{SPDMX_DATASET_DIR_NAME}/{SPDMX_MID_DIR_NAME}"
+    from synthesis.paths import mid_corrected_dir, production_tables_dir
+
+    assert mid_corrected_dir("/out") == spdmx_mid_dir("/out")
+    assert production_tables_dir("/out") == f"/out/{DEV_DIR_NAME}/final"
+
+
+def test_song_output_dir_swaps_data_for_audio():
+    from synthesis.synthesize import song_output_dir
+
+    json_path = "/pdmx/data/1/11/QmSong.json"
+    assert song_output_dir("/out", "/pdmx", json_path) == "/out/data/1/11/QmSong"
+    assert song_output_dir(
+        "/out", "/pdmx", json_path, tree_dir_name=SPDMX_AUDIO_DIR_NAME,
+    ) == "/out/audio/1/11/QmSong"
 
 
 def test_ablation_sample_size_and_seed():
