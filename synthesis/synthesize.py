@@ -59,6 +59,59 @@ from synthesis.reuse import (
     uses_slakh_recipes,
 )
 
+
+def _hybrid_recipe(args):
+    return getattr(args, "recipe", None)
+
+
+def _needs_ddsp_routing(args) -> bool:
+    recipe = _hybrid_recipe(args)
+    if recipe is not None:
+        return recipe.uses_ddsp()
+    return uses_ddsp(getattr(args, "render_mode", "") or "")
+
+
+def _pool_should_spawn(args) -> bool:
+    if uses_ddsp(getattr(args, "render_mode", "") or ""):
+        return True
+    return getattr(args, "ddsp_pass", None) in ("ddsp_piano", "midi_ddsp")
+
+
+def _hybrid_raw_current(args, song_path: str, track: int, out_stem, plan, backend: str) -> bool:
+    """True when the on-disk stem is valid and matches the current raw recipe."""
+    from synthesis.recipe import raw_fingerprint, recorded_raw_fingerprint
+
+    if args.reset or not stem_is_valid(out_stem):
+        return False
+    rec = (getattr(args, "stem_recipe_index", None) or {}).get(
+        (str(song_path), int(track))
+    )
+    return recorded_raw_fingerprint(rec) == raw_fingerprint(
+        plan.method, plan.fallback, backend,
+    )
+
+
+def _hybrid_song_raw_current(
+    args, path_output: str, n_tracks: int, song_dir, audio_format: str, recipe,
+) -> bool:
+    from synthesis.recipe import desired_raw_fingerprint, recorded_raw_fingerprint
+
+    index = getattr(args, "stem_recipe_index", None) or {}
+    for j in range(n_tracks):
+        if not stem_is_valid(stem_path(song_dir, j, audio_format)):
+            return False
+        rec = index.get((str(path_output), j))
+        if rec is None:
+            return False
+        category = rec.get("category")
+        if category not in recipe.specs:
+            return False
+        spec = recipe.spec_for_category(str(category))
+        backend = str(rec.get("backend") or "fluidsynth")
+        if recorded_raw_fingerprint(rec) != desired_raw_fingerprint(spec, backend):
+            return False
+    return True
+
 def parse_args(args=None, namespace=None):
     parser = argparse.ArgumentParser(
         prog="Synthesize",
@@ -129,8 +182,9 @@ def synthesize_song_at_index(
 
     For DDSP render modes, ``args.ddsp_pass`` selects a global phase:
     ``ddsp_piano`` / ``midi_ddsp`` only render that neural backend; ``finalize``
-    fills donor/soundfont stems and CSV rows. Mixtures are a separate
-    ``synthesis.mix`` pass.
+    fills donor/soundfont stems and CSV rows. Hybrid final synthesis also uses
+    ``fluidsynth`` (soundfont stems only; neural tracks left for later passes).
+    Mixtures are a separate ``synthesis.mix`` pass.
     """
     from synthesis.dense_midi import resolve_synthesis_midi
 
@@ -146,26 +200,38 @@ def synthesize_song_at_index(
     )
     midi = mido.MidiFile(filename=str(midi_path), charset="utf8")
     n_tracks = len(track_map)
+    recipe = _hybrid_recipe(args)
+    hybrid = recipe is not None
 
     if (
         path_output in completed_paths
         and song_is_complete(song_dir, n_tracks, audio_format, require_mixture=False)
         and not args.reset
+        and (
+            not hybrid
+            or _hybrid_song_raw_current(
+                args, path_output, n_tracks, song_dir, audio_format, recipe,
+            )
+        )
     ):
         del midi
-        return None, [], []
+        return None, [], [], []
     stems_complete = all(
         stem_is_valid(stem_path(song_dir, j, audio_format)) for j in range(n_tracks)
     )
     # Neural / finalize passes must enter the render block even when stems exist:
     # neural phases skip valid stems; finalize still emits ddsp_routing rows.
     need_to_synthesize = args.reset or not stems_complete
-    if uses_ddsp(args.render_mode) and ddsp_pass in (
-        "ddsp_piano", "midi_ddsp", "finalize",
+    if (
+        uses_ddsp(getattr(args, "render_mode", "") or "")
+        or hybrid
+    ) and ddsp_pass in (
+        "fluidsynth", "ddsp_piano", "midi_ddsp", "finalize",
     ):
         need_to_synthesize = True
     stem_rows: list[dict] = []
     routing_rows: list[dict] = []
+    recipe_rows: list[dict] = []
 
     if need_to_synthesize:
         temp_dir = tempfile.TemporaryDirectory()
@@ -216,7 +282,18 @@ def synthesize_song_at_index(
         if need_to_synthesize:
             track_midi.tracks.append(track_midi_track)
             slakh_cfg: dict = {}
-            if uses_slakh_recipes(args.render_mode):
+            plan = None
+            if recipe is not None:
+                plan = recipe.plan_for_track(
+                    program=program,
+                    is_drum=is_drum,
+                    track_name=track_name,
+                )
+            use_slakh = (
+                plan.use_slakh if plan is not None
+                else uses_slakh_recipes(args.render_mode)
+            )
+            if use_slakh:
                 from synthesis.patches import (
                     select_patch,
                     slakh_render_for_track,
@@ -238,7 +315,10 @@ def synthesize_song_at_index(
                 )
             track_midi.save(track_paths[j])
             route_meta: dict = {}
-            if uses_ddsp(args.render_mode):
+            should_route = uses_ddsp(getattr(args, "render_mode", "") or "") or (
+                plan is not None and plan.neural_ok
+            )
+            if should_route:
                 from synthesis.ddsp.routing import route_stem
 
                 route = route_stem(
@@ -260,6 +340,10 @@ def synthesize_song_at_index(
                 "soundfont_filepath": args.soundfont_filepath,
                 "fx_profile": None,
                 "original_track": original_track,
+                "use_slakh": use_slakh,
+                "neural_ok": bool(plan.neural_ok) if plan is not None else False,
+                "listening_category": plan.category if plan is not None else None,
+                "plan": plan,
                 **slakh_cfg,
                 **route_meta,
             })
@@ -286,15 +370,55 @@ def synthesize_song_at_index(
     del midi
 
     if need_to_synthesize:
-        donor_mode = fallback_donor_mode(args.render_mode)
+        donor_mode = fallback_donor_mode(getattr(args, "render_mode", None))
         song_rel = None
-        if uses_ddsp(args.render_mode) and donor_mode is not None:
+        if (
+            not hybrid
+            and uses_ddsp(getattr(args, "render_mode", "") or "")
+            and donor_mode is not None
+        ):
             song_rel = song_rel_under_data(
                 song_dir,
                 ablation_raw_dir(args.output_dir, args.render_mode),
             )
 
-        if uses_ddsp(args.render_mode):
+        if hybrid and ddsp_pass == "fluidsynth":
+            from synthesis.recipe import BACKEND_FLUIDSYNTH
+
+            for j, track_path in enumerate(track_paths):
+                meta = track_render_meta[j]
+                backend = meta.get("ddsp_backend")
+                if meta.get("neural_ok") and backend in ("midi_ddsp", "ddsp_piano"):
+                    continue
+                out_stem = stem_path(song_dir, j, audio_format)
+                plan = meta.get("plan")
+                if (
+                    plan is not None
+                    and _hybrid_raw_current(
+                        args, path_output, j, out_stem, plan, BACKEND_FLUIDSYNTH,
+                    )
+                ):
+                    continue
+                if stem_is_valid(out_stem) and not args.reset and plan is None:
+                    continue
+                waveform = _render_soundfont_stem(
+                    track_path, meta, args, path_output,
+                )
+                save_stem(waveform, song_dir, j, audio_format)
+                if plan is not None:
+                    recipe_rows.append(plan.sidecar_row(
+                        path=path_output, track=j, backend=BACKEND_FLUIDSYNTH,
+                    ))
+            for path in track_paths:
+                if exists(path):
+                    remove(path)
+            temp_dir.cleanup()
+            return None, [], [], recipe_rows
+
+        ddsp_like = uses_ddsp(getattr(args, "render_mode", "") or "") or (
+            hybrid and ddsp_pass in ("ddsp_piano", "midi_ddsp", "finalize")
+        )
+        if ddsp_like:
             from synthesis.ddsp.pool import ddsp_oneshot_enabled, get_ddsp_pool
             from synthesis.ddsp.routing import StemRoute
             from synthesis.ddsp.synthesize import synthesize_stem_neural
@@ -304,10 +428,20 @@ def synthesize_song_at_index(
                 neural_jobs: list[tuple[int, str, StemRoute]] = []
                 for j, track_path in enumerate(track_paths):
                     meta = track_render_meta[j]
+                    if hybrid and not meta.get("neural_ok"):
+                        continue
                     if meta.get("ddsp_backend") != ddsp_pass:
                         continue
                     out_stem = stem_path(song_dir, j, audio_format)
-                    if stem_is_valid(out_stem) and not args.reset:
+                    plan = meta.get("plan")
+                    if (
+                        plan is not None
+                        and _hybrid_raw_current(
+                            args, path_output, j, out_stem, plan, ddsp_pass,
+                        )
+                    ):
+                        continue
+                    if stem_is_valid(out_stem) and not args.reset and plan is None:
                         continue
                     neural_jobs.append((
                         j,
@@ -335,13 +469,18 @@ def synthesize_song_at_index(
                         for fut in as_completed(futures):
                             idx, waveform = fut.result()
                             save_stem(waveform, song_dir, idx, audio_format)
+                            plan = track_render_meta[idx].get("plan")
+                            if plan is not None:
+                                recipe_rows.append(plan.sidecar_row(
+                                    path=path_output, track=idx, backend=ddsp_pass,
+                                ))
 
                 for path in track_paths:
                     if exists(path):
                         remove(path)
                 temp_dir.cleanup()
                 # CSV rows only on finalize pass.
-                return None, [], []
+                return None, [], [], recipe_rows
 
             # Finalize (default when ddsp_pass is None or "finalize"): non-neural stems.
             for j, track_path in enumerate(track_paths):
@@ -350,8 +489,11 @@ def synthesize_song_at_index(
                 out_stem = stem_path(song_dir, j, audio_format)
                 source = "rendered"
                 original_path = None
+                neural_track = backend in ("midi_ddsp", "ddsp_piano") and (
+                    not hybrid or meta.get("neural_ok")
+                )
 
-                if backend in ("midi_ddsp", "ddsp_piano"):
+                if neural_track:
                     if not stem_is_valid(out_stem):
                         for path in track_paths:
                             if exists(path):
@@ -360,6 +502,16 @@ def synthesize_song_at_index(
                         raise RuntimeError(
                             f"Missing neural DDSP stem after neural passes: {out_stem}\n"
                             f"backend={backend} song={path_output} track={j}"
+                        )
+                elif hybrid:
+                    if not stem_is_valid(out_stem):
+                        for path in track_paths:
+                            if exists(path):
+                                remove(path)
+                        temp_dir.cleanup()
+                        raise RuntimeError(
+                            f"Missing Fluidsynth stem after hybrid passes: {out_stem}\n"
+                            f"song={path_output} track={j}"
                         )
                 elif stem_is_valid(out_stem) and not args.reset:
                     pass
@@ -408,6 +560,25 @@ def synthesize_song_at_index(
                     )
                     save_stem(waveform, song_dir, j, audio_format)
 
+                if hybrid and not _needs_ddsp_routing(args):
+                    plan = meta.get("plan")
+                    if plan is not None:
+                        from synthesis.recipe import resolve_track_backend
+                        from synthesis.ddsp.routing import StemRoute
+
+                        backend_name = resolve_track_backend(
+                            plan,
+                            StemRoute(
+                                backend=meta.get("ddsp_backend") or "soundfont",
+                                instrument_key=meta.get("ddsp_instrument_key"),
+                                reason=meta.get("ddsp_reason") or "",
+                            ),
+                        )
+                        recipe_rows.append(plan.sidecar_row(
+                            path=path_output, track=j, backend=backend_name,
+                        ))
+                    remove(track_path)
+                    continue
                 routing_rows.append({
                     "path": path_output,
                     "track": j,
@@ -415,13 +586,29 @@ def synthesize_song_at_index(
                     "program": stem_rows[j]["program"],
                     "is_drum": stem_rows[j]["is_drum"],
                     "name": stem_rows[j]["name"],
-                    "backend": meta.get("ddsp_backend"),
+                    "backend": meta.get("ddsp_backend") or "soundfont",
                     "instrument_key": meta.get("ddsp_instrument_key"),
                     "reason": meta.get("ddsp_reason"),
                     "n_notes": meta.get("n_notes"),
                     "source": source,
                     "original_path": original_path,
                 })
+                plan = meta.get("plan")
+                if plan is not None:
+                    from synthesis.recipe import resolve_track_backend
+                    from synthesis.ddsp.routing import StemRoute
+
+                    backend_name = resolve_track_backend(
+                        plan,
+                        StemRoute(
+                            backend=meta.get("ddsp_backend") or "soundfont",
+                            instrument_key=meta.get("ddsp_instrument_key"),
+                            reason=meta.get("ddsp_reason") or "",
+                        ),
+                    )
+                    recipe_rows.append(plan.sidecar_row(
+                        path=path_output, track=j, backend=backend_name,
+                    ))
                 remove(track_path)
             temp_dir.cleanup()
         else:
@@ -443,13 +630,13 @@ def synthesize_song_at_index(
     song_info.pop("mid_pdmx", None)
     # Dense path may have rewritten n_tracks to the cleaned count.
     song_info["n_tracks"] = n_tracks
-    return song_info, stem_rows, routing_rows
+    return song_info, stem_rows, routing_rows, recipe_rows
 
 
 def _render_soundfont_stem(track_path: str, meta: dict, args, path_output: str):
     soundfont_filepath = meta.get("soundfont_filepath") or args.soundfont_filepath
     fx_profile = meta.get("fx_profile")
-    if uses_slakh_recipes(args.render_mode):
+    if meta.get("use_slakh", uses_slakh_recipes(getattr(args, "render_mode", "") or "")):
         from experiments.patch_sweep.config import soundfont_file_for_id
         from experiments.patch_sweep.winners import pick_fx_profile, pick_soundfont_id
 
@@ -499,7 +686,10 @@ def _init_synthesis_worker(dataset, completed_paths, args):
         "completed_paths": completed_paths,
         "args": args,
     }
-    if uses_ddsp(args.render_mode):
+    if uses_ddsp(args.render_mode) or getattr(args, "ddsp_pass", None) in (
+        "ddsp_piano",
+        "midi_ddsp",
+    ):
         from synthesis.ddsp.pool import ddsp_oneshot_enabled, ensure_ddsp_pool
 
         ddsp_pass = getattr(args, "ddsp_pass", None)
@@ -510,7 +700,7 @@ def _init_synthesis_worker(dataset, completed_paths, args):
             ensure_ddsp_pool()
 
 
-def _synthesis_worker(i: int) -> tuple[dict | None, list[dict], list[dict]]:
+def _synthesis_worker(i: int) -> tuple[dict | None, list[dict], list[dict], list[dict]]:
     return synthesize_song_at_index(
         i,
         _WORKER_CTX["dataset"],
@@ -531,11 +721,14 @@ def _run_song_pool(
     routing_output_filepath: str | None,
     output_filepath: str,
     write_tables: bool,
+    recipe_output_filepath: str | None = None,
 ) -> None:
     """Run song workers once (one DDSP pass or the non-DDSP path)."""
+    from synthesis.recipe import STEM_RECIPE_COLUMNS
+
     pool_ctx = (
         multiprocessing.get_context("spawn")
-        if uses_ddsp(args.render_mode)
+        if _pool_should_spawn(args)
         else multiprocessing
     )
     with pool_ctx.Pool(
@@ -543,12 +736,19 @@ def _run_song_pool(
         initializer=_init_synthesis_worker,
         initargs=(dataset, completed_paths, args),
     ) as pool:
-        for song_info, stem_rows, routing_rows in tqdm(
+        for song_info, stem_rows, routing_rows, recipe_rows in tqdm(
             pool.imap(_synthesis_worker, work_indices, chunksize=CHUNK_SIZE),
             desc=desc,
             total=len(work_indices),
             unit="song",
         ):
+            if recipe_rows and recipe_output_filepath is not None:
+                append_rows_deduped(
+                    recipe_output_filepath,
+                    STEM_RECIPE_COLUMNS,
+                    recipe_rows,
+                    key_cols=["path", "track"],
+                )
             if not write_tables or song_info is None:
                 continue
             if stem_rows:
@@ -577,8 +777,74 @@ def reset_synthesis_output(output_dir: str) -> None:
     makedirs(output_dir, exist_ok=True)
 
 
+def _run_hybrid_synthesis(
+    *,
+    args,
+    recipe,
+    dataset: pd.DataFrame,
+    completed_paths: set[str],
+    work_indices: list,
+    stems_output_filepath: str,
+    routing_output_filepath: str | None,
+    output_filepath: str,
+    recipe_output_filepath: str | None,
+) -> None:
+    """Fluidsynth → DDSP-Piano → MIDI-DDSP → finalize CSVs (skip unused passes)."""
+    from synthesis.ddsp.pool import shutdown_ddsp_pool
+    from synthesis.recipe import load_stem_recipe_index
+
+    only = getattr(args, "only_pass", None)
+    uses_neural = recipe.uses_ddsp()
+    run_fluidsynth = only in (None, "fluidsynth")
+    run_ddsp = uses_neural and only in (None, "ddsp")
+    run_finalize = (
+        only is None
+        or only == "ddsp"
+        or (only == "fluidsynth" and not uses_neural)
+    )
+
+    def _one(pass_name: str, desc: str, write_tables: bool, pass_jobs: int) -> None:
+        args.ddsp_pass = pass_name
+        args.stem_recipe_index = load_stem_recipe_index(Path(output_filepath).parent)
+        print(f"Hybrid pass: {pass_name} (-j {pass_jobs})", flush=True)
+        if pass_name == "finalize":
+            shutdown_ddsp_pool()
+        _run_song_pool(
+            dataset=dataset,
+            completed_paths=completed_paths,
+            args=args,
+            work_indices=work_indices,
+            jobs=pass_jobs,
+            desc=desc,
+            stems_output_filepath=stems_output_filepath,
+            routing_output_filepath=routing_output_filepath,
+            output_filepath=output_filepath,
+            write_tables=write_tables,
+            recipe_output_filepath=recipe_output_filepath,
+        )
+        if pass_name in ("ddsp_piano", "midi_ddsp"):
+            shutdown_ddsp_pool()
+
+    if run_fluidsynth:
+        _one("fluidsynth", "Fluidsynth stems", False, max(1, int(args.jobs)))
+    if run_ddsp:
+        if int(args.jobs) > 1:
+            print(
+                "Note: hybrid DDSP passes use spawn + -j 1 "
+                f"(was {args.jobs}) to avoid CUDA-after-fork kills.",
+                flush=True,
+            )
+        _one("ddsp_piano", "DDSP piano stems", False, 1)
+        _one("midi_ddsp", "DDSP mono stems", False, 1)
+    elif only == "ddsp" and not uses_neural:
+        print("Hybrid DDSP pass skipped (no category uses midi-ddsp).", flush=True)
+    if run_finalize:
+        _one("finalize", "Hybrid finalize", True, max(1, int(args.jobs)))
+    args.ddsp_pass = None
+
+
 def run_synthesis(args, output_dir: str):
-    if args.reset:
+    if args.reset and not getattr(args, "skip_output_reset", False):
         reset_synthesis_output(output_dir)
     else:
         makedirs(output_dir, exist_ok=True)
@@ -610,8 +876,9 @@ def run_synthesis(args, output_dir: str):
         register_df = pd.read_csv(register_path)
         print(f"Loaded GM register ({len(args.gm_register_lookup)} keys) from {register_path}")
 
-    if uses_ddsp(args.render_mode) and not args.full:
-        require_donor_ablation(args, realify=False)
+    if uses_ddsp(getattr(args, "render_mode", "") or "") and not args.full:
+        if _hybrid_recipe(args) is None:
+            require_donor_ablation(args, realify=False)
 
     dataset = pd.read_csv(args.dataset_filepath, sep=",", header=0, index_col=False)
     dataset = dataset[dataset["subset:all_valid"]].reset_index(drop=True)
@@ -680,17 +947,44 @@ def run_synthesis(args, output_dir: str):
             stems_output_filepath, sep=",", na_rep=NA_STRING, header=True, index=False, mode="w",
         )
     routing_output_filepath = f"{output_dir}/{DDSP_ROUTING_FILE_NAME}"
-    if uses_ddsp(args.render_mode) and (
+    needs_routing = _needs_ddsp_routing(args)
+    if needs_routing and (
         not exists(routing_output_filepath) or args.reset
     ):
         pd.DataFrame(columns=DDSP_ROUTING_COLUMNS).to_csv(
             routing_output_filepath, sep=",", na_rep=NA_STRING, header=True, index=False, mode="w",
         )
+    from synthesis.recipe import (
+        STEM_RECIPE_COLUMNS,
+        STEM_RECIPE_FILE_NAME,
+        load_stem_recipe_index,
+        require_recipe_conflicts_ok,
+        scan_recipe_conflicts,
+    )
+    recipe = _hybrid_recipe(args)
+    recipe_output_filepath = (
+        f"{output_dir}/{STEM_RECIPE_FILE_NAME}" if recipe is not None else None
+    )
+    if recipe is not None and (not exists(recipe_output_filepath) or args.reset):
+        pd.DataFrame(columns=STEM_RECIPE_COLUMNS).to_csv(
+            recipe_output_filepath, sep=",", na_rep=NA_STRING, header=True, index=False, mode="w",
+        )
+    audio_format = synthesis_audio_format(args.flac)
+    if recipe is not None and not args.reset:
+        require_recipe_conflicts_ok(
+            scan_recipe_conflicts(
+                output_dir, recipe, audio_format=audio_format, stage="raw",
+            ),
+            yes=bool(getattr(args, "yes", False)),
+        )
+        args.stem_recipe_index = load_stem_recipe_index(output_dir)
+    else:
+        args.stem_recipe_index = {}
 
     completed_paths = set()
     if exists(output_filepath) and not args.reset:
         routing_for_completed = (
-            routing_output_filepath if uses_ddsp(args.render_mode) else None
+            routing_output_filepath if needs_routing else None
         )
         # For DDSP, songs with stems/data but incomplete routing are not "done".
         completed_paths = load_completed_song_paths(
@@ -700,8 +994,9 @@ def run_synthesis(args, output_dir: str):
 
     # Neural DDSP needs Torch in workers for resample. Fork-after-CUDA causes
     # SIGKILL (exit -9); use spawn so each worker initializes cleanly.
-    jobs = 1 if uses_ddsp(args.render_mode) else args.jobs
-    if uses_ddsp(args.render_mode) and args.jobs > 1:
+    ablation_ddsp = uses_ddsp(getattr(args, "render_mode", "") or "") and recipe is None
+    jobs = 1 if ablation_ddsp else args.jobs
+    if ablation_ddsp and args.jobs > 1:
         print(
             f"Note: {args.render_mode} uses spawn + -j 1 (was {args.jobs}) to avoid "
             "CUDA-after-fork kills (exit -9)."
@@ -717,13 +1012,31 @@ def run_synthesis(args, output_dir: str):
             work_indices.append(i)
             continue
         n_tracks = int(dataset.at[i, "n_tracks"])
-        audio_format = synthesis_audio_format(args.flac)
         if not song_is_complete(
             Path(path_output), n_tracks, audio_format, require_mixture=False,
         ):
             work_indices.append(i)
+            continue
+        if recipe is not None and not _hybrid_song_raw_current(
+            args, path_output, n_tracks, Path(path_output), audio_format, recipe,
+        ):
+            work_indices.append(i)
 
     if not work_indices:
+        return
+
+    if recipe is not None:
+        _run_hybrid_synthesis(
+            args=args,
+            recipe=recipe,
+            dataset=dataset,
+            completed_paths=completed_paths,
+            work_indices=work_indices,
+            stems_output_filepath=stems_output_filepath,
+            routing_output_filepath=routing_output_filepath if needs_routing else None,
+            output_filepath=output_filepath,
+            recipe_output_filepath=recipe_output_filepath,
+        )
         return
 
     if uses_ddsp(args.render_mode):
@@ -900,6 +1213,12 @@ def run_realify_pass(args, source_dir: str, dest_dir: str):
         content_fidelity_enforce=content_fidelity_enforce,
         output_root=args.output_dir,
         render_mode=args.render_mode,
+        category_allowlist=(
+            set(_hybrid_recipe(args).realify_categories())
+            if _hybrid_recipe(args) is not None
+            else None
+        ),
+        recipe=_hybrid_recipe(args),
     )
 
 

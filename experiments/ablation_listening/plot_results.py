@@ -9,6 +9,8 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+
+plt.rcParams["hatch.linewidth"] = 1.35
 import numpy as np
 import pandas as pd
 
@@ -44,17 +46,23 @@ REALIFIED = {
     "ddsp_basic_realify",
     "ddsp_slakh_realify",
 }
+REALIFY_BASE = {
+    "basic_realify": "basic",
+    "slakh_realify": "slakh",
+    "ddsp_basic_realify": "ddsp_basic",
+    "ddsp_slakh_realify": "ddsp_slakh",
+}
 
 DEFAULT_PLOTS_DIR = DEFAULT_OUTPUT_DIR / "plots"
 
-# content · realism/100-scaled product rewards high content adherence.
-COMBINED_METRIC = "combined"
-PLOT_METRICS = ("content", "realism", COMBINED_METRIC)
+CONTENT_DIFF_METRIC = "content_diff"
+PLOT_METRICS = ("content", CONTENT_DIFF_METRIC, "realism")
 METRIC_TITLES = {
     "content": "Content",
+    CONTENT_DIFF_METRIC: "Content Δ",
     "realism": "Realism",
-    COMBINED_METRIC: r"Combined $=(\mathrm{content}/100)\times\mathrm{realism}$",
 }
+MOS_YLIM = (0.0, 118.0)
 
 # X-axis families: synthetic + realified share each tick.
 AXIS_GROUPS: tuple[tuple[str, tuple[str, str]], ...] = (
@@ -65,18 +73,47 @@ AXIS_GROUPS: tuple[tuple[str, tuple[str, str]], ...] = (
 )
 
 
-def with_combined_score(df: pd.DataFrame) -> pd.DataFrame:
-    """Add ``combined = (content/100) * realism`` (NaN if either score missing)."""
+def with_content_difference(df: pd.DataFrame) -> pd.DataFrame:
+    """Add ``content_diff``: realified minus paired non-realified content.
+
+    Pairing is per listener × trial × family (A2−A1, B2−B1, CA2−CA1, CB2−CB1).
+    Non-realified rows are 0 (no generative content change by construction).
+    """
     out = df.copy()
-    content = pd.to_numeric(out.get("content"), errors="coerce")
-    realism = pd.to_numeric(out.get("realism"), errors="coerce")
-    out[COMBINED_METRIC] = (content / 100.0) * realism
+    if out.empty or "content" not in out.columns:
+        out[CONTENT_DIFF_METRIC] = pd.Series(dtype=float)
+        return out
+    work = out.copy()
+    work["_content"] = pd.to_numeric(work["content"], errors="coerce")
+    bases = work.loc[
+        ~work["condition_id"].isin(REALIFIED),
+        ["listener_id", "trial_id", "condition_id", "_content"],
+    ].rename(columns={"condition_id": "base_id", "_content": "base_content"})
+    bases = bases.drop_duplicates(
+        subset=["listener_id", "trial_id", "base_id"], keep="first",
+    )
+    work = work.reset_index(drop=True)
+    work["base_id"] = work["condition_id"].map(REALIFY_BASE)
+    merged = work.merge(
+        bases,
+        on=["listener_id", "trial_id", "base_id"],
+        how="left",
+    )
+    if len(merged) != len(work):
+        raise ValueError("content Δ pairing produced duplicate rows")
+    is_realified = merged["condition_id"].isin(REALIFIED)
+    merged[CONTENT_DIFF_METRIC] = np.where(
+        is_realified,
+        merged["_content"] - merged["base_content"],
+        np.where(merged["_content"].notna(), 0.0, np.nan),
+    )
+    out[CONTENT_DIFF_METRIC] = merged[CONTENT_DIFF_METRIC].to_numpy()
     return out
 
 
 def _stem_df(df: pd.DataFrame) -> pd.DataFrame:
     work = df[df["trial_type"] == "stem"].copy() if "trial_type" in df.columns else df.copy()
-    return with_combined_score(work)
+    return with_content_difference(work)
 
 
 def _savefig(fig: plt.Figure, output_path: Path) -> Path:
@@ -103,30 +140,52 @@ def _short_label(condition_id: str) -> str:
     return CONDITION_LABELS.get(condition_id, condition_id)
 
 
-def _bar_style(condition_id: str, *, winner: bool = False) -> dict:
+def _family_color(condition_id: str) -> str:
     family = CONDITION_FAMILY.get(condition_id, condition_id)
-    color = FAMILY_COLOR.get(family, "#888888")
+    return FAMILY_COLOR.get(family, "#888888")
+
+
+def _bar_style(condition_id: str, *, winner: bool = False) -> dict:
+    color = _family_color(condition_id)
     if condition_id in REALIFIED:
+        r, g, b, _ = matplotlib.colors.to_rgba(color)
+        # Hatch is drawn as a second layer so winner outlines cannot hide it.
         style = {
-            "color": color,
-            "alpha": 0.45,
-            "hatch": "//",
+            "facecolor": (r, g, b, 0.38),
             "edgecolor": color,
             "linewidth": 1.0,
         }
     else:
         style = {
-            "color": color,
+            "facecolor": color,
             "alpha": 0.92,
-            "hatch": None,
             "edgecolor": "white",
             "linewidth": 0.6,
         }
     if winner:
         style["edgecolor"] = "#111111"
         style["linewidth"] = 2.8
-        style["alpha"] = min(1.0, float(style["alpha"]) + 0.08)
     return style
+
+
+def hidden_equivalent_conditions(df: pd.DataFrame) -> set[str]:
+    """Conditions that are donor-copies for every rating in ``df``.
+
+    Aggregation expands omitted DDSP samples with ``auto_assigned=True``. If
+    every row for a condition is auto-assigned (e.g. drums CA1=A1), hide it.
+    Mixed categories (some neural, some fallback) keep the bar.
+    """
+    if df.empty or "auto_assigned" not in df.columns:
+        return set()
+    hidden: set[str] = set()
+    flags = df["auto_assigned"].fillna(False).astype(bool)
+    for condition_id in CONDITION_ORDER:
+        mask = df["condition_id"] == condition_id
+        if not mask.any():
+            continue
+        if bool(flags[mask].all()):
+            hidden.add(condition_id)
+    return hidden
 
 
 def condition_metric_stats(df: pd.DataFrame, metric: str) -> pd.DataFrame:
@@ -153,10 +212,20 @@ def condition_metric_stats(df: pd.DataFrame, metric: str) -> pd.DataFrame:
     return out.reindex(CONDITION_ORDER)
 
 
-def _metric_winners(stats: pd.DataFrame, *, tol: float = 1e-9) -> set[str]:
-    """All conditions tied for the highest mean (within ``tol``)."""
+def _metric_winners(
+    stats: pd.DataFrame,
+    *,
+    hide: set[str] | None = None,
+    candidates: set[str] | None = None,
+    tol: float = 1e-9,
+) -> set[str]:
+    """All visible conditions tied for the highest mean (within ``tol``)."""
+    hide = hide or set()
+    allowed = set(CONDITION_ORDER) if candidates is None else set(candidates)
     best_mean = float("-inf")
     for condition_id in CONDITION_ORDER:
+        if condition_id in hide or condition_id not in allowed:
+            continue
         if condition_id not in stats.index or pd.isna(stats.loc[condition_id, "mean"]):
             continue
         mean = float(stats.loc[condition_id, "mean"])
@@ -166,6 +235,8 @@ def _metric_winners(stats: pd.DataFrame, *, tol: float = 1e-9) -> set[str]:
         return set()
     winners = set()
     for condition_id in CONDITION_ORDER:
+        if condition_id in hide or condition_id not in allowed:
+            continue
         if condition_id not in stats.index or pd.isna(stats.loc[condition_id, "mean"]):
             continue
         if abs(float(stats.loc[condition_id, "mean"]) - best_mean) <= tol:
@@ -183,48 +254,100 @@ def _draw_condition_bars(
     ax: plt.Axes,
     stats: pd.DataFrame,
     *,
-    title: str,
-    ylabel: str = "Score (0–100)",
+    hide: set[str] | None = None,
+    ylim: tuple[float, float] | None = None,
+    signed: bool = False,
 ) -> None:
-    """Grouped bars: x ticks are A/B/CA/CB; each tick has synthetic + realified."""
-    winners = _metric_winners(stats)
+    """Grouped bars: x ticks are A/B/CA/CB; each tick has synthetic + realified.
+
+    Content Δ only draws realified bars (centered on the tick). Synthetics are
+    the Δ baseline, not a plotted condition.
+    """
+    hide = hide or set()
+    winner_pool = REALIFIED if signed else None
+    winners = _metric_winners(stats, hide=hide, candidates=winner_pool)
     group_xs = np.arange(len(AXIS_GROUPS), dtype=float)
     bar_width = 0.36
-    offsets = (-bar_width / 2, bar_width / 2)  # synthetic, realified
+    offsets = (0.0, 0.0) if signed else (-bar_width / 2, bar_width / 2)
+
+    if ylim is None:
+        if signed:
+            values = []
+            for condition_id in CONDITION_ORDER:
+                if condition_id in hide or condition_id not in REALIFIED:
+                    continue
+                if condition_id not in stats.index or pd.isna(stats.loc[condition_id, "mean"]):
+                    continue
+                mean = float(stats.loc[condition_id, "mean"])
+                sem = _stat_value(stats, condition_id, "sem")
+                values.extend((mean - sem, mean + sem))
+            if values:
+                lo, hi = min(values), max(values)
+                pad = max(8.0, 0.12 * (hi - lo if hi > lo else 20.0))
+                ylim = (min(-12.0, lo - pad), max(12.0, hi + pad))
+            else:
+                ylim = (-50.0, 20.0)
+        else:
+            ylim = MOS_YLIM
+    y_span = ylim[1] - ylim[0]
+    label_pad = 0.015 * y_span
+    star_pad = 0.075 * y_span
 
     for group_x, (_group_label, conditions) in zip(group_xs, AXIS_GROUPS):
         for offset, condition_id in zip(offsets, conditions):
+            if condition_id in hide:
+                continue
+            if signed and condition_id not in REALIFIED:
+                continue
             mean = _stat_value(stats, condition_id, "mean")
             sem = _stat_value(stats, condition_id, "sem")
             is_winner = condition_id in winners
             x = group_x + offset
+            width = bar_width * 0.95
             ax.bar(
                 x,
                 mean,
-                width=bar_width * 0.95,
+                width=width,
                 yerr=sem,
                 capsize=3,
                 error_kw={"ecolor": "#333333", "elinewidth": 1},
                 **_bar_style(condition_id, winner=is_winner),
             )
-            if mean > 0:
+            if condition_id in REALIFIED:
+                ax.bar(
+                    x,
+                    mean,
+                    width=width,
+                    facecolor="none",
+                    hatch="///",
+                    edgecolor=_family_color(condition_id),
+                    linewidth=0.0,
+                    zorder=3,
+                )
+            if signed or mean > 0:
+                label = f"{mean:+.0f}" if signed else f"{mean:.0f}"
+                above = mean >= 0
+                text_y = mean + sem + label_pad if above else mean - sem - label_pad
                 ax.text(
                     x,
-                    mean + sem + 1.5,
-                    f"{mean:.0f}",
+                    text_y,
+                    label,
                     ha="center",
-                    va="bottom",
+                    va="bottom" if above else "top",
                     fontsize=8,
                     fontweight="bold" if is_winner else "normal",
                     color="#111111" if is_winner else "#333333",
                 )
                 if is_winner:
+                    star_y = (
+                        mean + sem + star_pad if above else mean - sem - star_pad
+                    )
                     ax.text(
                         x,
-                        mean + sem + 9.0,
+                        star_y,
                         "★",
                         ha="center",
-                        va="bottom",
+                        va="bottom" if above else "top",
                         fontsize=11,
                         fontweight="bold",
                         color="#111111",
@@ -233,12 +356,26 @@ def _draw_condition_bars(
     ax.set_xticks(group_xs)
     ax.set_xticklabels([group_label for group_label, _ in AXIS_GROUPS])
     ax.set_xlim(-0.6, len(AXIS_GROUPS) - 0.4)
-    ax.set_ylim(0, 118)
-    ax.set_ylabel(ylabel)
-    ax.set_title(title)
-    ax.axhline(50, color="#bbbbbb", linewidth=0.8, linestyle=":")
+    ax.set_ylim(*ylim)
+    if signed:
+        ax.axhline(0.0, color="#888888", linewidth=0.8, zorder=1)
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
+
+
+def _set_grid_headers(
+    axes: np.ndarray,
+    *,
+    col_labels: tuple[str, ...] | list[str],
+    row_labels: tuple[str, ...] | list[str] | None = None,
+) -> None:
+    """Column titles on the top row; category names as left-column y labels."""
+    axes = np.atleast_2d(axes)
+    for col, label in enumerate(col_labels):
+        axes[0, col].set_title(label)
+    if row_labels is not None:
+        for row, label in enumerate(row_labels):
+            axes[row, 0].set_ylabel(label)
 
 
 def _legend_handles():
@@ -250,36 +387,53 @@ def _legend_handles():
         Patch(facecolor=FAMILY_COLOR["ddsp_basic"], edgecolor="white", label="CA (ddsp_basic)"),
         Patch(facecolor=FAMILY_COLOR["ddsp_slakh"], edgecolor="white", label="CB (ddsp_slakh)"),
         Patch(
-            facecolor="#888888",
-            alpha=0.45,
-            hatch="//",
-            edgecolor="#888888",
-            label="realified (right bar)",
-        ),
-        Patch(
-            facecolor="none",
-            edgecolor="#111111",
-            linewidth=2.5,
-            label="★ winner",
+            facecolor="#d0d0d0",
+            hatch="///",
+            edgecolor="#444444",
+            label="Realified",
         ),
     ]
     return handles
 
 
-def plot_overview(df: pd.DataFrame, output_path: Path) -> Path:
-    """Three-panel overall means across all stem trials (content, realism, combined)."""
+def _draw_metric_panel(
+    ax: plt.Axes,
+    stats: pd.DataFrame,
+    metric: str,
+    *,
+    hide: set[str] | None = None,
+) -> None:
+    signed = metric == CONTENT_DIFF_METRIC
+    _draw_condition_bars(
+        ax,
+        stats,
+        hide=hide,
+        ylim=None if signed else MOS_YLIM,
+        signed=signed,
+    )
+
+
+def plot_overview(
+    df: pd.DataFrame,
+    output_path: Path,
+    *,
+    hide_equivalences: bool = True,
+) -> Path:
+    """Overall means across stem trials (content, content Δ, realism)."""
     stem = _stem_df(df)
-    fig, axes = plt.subplots(1, 3, figsize=(15, 4.2), sharey=True)
+    hide = hidden_equivalent_conditions(stem) if hide_equivalences else set()
+    fig, axes = plt.subplots(
+        1, len(PLOT_METRICS), figsize=(5.2 * len(PLOT_METRICS), 4.2), sharey=False,
+    )
+    axes = np.atleast_1d(axes)
     for ax, metric in zip(axes, PLOT_METRICS):
         stats = condition_metric_stats(stem, metric)
-        _draw_condition_bars(ax, stats, title=METRIC_TITLES[metric])
-    axes[0].legend(handles=_legend_handles(), loc="upper right", fontsize=8, frameon=False)
-    n_listeners = int(stem["listener_id"].nunique(dropna=True)) if not stem.empty else 0
-    fig.suptitle(
-        f"Ablation listening — overall means (±SEM; n_listeners={n_listeners})",
-        fontsize=12,
-        y=1.02,
+        _draw_metric_panel(ax, stats, metric, hide=hide)
+    _set_grid_headers(
+        np.atleast_2d(axes),
+        col_labels=[METRIC_TITLES[m] for m in PLOT_METRICS],
     )
+    axes[0].legend(handles=_legend_handles(), loc="upper right", fontsize=8, frameon=False)
     fig.tight_layout()
     output_path = Path(output_path)
     _savefig(fig, output_path)
@@ -287,8 +441,13 @@ def plot_overview(df: pd.DataFrame, output_path: Path) -> Path:
     return Path(output_path).with_suffix(".pdf")
 
 
-def plot_category_grid(df: pd.DataFrame, output_path: Path) -> Path:
-    """Big plot: one row per category, content | realism | combined panels."""
+def plot_category_grid(
+    df: pd.DataFrame,
+    output_path: Path,
+    *,
+    hide_equivalences: bool = True,
+) -> Path:
+    """Big plot: one row per category, content | content Δ | realism panels."""
     stem = _stem_df(df)
     categories = [
         c for c in STEM_TRIAL_CATEGORIES
@@ -297,30 +456,26 @@ def plot_category_grid(df: pd.DataFrame, output_path: Path) -> Path:
     if not categories:
         categories = sorted(stem["category"].dropna().astype(str).unique())
     n = max(len(categories), 1)
-    fig, axes = plt.subplots(n, 3, figsize=(15, 2.4 * n), sharex=True, sharey=True)
-    if n == 1:
-        axes = np.array([axes])
+    n_cols = len(PLOT_METRICS)
+    fig, axes = plt.subplots(
+        n, n_cols, figsize=(5.2 * n_cols, 2.4 * n), sharex=True, sharey=False,
+    )
+    axes = np.atleast_2d(axes)
     for row, category in enumerate(categories):
         cat_df = stem[stem["category"] == category]
+        hide = hidden_equivalent_conditions(cat_df) if hide_equivalences else set()
         for col, metric in enumerate(PLOT_METRICS):
             ax = axes[row, col]
             stats = condition_metric_stats(cat_df, metric)
-            short = {
-                "content": "content",
-                "realism": "realism",
-                COMBINED_METRIC: "combined",
-            }[metric]
-            title = f"{category.capitalize()} — {short}"
-            _draw_condition_bars(ax, stats, title=title)
+            _draw_metric_panel(ax, stats, metric, hide=hide)
             if row < n - 1:
                 ax.set_xlabel("")
-    axes[0, 2].legend(handles=_legend_handles(), loc="upper right", fontsize=7, frameon=False)
-    fig.suptitle(
-        r"Ablation listening — by category "
-        r"(combined $=(\mathrm{content}/100)\times\mathrm{realism}$)",
-        fontsize=12,
-        y=1.005,
+    _set_grid_headers(
+        axes,
+        col_labels=[METRIC_TITLES[m] for m in PLOT_METRICS],
+        row_labels=[c.capitalize() for c in categories],
     )
+    axes[0, -1].legend(handles=_legend_handles(), loc="upper right", fontsize=7, frameon=False)
     fig.tight_layout()
     output_path = Path(output_path)
     _savefig(fig, output_path)
@@ -328,8 +483,13 @@ def plot_category_grid(df: pd.DataFrame, output_path: Path) -> Path:
     return Path(output_path).with_suffix(".pdf")
 
 
-def plot_category_panels(df: pd.DataFrame, output_dir: Path) -> list[Path]:
-    """Write one three-panel (content|realism|combined) figure per category."""
+def plot_category_panels(
+    df: pd.DataFrame,
+    output_dir: Path,
+    *,
+    hide_equivalences: bool = True,
+) -> list[Path]:
+    """Write one content | content Δ | realism figure per category."""
     stem = _stem_df(df)
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -343,15 +503,18 @@ def plot_category_panels(df: pd.DataFrame, output_dir: Path) -> list[Path]:
     written: list[Path] = []
     for category in categories:
         cat_df = stem[stem["category"] == category]
-        fig, axes = plt.subplots(1, 3, figsize=(15, 4.6), sharey=True)
+        hide = hidden_equivalent_conditions(cat_df) if hide_equivalences else set()
+        fig, axes = plt.subplots(
+            1, len(PLOT_METRICS), figsize=(5.2 * len(PLOT_METRICS), 4.6), sharey=False,
+        )
+        axes = np.atleast_1d(axes)
         for ax, metric in zip(axes, PLOT_METRICS):
             stats = condition_metric_stats(cat_df, metric)
-            _draw_condition_bars(ax, stats, title=METRIC_TITLES[metric])
-        n_ratings = len(cat_df)
-        n_listeners = int(cat_df["listener_id"].nunique(dropna=True))
-        fig.suptitle(
-            f"{category.capitalize()} (n_ratings={n_ratings}, n_listeners={n_listeners})",
-            fontsize=12,
+            _draw_metric_panel(ax, stats, metric, hide=hide)
+        _set_grid_headers(
+            np.atleast_2d(axes),
+            col_labels=[METRIC_TITLES[m] for m in PLOT_METRICS],
+            row_labels=[category.capitalize()],
         )
         handles = _legend_handles()
         fig.legend(
@@ -364,7 +527,7 @@ def plot_category_panels(df: pd.DataFrame, output_dir: Path) -> list[Path]:
             columnspacing=1.2,
             handlelength=1.6,
         )
-        fig.tight_layout(rect=(0, 0.10, 1, 0.95))
+        fig.tight_layout(rect=(0, 0.10, 1, 0.92))
         path = output_dir / f"{category}.pdf"
         _savefig(fig, path)
         plt.close(fig)
@@ -372,64 +535,85 @@ def plot_category_panels(df: pd.DataFrame, output_dir: Path) -> list[Path]:
     return written
 
 
-def category_leaderboard(df: pd.DataFrame) -> pd.DataFrame:
-    """Per-category winner on combined=(content/100)*realism."""
+def category_leaderboard(
+    df: pd.DataFrame,
+    *,
+    hide_equivalences: bool = True,
+) -> pd.DataFrame:
+    """Per-category winner(s) ranked by realism."""
     stem = _stem_df(df)
+    rank_key = "realism"
     rows = []
     for category in sorted(stem["category"].dropna().astype(str).unique()):
         cat_df = stem[stem["category"] == category]
-        combined = condition_metric_stats(cat_df, COMBINED_METRIC)
+        hide = hidden_equivalent_conditions(cat_df) if hide_equivalences else set()
         realism = condition_metric_stats(cat_df, "realism")
         content = condition_metric_stats(cat_df, "content")
+        content_diff = condition_metric_stats(cat_df, CONTENT_DIFF_METRIC)
         merged = (
-            combined[["mean"]].rename(columns={"mean": "combined"})
-            .join(realism[["mean"]].rename(columns={"mean": "realism"}), how="outer")
+            realism[["mean"]].rename(columns={"mean": "realism"})
             .join(content[["mean"]].rename(columns={"mean": "content"}), how="outer")
+            .join(
+                content_diff[["mean"]].rename(columns={"mean": CONTENT_DIFF_METRIC}),
+                how="outer",
+            )
         )
-        merged = merged.dropna(subset=["combined"]).sort_values(
-            ["combined", "realism", "content"], ascending=False,
-        )
+        if hide:
+            merged = merged.drop(index=[c for c in hide if c in merged.index], errors="ignore")
+        sort_cols = [rank_key, "content"]
+        sort_cols = list(dict.fromkeys(c for c in sort_cols if c in merged.columns))
+        merged = merged.dropna(subset=[rank_key]).sort_values(sort_cols, ascending=False)
         if merged.empty:
             continue
-        winner = merged.index[0]
-        winner_combined = float(merged.iloc[0]["combined"])
-        second_combined = (
-            float(merged.iloc[1]["combined"]) if len(merged) > 1 else float("nan")
-        )
-        margin = (
-            winner_combined - second_combined if pd.notna(second_combined) else float("nan")
-        )
+        best = float(merged.iloc[0][rank_key])
+        winners = [
+            idx for idx, row in merged.iterrows()
+            if abs(float(row[rank_key]) - best) <= 1e-9
+        ]
+        runner_up = None
+        for idx, row in merged.iterrows():
+            if idx not in winners:
+                runner_up = float(row[rank_key])
+                break
+        margin = best - runner_up if runner_up is not None else None
         donor_margin = None
-        if str(winner).startswith("ddsp_"):
-            donor = str(winner).removeprefix("ddsp_")
+        ddsp_winners = [w for w in winners if str(w).startswith("ddsp_")]
+        if ddsp_winners:
+            donor = str(ddsp_winners[0]).removeprefix("ddsp_")
             if donor in merged.index:
-                donor_margin = winner_combined - float(merged.loc[donor, "combined"])
-        rows.append({
+                donor_margin = best - float(merged.loc[donor, rank_key])
+        first = merged.loc[winners[0]]
+        row = {
             "category": category,
-            "winner": winner,
-            "winner_label": _short_label(winner),
-            "combined": round(winner_combined, 2),
-            "content": round(float(merged.iloc[0]["content"]), 2)
-            if pd.notna(merged.iloc[0]["content"]) else None,
-            "realism": round(float(merged.iloc[0]["realism"]), 2)
-            if pd.notna(merged.iloc[0]["realism"]) else None,
-            "margin_vs_2nd": round(margin, 2) if pd.notna(margin) else None,
+            "winner": ",".join(winners),
+            "winner_label": ",".join(_short_label(w) for w in winners),
+            "content": round(float(first["content"]), 2)
+            if pd.notna(first["content"]) else None,
+            "content_diff": round(float(first[CONTENT_DIFF_METRIC]), 2)
+            if pd.notna(first[CONTENT_DIFF_METRIC]) else None,
+            "realism": round(float(first["realism"]), 2)
+            if pd.notna(first["realism"]) else None,
+            "margin_vs_2nd": round(margin, 2) if margin is not None else None,
             "ddsp_margin_vs_donor": round(donor_margin, 2) if donor_margin is not None else None,
-        })
+        }
+        rows.append(row)
     return pd.DataFrame(rows)
 
 
 def write_plots(
     df: pd.DataFrame,
     plots_dir: Path,
+    *,
+    hide_equivalences: bool = True,
 ) -> dict:
     plots_dir = Path(plots_dir)
     plots_dir.mkdir(parents=True, exist_ok=True)
     by_cat = plots_dir / "by_category"
-    overview = plot_overview(df, plots_dir / "overview.pdf")
-    grid = plot_category_grid(df, plots_dir / "overview_by_category.pdf")
-    panels = plot_category_panels(df, by_cat)
-    board = category_leaderboard(df)
+    kw = {"hide_equivalences": hide_equivalences}
+    overview = plot_overview(df, plots_dir / "overview.pdf", **kw)
+    grid = plot_category_grid(df, plots_dir / "overview_by_category.pdf", **kw)
+    panels = plot_category_panels(df, by_cat, **kw)
+    board = category_leaderboard(df, **kw)
     board_path = plots_dir / "category_winners.csv"
     board.to_csv(board_path, index=False)
     return {
@@ -471,6 +655,14 @@ def parse_args(args=None):
         default=DEFAULT_PLOTS_DIR,
         help=f"Output directory for plots (default: {DEFAULT_PLOTS_DIR}).",
     )
+    parser.add_argument(
+        "--show-equivalences",
+        action="store_true",
+        help=(
+            "Show bars whose scores were auto-copied from a donor (e.g. drums "
+            "CA1/CA2/CB1/CB2 when they equal A/B). Hidden by default."
+        ),
+    )
     return parser.parse_args(args)
 
 
@@ -486,14 +678,18 @@ def main(args=None) -> None:
     if df.empty or summary.get("error"):
         raise SystemExit(summary.get("error") or "no ratings to plot")
 
-    result = write_plots(df, opts.plots_dir)
+    result = write_plots(
+        df,
+        opts.plots_dir,
+        hide_equivalences=not opts.show_equivalences,
+    )
     print(f"Wrote {result['overview']}")
     print(f"Wrote {result['overview_by_category']}")
     print(f"Wrote {len(result['by_category'])} category panels under {opts.plots_dir / 'by_category'}")
     print(f"Wrote {result['category_winners']}")
     board = result["leaderboard"]
     if not board.empty:
-        print("\nPer-category winners on combined=(content/100)*realism:")
+        print("\nPer-category winners on realism:")
         print(board.to_string(index=False))
 
 

@@ -922,7 +922,7 @@ def copy_metadata_tables(source_dir: Path, output_dir: Path):
     if source_dir.resolve() == output_dir.resolve():
         return
     output_dir.mkdir(parents=True, exist_ok=True)
-    for name in ("data.csv", "stems.csv", DDSP_ROUTING_FILE_NAME):
+    for name in ("data.csv", "stems.csv", DDSP_ROUTING_FILE_NAME, "stem_recipe.csv"):
         src = source_dir / name
         if not src.exists():
             continue
@@ -975,6 +975,9 @@ def build_realify_tasks(
     *,
     output_root: str | None = None,
     render_mode: str | None = None,
+    category_allowlist: set[str] | frozenset[str] | None = None,
+    recipe=None,
+    reset: bool = False,
 ) -> list[dict]:
     from synthesis.realify.preset_config import realify_enabled, select_preset
     from synthesis.reuse import (
@@ -992,6 +995,11 @@ def build_realify_tasks(
     routing_index = _load_ddsp_routing_index(source_dir)
     donor_mode = fallback_donor_mode(render_mode) if render_mode else None
     ddsp_mode = bool(render_mode and uses_ddsp(render_mode))
+    dest_recipe_index = {}
+    if recipe is not None:
+        from synthesis.recipe import load_stem_recipe_index
+
+        dest_recipe_index = load_stem_recipe_index(output_dir)
 
     tasks = []
     original_path_updates: list[tuple[str, int, str]] = []
@@ -1001,8 +1009,28 @@ def build_realify_tasks(
         out_path = resolve_stem_output_path(
             song_dir, track, source_dir, output_dir, audio_format,
         )
-        if out_path.exists():
-            continue
+        if out_path.exists() and not reset:
+            if recipe is None:
+                continue
+            from synthesis.recipe import (
+                desired_realify_fingerprint,
+                listening_category_from_stem_row,
+                recorded_realify_fingerprint,
+            )
+
+            out_song = resolve_output_song_dir(song_dir, source_dir, output_dir)
+            rec = dest_recipe_index.get((str(out_song), track))
+            meta_row = _stem_metadata_row(row, stems_df)
+            try:
+                category = listening_category_from_stem_row(meta_row)
+                spec = recipe.spec_for_category(category)
+            except (KeyError, TypeError, ValueError):
+                continue
+            backend = str(rec["backend"]) if rec and rec.get("backend") else "fluidsynth"
+            if recorded_realify_fingerprint(rec) == desired_realify_fingerprint(
+                spec, backend,
+            ):
+                continue
         source_stem_path = stem_path(song_dir, track, audio_format)
         if not stem_is_valid(source_stem_path):
             continue
@@ -1034,6 +1062,18 @@ def build_realify_tasks(
 
         if presets is not None:
             meta_row = _stem_metadata_row(row, stems_df)
+            if category_allowlist is not None:
+                from synthesis.recipe import listening_category_from_stem_row
+
+                category = listening_category_from_stem_row(meta_row)
+                if category not in category_allowlist:
+                    out_path.parent.mkdir(parents=True, exist_ok=True)
+                    copy_stem(source_stem_path, out_path)
+                    out_song = resolve_output_song_dir(song_dir, source_dir, output_dir)
+                    original_path_updates.append(
+                        (str(out_song), track, str(source_stem_path.resolve()))
+                    )
+                    continue
             preset = select_preset(presets, meta_row)
             if not realify_enabled(preset):
                 out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1452,6 +1492,8 @@ def run_realify(
     backend: str = REALIFY_BACKEND,
     output_root: str | None = None,
     render_mode: str | None = None,
+    category_allowlist: set[str] | frozenset[str] | None = None,
+    recipe=None,
 ):
     """Realify stems on visible GPU(s) or CPU (small-music only)."""
     configure_sa3_env()
@@ -1484,6 +1526,9 @@ def run_realify(
         presets=presets,
         output_root=output_root,
         render_mode=render_mode,
+        category_allowlist=category_allowlist,
+        recipe=recipe,
+        reset=reset,
     )
     use_gpu = (backend == "trt" or realify_uses_gpu(model)) if tasks else False
     log_realify_plan(
@@ -1496,6 +1541,10 @@ def run_realify(
         batch_size=batch_size,
     )
     if not tasks:
+        if recipe is not None:
+            from synthesis.recipe import sync_realify_sidecar
+
+            sync_realify_sidecar(source_dir, output_dir, recipe)
         return
 
     if use_gpu:
@@ -1521,6 +1570,10 @@ def run_realify(
             content_fidelity_enforce=content_fidelity_enforce,
             backend=backend,
         )
+    if recipe is not None:
+        from synthesis.recipe import sync_realify_sidecar
+
+        sync_realify_sidecar(source_dir, output_dir, recipe)
 
 
 def parse_args(args=None, namespace=None):

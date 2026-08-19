@@ -33,7 +33,13 @@ def add_audio_format_arg(parser: argparse.ArgumentParser):
     )
 
 
-def add_synthesis_args(parser: argparse.ArgumentParser):
+def add_synthesis_args(
+    parser: argparse.ArgumentParser,
+    *,
+    include_render_mode: bool = True,
+    include_realify: bool = True,
+    full_default: bool = False,
+):
     parser.add_argument("-df", "--dataset_filepath", default=PDMX_FILEPATH, type=str)
     parser.add_argument("-o", "--output_dir", default=OUTPUT_DIR, type=str)
     parser.add_argument("-sf", "--soundfont_filepath", default=SOUNDFONT_PATH, type=str)
@@ -50,22 +56,39 @@ def add_synthesis_args(parser: argparse.ArgumentParser):
         type=int,
         help="CPU workers for synthesis and CPU realify (small-music).",
     )
-    parser.add_argument(
-        "--render-mode",
-        default=RENDER_MODE_BASIC,
-        choices=list(RENDER_MODES),
-        help=(
-            "basic = single soundfont; slakh = locked multi-SF recipes; "
-            "ddsp_basic / ddsp_slakh = neural DDSP with basic/slakh soundfont fallback "
-            "(copies donor stems; skips Fluidsynth for fallbacks)."
-        ),
-    )
-    parser.add_argument(
-        "--full",
-        action="store_true",
-        help="Synthesize all valid PDMX songs (default: stratified ablation sample from rated_deduplicated).",
-    )
-    parser.add_argument("--realify", action="store_true")
+    if include_render_mode:
+        parser.add_argument(
+            "--render-mode",
+            default=RENDER_MODE_BASIC,
+            choices=list(RENDER_MODES),
+            help=(
+                "basic = single soundfont; slakh = locked multi-SF recipes; "
+                "ddsp_basic / ddsp_slakh = neural DDSP with basic/slakh soundfont fallback "
+                "(copies donor stems; skips Fluidsynth for fallbacks)."
+            ),
+        )
+    if full_default:
+        parser.add_argument(
+            "--full",
+            dest="full",
+            action="store_true",
+            default=True,
+            help="Synthesize all valid PDMX songs (default for hybrid final synthesis).",
+        )
+        parser.add_argument(
+            "--ablation-sample",
+            dest="full",
+            action="store_false",
+            help="Use the stratified ablation sample instead of --full.",
+        )
+    else:
+        parser.add_argument(
+            "--full",
+            action="store_true",
+            help="Synthesize all valid PDMX songs (default: stratified ablation sample from rated_deduplicated).",
+        )
+    if include_realify:
+        parser.add_argument("--realify", action="store_true")
     parser.add_argument("-m", "--model", default="medium", choices=["small-music", "medium"])
     parser.add_argument(
         "--realify-limit",

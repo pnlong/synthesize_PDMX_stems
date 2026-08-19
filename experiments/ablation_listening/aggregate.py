@@ -386,6 +386,14 @@ def parse_args(args=None):
         nargs="?",
         const=DEFAULT_OUTPUT_DIR / "plots",
     )
+    parser.add_argument(
+        "--show-equivalences",
+        action="store_true",
+        help=(
+            "When plotting, show bars auto-copied from a donor (e.g. drums CA/CB). "
+            "Hidden by default. Only used with --plots-dir."
+        ),
+    )
     return parser.parse_args(args)
 
 
@@ -424,7 +432,11 @@ def main(args=None) -> None:
     if opts.plots_dir is not None:
         from experiments.ablation_listening.plot_results import write_plots
 
-        result = write_plots(df, opts.plots_dir)
+        result = write_plots(
+            df,
+            opts.plots_dir,
+            hide_equivalences=not opts.show_equivalences,
+        )
         print(f"Wrote plots under {opts.plots_dir}")
         print(f"  overview: {result['overview'].name}")
         print(f"  by category: {result['overview_by_category'].name}")

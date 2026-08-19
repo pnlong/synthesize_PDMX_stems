@@ -37,3 +37,24 @@ def test_append_rows_deduped_replaces_path(tmp_path):
     stems = pd.read_csv(csv_path)
     assert len(stems) == 2
     assert stems[stems["track"] == 0].iloc[0]["name"] == "Piano"
+
+
+def test_append_rows_deduped_composite_key(tmp_path):
+    csv_path = tmp_path / "stem_recipe.csv"
+    path = "/songs/a"
+    append_rows_deduped(
+        str(csv_path),
+        ["path", "track", "method"],
+        [{"path": path, "track": 0, "method": "basic"}, {"path": path, "track": 1, "method": "slakh"}],
+        key_cols=["path", "track"],
+    )
+    append_rows_deduped(
+        str(csv_path),
+        ["path", "track", "method"],
+        [{"path": path, "track": 0, "method": "midi-ddsp"}],
+        key_cols=["path", "track"],
+    )
+    df = pd.read_csv(csv_path)
+    assert len(df) == 2
+    assert df[df["track"] == 0].iloc[0]["method"] == "midi-ddsp"
+    assert df[df["track"] == 1].iloc[0]["method"] == "slakh"

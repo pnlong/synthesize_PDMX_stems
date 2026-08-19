@@ -3,6 +3,7 @@
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 from experiments.ablation_listening.plot_results import (
     category_leaderboard,
@@ -42,21 +43,100 @@ def test_write_plots(tmp_path: Path):
     assert names == {"piano.pdf", "drums.pdf"}
 
 
-def test_combined_score_penalizes_low_content():
-    from experiments.ablation_listening.plot_results import with_combined_score
+def test_content_difference_pairs_realify_to_base():
+    from experiments.ablation_listening.plot_results import with_content_difference
 
     df = pd.DataFrame({
-        "content": [100.0, 50.0, 0.0],
-        "realism": [80.0, 80.0, 100.0],
+        "listener_id": ["a", "a", "a", "a"],
+        "trial_id": ["stem_piano_01"] * 4,
+        "condition_id": ["basic", "basic_realify", "slakh", "slakh_realify"],
+        "content": [79.0, 56.0, 70.0, 70.0],
+        "realism": [80.0, 70.0, 75.0, 72.0],
+        "trial_type": ["stem"] * 4,
+        "category": ["piano"] * 4,
     })
-    out = with_combined_score(df)
-    assert list(out["combined"]) == [80.0, 40.0, 0.0]
+    out = with_content_difference(df)
+    by_cond = dict(zip(out["condition_id"], out["content_diff"]))
+    assert by_cond["basic"] == 0.0
+    assert by_cond["slakh"] == 0.0
+    assert by_cond["basic_realify"] == pytest.approx(-23.0)
+    assert by_cond["slakh_realify"] == pytest.approx(0.0)
+
+
+def test_content_delta_panel_skips_synthetic_bars():
+    from experiments.ablation_listening.plot_results import (
+        CONTENT_DIFF_METRIC,
+        _draw_metric_panel,
+        condition_metric_stats,
+        with_content_difference,
+    )
+    import matplotlib.pyplot as plt
+
+    stats = condition_metric_stats(
+        with_content_difference(_fake_df()),
+        CONTENT_DIFF_METRIC,
+    )
+    fig, ax = plt.subplots()
+    _draw_metric_panel(ax, stats, CONTENT_DIFF_METRIC)
+    # One realified bar per family (A/B/CA/CB); synthetics are not drawn.
+    assert len(ax.patches) == 8  # 4 bars + 4 hatch overlays
+    plt.close(fig)
 
 
 def test_category_leaderboard_reports_margin():
     board = category_leaderboard(_fake_df())
     assert set(board["category"]) == {"piano", "drums"}
-    assert "combined" in board.columns
+    assert "combined" not in board.columns
+    assert "content_diff" in board.columns
     assert "margin_vs_2nd" in board.columns
-    # Highest index condition wins on content, realism, and combined with the fake data.
+    # Highest index condition wins on realism (and content) with the fake data.
     assert (board["winner"] == "ddsp_slakh_realify").all()
+
+
+def test_hidden_equivalent_conditions_only_when_all_auto_assigned():
+    from experiments.ablation_listening.plot_results import hidden_equivalent_conditions
+    from experiments.ablation_listening.equivalence import DONOR_EQUIVALENCE_PAIRS
+
+    rows = []
+    for condition in CONDITION_ORDER:
+        auto = condition in DONOR_EQUIVALENCE_PAIRS
+        rows.append({
+            "category": "drums",
+            "condition_id": condition,
+            "auto_assigned": auto,
+        })
+    drums = pd.DataFrame(rows)
+    assert hidden_equivalent_conditions(drums) == set(DONOR_EQUIVALENCE_PAIRS)
+
+    mixed = drums.copy()
+    mixed.loc[mixed["condition_id"] == "ddsp_basic", "auto_assigned"] = False
+    assert "ddsp_basic" not in hidden_equivalent_conditions(mixed)
+    assert "ddsp_slakh" in hidden_equivalent_conditions(mixed)
+
+
+def test_leaderboard_hides_equivalent_duplicates():
+    from experiments.ablation_listening.equivalence import DONOR_EQUIVALENCE_PAIRS
+
+    rows = []
+    for condition in CONDITION_ORDER:
+        is_ddsp = condition in DONOR_EQUIVALENCE_PAIRS
+        rows.append({
+            "listener_id": "a",
+            "trial_id": "stem_drums_01",
+            "trial_type": "stem",
+            "category": "drums",
+            "condition_id": condition,
+            "condition_label": condition,
+            "is_reference": False,
+            "content": 90.0 if condition in ("basic", "ddsp_basic") else 40.0,
+            "realism": 80.0 if condition in ("basic", "ddsp_basic") else 30.0,
+            "auto_assigned": is_ddsp,
+            "source_condition": DONOR_EQUIVALENCE_PAIRS.get(condition),
+        })
+    df = pd.DataFrame(rows)
+    shown = category_leaderboard(df, hide_equivalences=False)
+    hidden = category_leaderboard(df, hide_equivalences=True)
+    default = category_leaderboard(df)
+    assert "ddsp_basic" in shown.iloc[0]["winner"]
+    assert hidden.iloc[0]["winner"] == "basic"
+    assert default.iloc[0]["winner"] == "basic"

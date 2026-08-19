@@ -181,6 +181,40 @@ python -m synthesis.synthesize --render-mode basic --full --realify
 python -m synthesis.mix --full -j 8
 ```
 
+## Hybrid final synthesis (per-category recipe)
+
+After the ablation listening test, edit [`recipe.yaml`](recipe.yaml) with the winning ablation id per listening category (`basic`, `slakh`, `ddsp_basic`, `ddsp_slakh`, plus `_realify` variants). Expanded `{method, realify, fallback}` mappings are also accepted.
+
+`python -m synthesis.final` renders **one** mixed stem tree (not eight ablation dirs) in method passes:
+
+1. **Fluidsynth** — categories whose recipe is `basic` / `slakh` (and DDSP-ineligible fallbacks). Per-track slakh recipes vs default GM. `-j` workers.
+2. **DDSP** — categories whose recipe is `ddsp_*`: global `ddsp_piano` then `midi_ddsp` (same pool restart as ablation DDSP). No donor copies; Fluidsynth already filled fallbacks.
+3. **SA3 realify** — only categories whose recipe is a `*_realify` ablation; other stems are copied through. Locked preset bypasses (`realify: false`) still apply.
+
+Without `--reset`, the run **resumes**: valid stems whose `stem_recipe.csv` sidecar matches the current recipe are skipped. If a stem exists but the sidecar does not match (recipe YAML changed, or a completed tree has no sidecar), the CLI lists the conflicts and asks before regenerating. Pass `-y` / `--yes` to regenerate without a prompt.
+
+```bash
+# Edit synthesis/recipe.yaml, then:
+uv run python -m synthesis.final --recipe synthesis/recipe.yaml --full -j 8
+
+# Method groups as separate jobs:
+uv run python -m synthesis.final --only-pass fluidsynth -j 8
+uv run python -m synthesis.final --only-pass ddsp
+uv run python -m synthesis.final --only-pass realify
+
+# Recipe changed; regenerate mismatches without prompting:
+uv run python -m synthesis.final -y --full -j 8
+
+# Stratified sample instead of all valid PDMX (writes dev/ablations/final/):
+uv run python -m synthesis.final --ablation-sample -j 8
+
+# Then mix the complete tree (raw, or stems_realify/ if any category was realified):
+uv run python -m synthesis.mix --full -j 8
+uv run python -m synthesis.mix --full --realify -j 8
+```
+
+`--full` is the default. Do not add `final` to listening `CONDITION_ORDER`. Each stem tree writes `stem_recipe.csv` beside `stems.csv` (`path`, `track`, `category`, `ablation`, `method`, `fallback`, `backend`, `realify`).
+
 Synthesize always uses dense corrected MIDIs from `dev/mid_corrected/` (`prepare_synthesis` is the step-0 setup).
 
 Song-length analysis (no synthesis required):
@@ -212,7 +246,10 @@ python -m synthesis.realify.realify --source-dir .../dev/ablations/basic --outpu
 
 ```
 synthesis/
-├── synthesize.py       # main CLI (--render-mode, --full, --realify)
+├── synthesize.py       # ablation CLI (--render-mode, --full, --realify)
+├── final.py            # hybrid production CLI (per-category recipe.yaml)
+├── recipe.yaml         # per-category synthesis recipe (edit this)
+├── recipe.py           # parse recipe → per-track plan + stem_recipe.csv
 ├── build_spdmx.py      # assemble {OUTPUT_DIR}/SPDMX/ (stub)
 ├── realify/
 │   ├── realify.py      # SA3 audio-to-audio
@@ -296,6 +333,7 @@ See [`listening/README.md`](listening/README.md).
 | `--render-mode ddsp_basic` / `ddsp_slakh` + donor copy reuse | Done (isolated TF venv; SETUP Track C) |
 | Stratified listening sample + 10s clips | Done |
 | `--full` for all valid PDMX | Done |
+| Hybrid `synthesis.final` from `recipe.yaml` | Done |
 | `build_spdmx.py` | Stub |
 | Patch pools (Slakh) | Stub |
 | `mixture` per song | Not stored by default; `synthesis.mix` applies LUFS × velocity × peak so mix = sum(stems). See [`MIXING.md`](MIXING.md). |

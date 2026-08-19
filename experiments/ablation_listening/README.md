@@ -72,16 +72,21 @@ uv run python -m experiments.ablation_listening.aggregate \
 By default this reads `output/responses/` and **only** finished exports (`responses_<listener>_<timestamp>.json`). In-progress checkpoints (`responses_in_progress_*.json`) are ignored.
 
 `--plots-dir` writes bar charts to `output/plots/` (PDF, transparent background):
-- `overview.pdf` — overall content / realism / combined (x-axis A/B/CA/CB; left=synthetic, right=realified; ★ = winner)
+- `overview.pdf` — overall content / content Δ / realism (x-axis A/B/CA/CB; left=synthetic, right=hatched realified; ★ = winner)
 - `overview_by_category.pdf` — all categories in one figure
-- `by_category/<category>.pdf` — three-panel content|realism|combined per category
-- `category_winners.csv` — per-category winner on
-  $\mathrm{combined}=(\mathrm{content}/100)\times\mathrm{realism}$ (+ margin vs 2nd / DDSP donor)
+- `by_category/<category>.pdf` — content | content Δ | realism per category
+- `category_winners.csv` — per-category winner on realism (+ margin vs 2nd / DDSP donor)
+
+Donor-copy bars (e.g. drums CA1/CA2/CB1/CB2 when they equal A/B) are **hidden by default**. A bar is hidden only when **every** rating for that condition in the plotted slice is a donor copy. Pass `--show-equivalences` to include them.
+
+**Content Δ** is the per-trial paired drop from the non-realified sibling (A2−A1, B2−B1, CA2−CA1, CB2−CB1). Only realified bars are drawn (synthetics are the baseline, not a Δ). Negative means SA3 scored lower on content than its pair. The Δ panel uses its own y-axis; content and realism stay on 0–100.
 
 Plots only:
 
 ```bash
 uv run python -m experiments.ablation_listening.plot_results
+# include donor-copy bars:
+uv run python -m experiments.ablation_listening.plot_results --show-equivalences
 ```
 
 ## Layout

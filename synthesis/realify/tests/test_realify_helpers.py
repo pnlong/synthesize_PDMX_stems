@@ -131,6 +131,50 @@ def test_build_realify_tasks_copies_passthrough_when_realify_disabled(tmp_path: 
     assert not realify_enabled(presets["categories"]["organ"])
 
 
+def test_build_realify_tasks_copies_when_category_not_allowlisted(tmp_path: Path):
+    source_dir = tmp_path / "basic"
+    output_dir = tmp_path / "basic_realify"
+    song_dir = source_dir / "data" / "song"
+    out_song_dir = output_dir / "data" / "song"
+    song_dir.mkdir(parents=True)
+
+    sr = 44100
+    sf.write(str(song_dir / "stem_0.flac"), np.ones(sr) * 0.1, sr, format="FLAC")
+    sf.write(str(song_dir / "stem_1.flac"), np.ones(sr) * 0.2, sr, format="FLAC")
+
+    stems = pd.DataFrame({
+        "path": [str(song_dir), str(song_dir)],
+        "track": [0, 1],
+        "name": ["Organ", "Piano"],
+        "program": [16, 0],
+        "is_drum": [False, False],
+    })
+    stems.to_csv(source_dir / "stems.csv", index=False)
+
+    captions = pd.DataFrame({
+        "path": [str(song_dir), str(song_dir)],
+        "track": [0, 1],
+        "prompt": ["organ", "piano"],
+    })
+
+    presets = {
+        "default": {"init_noise_level": 0.45, "prompt_variant": "current"},
+        "routing": [],
+        "categories": {},
+    }
+    tasks = build_realify_tasks(
+        captions,
+        source_dir,
+        output_dir,
+        presets=presets,
+        audio_format="flac",
+        category_allowlist={"organ"},
+    )
+    assert len(tasks) == 1
+    assert tasks[0]["out_path"] == str(out_song_dir / "stem_0.flac")
+    assert (out_song_dir / "stem_1.flac").is_file()
+
+
 def test_build_realify_tasks_skips_invalid_stem(tmp_path: Path, monkeypatch):
     source_dir = tmp_path / "basic"
     output_dir = tmp_path / "basic_realify"
