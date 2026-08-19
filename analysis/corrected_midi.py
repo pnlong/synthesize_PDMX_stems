@@ -13,11 +13,13 @@ from shared.config import (
     DEV_DIR_NAME,
     MID_CORRECTED_DIR_NAME,
     SPDMX_DATASET_DIR_NAME,
+    SPDMX_FILE_NAME,
     SPDMX_MID_DIR_NAME,
 )
 from synthesis.patches import PatchAssignment, apply_patch_to_midi_track
 
-TRACK_MAP_FILE_NAME = "track_map.csv"
+TRACK_MAP_FILE_NAME = f"{SPDMX_FILE_NAME}.csv"
+LEGACY_TRACK_MAP_FILE_NAME = "track_map.csv"
 # ``song_id`` is ``<shard>/<shard>/<hash>`` (PDMX ``./data/{song_id}.json``).
 # Row identity in this table is (song_id, track).
 TRACK_MAP_COLUMNS = [
@@ -92,7 +94,7 @@ def spdmx_mid_rel(song_id: str) -> str:
 
 
 def track_map_csv_path(corrected_midi_dir: str | Path) -> Path:
-    """Preferred global track map: ``{SPDMX}/track_map.csv`` when mid is ``{SPDMX}/mid/``."""
+    """Preferred global track map: ``{SPDMX}/SPDMX.csv`` when mid is ``{SPDMX}/mid/``."""
     root = Path(corrected_midi_dir)
     if root.name == SPDMX_MID_DIR_NAME:
         return root.parent / TRACK_MAP_FILE_NAME
@@ -102,20 +104,26 @@ def track_map_csv_path(corrected_midi_dir: str | Path) -> Path:
 def track_map_csv_candidates(corrected_midi_dir: str | Path) -> list[Path]:
     root = Path(corrected_midi_dir)
     primary = track_map_csv_path(root)
-    candidates = [primary]
+    locations = [primary]
     nested = root / TRACK_MAP_FILE_NAME
     if nested.resolve() != primary.resolve():
-        candidates.append(nested)
+        locations.append(nested)
     if (
         root.name == SPDMX_MID_DIR_NAME
         and root.parent.name == SPDMX_DATASET_DIR_NAME
     ):
-        candidates.append(
+        locations.append(
             root.parent.parent
             / DEV_DIR_NAME
             / MID_CORRECTED_DIR_NAME
             / TRACK_MAP_FILE_NAME
         )
+    candidates: list[Path] = []
+    for path in locations:
+        candidates.append(path)
+        legacy = path.with_name(LEGACY_TRACK_MAP_FILE_NAME)
+        if legacy.resolve() != path.resolve():
+            candidates.append(legacy)
     return candidates
 
 
@@ -188,7 +196,7 @@ def load_track_map(
     corrected_midi_dir: str | Path,
     track_maps: dict[str, dict[int, dict]] | None = None,
 ) -> dict[int, dict]:
-    """Map dense ``track`` → row dict from the global ``track_map.csv``."""
+    """Map dense ``track`` → row dict from the global ``SPDMX.csv``."""
     csv_path = resolve_track_map_csv(corrected_midi_dir)
     key = dest_rel_for_midi(midi_path, corrected_midi_dir)
     maps = track_maps if track_maps is not None else load_track_maps(csv_path)
@@ -263,7 +271,7 @@ def write_corrected_midi(
     grand-staff / conductor stubs are omitted.
 
     Returns track-map rows (``TRACK_MAP_COLUMNS``). The batch writer stores them
-    in a single ``track_map.csv``; this function does not write a per-file map.
+    in a single ``SPDMX.csv``; this function does not write a per-file map.
     """
     src_mid = Path(src_mid)
     dest_mid = Path(dest_mid)
@@ -410,6 +418,10 @@ def write_corrected_midis_from_register(
 
     if global_rows:
         out_csv = track_map_csv_path(corrected_midi_dir)
+        out_csv.parent.mkdir(parents=True, exist_ok=True)
+        legacy = out_csv.with_name(LEGACY_TRACK_MAP_FILE_NAME)
+        if legacy.is_file() and legacy.resolve() != out_csv.resolve():
+            legacy.unlink()
         pd.DataFrame(global_rows, columns=TRACK_MAP_COLUMNS).to_csv(out_csv, index=False)
         clear_track_map_cache()
         from synthesis.spdmx_release import maybe_write_spdmx_release_docs

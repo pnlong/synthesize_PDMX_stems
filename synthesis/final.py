@@ -36,7 +36,7 @@ def parse_args(args=None, namespace=None):
         description=(
             "Synthesize the sPDMX dataset using a per-category recipe. "
             f"Writes FLAC stems under {OUTPUT_DIR}/{SPDMX_DATASET_DIR_NAME}/audio/ "
-            "and sanitized MIDI under mid/. Join track_map.csv to PDMX.csv on song_id. "
+            "and sanitized MIDI under mid/. Join SPDMX.csv to PDMX.csv on song_id. "
             "Audio format is always FLAC. "
             "Run one pass at a time with --only-pass "
             "(layout → fluidsynth → ddsp → realify → mix)."

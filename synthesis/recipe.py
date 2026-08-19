@@ -9,6 +9,7 @@ from typing import Any, Mapping
 import pandas as pd
 import yaml
 
+from shared.config import DATA_DIR_NAME
 from synthesis.audio import stem_is_valid, stem_path
 from synthesis.ddsp.routing import (
     BACKEND_DDSP_PIANO,
@@ -398,7 +399,7 @@ def scan_recipe_conflicts(
     Incomplete runs (stem files but no ``data.csv``) resume without prompting.
     """
     root = Path(stems_dir)
-    data_csv = root / "data.csv"
+    data_csv = root / f"{DATA_DIR_NAME}.csv"
     if not data_csv.is_file():
         return []
     songs = pd.read_csv(data_csv)

@@ -11,12 +11,12 @@ the hashed layout path without `./data/` or `.json`
 .
 ├── LICENSE
 ├── README.md
-├── track_map.csv
+├── SPDMX.csv
 ├── audio/<song_id>/<track>.flac
 └── mid/<song_id>.mid
 ```
 
-`track` in filenames and in `track_map.csv` is the **dense** MIDI track index
+`track` in filenames and in `SPDMX.csv` is the **dense** MIDI track index
 after empty PDMX tracks are dropped. `original_track` is the PDMX MIDI track
 index.
 
@@ -30,7 +30,7 @@ index.
 | `mid` (`./mid/{song_id}.mid`) | `mid` = `./mid/{song_id}.mid` |
 | `path` (`./audio/{song_id}`) | PDMX `path` is metadata JSON; sPDMX `path` is the stem directory |
 
-Row identity in `track_map.csv` is `(song_id, track)`.
+Row identity in `SPDMX.csv` is `(song_id, track)`.
 
 Columns: `song_id`, `path`, `mid`, `track`, `original_track`, `program`, `is_drum`, `name`.
 

@@ -2,7 +2,7 @@ sPDMX dataset license
 =====================
 
 The contents of this directory (dense MIDI under mid/, audio stems under
-audio/, and track_map.csv) are released under the Creative Commons
+audio/, and SPDMX.csv) are released under the Creative Commons
 Attribution 4.0 International License (CC BY 4.0):
 
     https://creativecommons.org/licenses/by/4.0/

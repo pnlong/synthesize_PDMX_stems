@@ -27,6 +27,7 @@ from shared.config import (
     SONGS_TABLE_COLUMNS,
     SOUNDFONT_DIR,
     SPDMX_AUDIO_DIR_NAME,
+    SPDMX_FILE_NAME,
     SPDMX_MID_DIR_NAME,
     STEMS_FILE_NAME,
     STEMS_TABLE_COLUMNS,
@@ -889,6 +890,9 @@ def prepare_render_dataset(
 def ensure_synthesis_tables(output_dir: str, args) -> None:
     """Create empty data/stems/routing/recipe CSVs when missing (or after ``--reset``)."""
     output_filepath = f"{output_dir}/{DATA_DIR_NAME}.csv"
+    mistaken_release_name = f"{output_dir}/{SPDMX_FILE_NAME}.csv"
+    if exists(mistaken_release_name) and not exists(output_filepath):
+        Path(mistaken_release_name).rename(output_filepath)
     stems_output_filepath = f"{output_dir}/{STEMS_FILE_NAME}.csv"
     if not exists(output_filepath) or args.reset:
         pd.DataFrame(columns=SONGS_TABLE_COLUMNS).to_csv(

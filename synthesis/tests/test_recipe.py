@@ -11,7 +11,7 @@ import pytest
 import soundfile as sf
 import yaml
 
-from shared.config import DEFAULT_AUDIO_FORMAT
+from shared.config import DATA_DIR_NAME, DEFAULT_AUDIO_FORMAT
 from shared.csv_tables import append_rows_deduped
 from synthesis.ddsp.routing import BACKEND_MIDI_DDSP, BACKEND_SOUNDFONT, route_stem
 from synthesis.patches import LISTENING_CATEGORY_GM_CLASSES
@@ -200,7 +200,7 @@ def _write_stem_tree(root: Path, *, method: str = "basic", backend: str = "fluid
     song_dir.mkdir(parents=True)
     sf.write(str(song_dir / "stem_0.mp3"), np.zeros(44100), 44100, format="MP3")
     pd.DataFrame({"path": [str(song_dir)], "n_tracks": [1]}).to_csv(
-        root / "data.csv", index=False,
+        root / f"{DATA_DIR_NAME}.csv", index=False,
     )
     pd.DataFrame({
         "path": [str(song_dir)],

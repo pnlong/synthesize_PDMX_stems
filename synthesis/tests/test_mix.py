@@ -8,7 +8,7 @@ import pytest
 import soundfile as sf
 import torch
 
-from shared.config import SAMPLE_RATE
+from shared.config import DATA_DIR_NAME, SAMPLE_RATE
 from synthesis.audio import load_stem, to_mono_numpy
 from synthesis.mix import (
     confirm_overwrite,
@@ -87,7 +87,7 @@ def _seed_song_tree(root: Path) -> Path:
         "path": [str(song), str(song)],
         "track": [0, 1],
     }).to_csv(root / "stems.csv", index=False)
-    pd.DataFrame({"path": [str(song)], "n_tracks": [2]}).to_csv(root / "data.csv", index=False)
+    pd.DataFrame({"path": [str(song)], "n_tracks": [2]}).to_csv(root / f"{DATA_DIR_NAME}.csv", index=False)
     return song
 
 

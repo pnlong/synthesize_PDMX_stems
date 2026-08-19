@@ -918,11 +918,12 @@ def resolve_stem_output_path(
 def copy_metadata_tables(source_dir: Path, output_dir: Path):
     """Copy data/stems/routing CSVs into ``output_dir``, remapping absolute song paths."""
     from synthesis.ddsp.config import DDSP_ROUTING_FILE_NAME
+    from shared.config import DATA_DIR_NAME
 
     if source_dir.resolve() == output_dir.resolve():
         return
     output_dir.mkdir(parents=True, exist_ok=True)
-    for name in ("data.csv", "stems.csv", DDSP_ROUTING_FILE_NAME, "stem_recipe.csv"):
+    for name in (f"{DATA_DIR_NAME}.csv", "stems.csv", DDSP_ROUTING_FILE_NAME, "stem_recipe.csv"):
         src = source_dir / name
         if not src.exists():
             continue

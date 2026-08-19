@@ -11,7 +11,7 @@ import pandas as pd
 import soundfile as sf
 from tqdm import tqdm
 
-from shared.config import CHUNK_SIZE, OUTPUT_DIR, RENDER_MODE_BASIC, STEMS_FILE_NAME
+from shared.config import CHUNK_SIZE, DATA_DIR_NAME, OUTPUT_DIR, RENDER_MODE_BASIC, STEMS_FILE_NAME
 from synthesis.audio import stem_path
 from synthesis.paths import ablation_raw_dir
 
@@ -51,7 +51,7 @@ def analyze_stem_row(row: pd.Series) -> dict:
 def analyze_durations(dataset_dir: str, jobs: int = 1) -> pd.DataFrame:
     dataset_dir = Path(dataset_dir)
     stems = pd.read_csv(dataset_dir / f"{STEMS_FILE_NAME}.csv")
-    songs = pd.read_csv(dataset_dir / "data.csv", usecols=["path", "genres"])
+    songs = pd.read_csv(dataset_dir / f"{DATA_DIR_NAME}.csv", usecols=["path", "genres"])
     merged = stems.merge(songs, on="path", how="left")
 
     if jobs <= 1:

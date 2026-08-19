@@ -11,8 +11,8 @@ import pandas as pd
 from shared.config import (
     ABLATION_SAMPLE_SEED,
     CAPTIONS_TABLE_COLUMNS,
-    DATA_DIR_NAME,
     OUTPUT_DIR,
+    DATA_DIR_NAME,
     STEMS_FILE_NAME,
 )
 from synthesis.paths import full_stems_dir

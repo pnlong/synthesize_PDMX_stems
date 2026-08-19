@@ -19,6 +19,7 @@ NA_STRING = "NA"
 
 DATA_DIR_NAME = "data"
 STEMS_FILE_NAME = "stems"
+SPDMX_FILE_NAME = "SPDMX"  # released table {SPDMX}/SPDMX.csv (was track_map.csv)
 CAPTIONS_FILE_NAME = "captions"
 
 # {OUTPUT_DIR}/dev/ — development artifacts (ablations, analysis, interim stems)
@@ -45,7 +46,7 @@ EXPERIMENTS_DIR_NAME = "experiments"
 PRESET_SWEEP_DIR_NAME = "preset_sweep"
 PATCH_SWEEP_DIR_NAME = "patch_sweep"
 
-# {OUTPUT_DIR}/SPDMX/ — released dataset: LICENSE, README, track_map.csv, audio/, mid/
+# {OUTPUT_DIR}/SPDMX/ — released dataset: LICENSE, README, SPDMX.csv, audio/, mid/
 SPDMX_DATASET_DIR_NAME = "SPDMX"
 SPDMX_AUDIO_DIR_NAME = "audio"
 SPDMX_MID_DIR_NAME = "mid"

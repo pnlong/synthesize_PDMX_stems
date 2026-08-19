@@ -94,13 +94,13 @@ def test_synthesis_is_complete_stems_only_without_mixture(tmp_path: Path):
 def test_reset_synthesis_output_removes_stems_and_tables(tmp_path: Path):
     ablation_dir = tmp_path / "basic"
     _write_complete_ablation(ablation_dir)
-    assert (ablation_dir / "data.csv").exists()
+    assert (ablation_dir / f"{DATA_DIR_NAME}.csv").exists()
     assert (ablation_dir / "data" / "song" / "stem_0.mp3").exists()
 
     reset_synthesis_output(str(ablation_dir))
 
     assert ablation_dir.is_dir()
-    assert not (ablation_dir / "data.csv").exists()
+    assert not (ablation_dir / f"{DATA_DIR_NAME}.csv").exists()
     assert not (ablation_dir / "data" / "song" / "stem_0.mp3").exists()
 
 
@@ -119,7 +119,7 @@ def test_songs_missing_routing_detects_incomplete_coverage():
 
 
 def test_load_completed_song_paths_excludes_incomplete_routing(tmp_path: Path):
-    data_csv = tmp_path / "data.csv"
+    data_csv = tmp_path / f"{DATA_DIR_NAME}.csv"
     routing_csv = tmp_path / "ddsp_routing.csv"
     pd.DataFrame({
         "path": ["/done", "/missing"],
