@@ -8,6 +8,7 @@ from pathlib import Path
 import mido
 import pandas as pd
 
+from shared.csv_tables import sanitize_track_name
 from shared.config import (
     DEV_DIR_NAME,
     MID_CORRECTED_DIR_NAME,
@@ -244,8 +245,7 @@ def _track_program_and_drum(track) -> tuple[int, bool]:
 def _track_name(track) -> str | None:
     for message in track:
         if message.type == "track_name":
-            name = " ".join(message.name.replace(",", " ").split())
-            return name if name else None
+            return sanitize_track_name(message.name)
     return None
 
 

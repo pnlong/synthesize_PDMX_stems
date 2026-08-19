@@ -75,6 +75,21 @@ def test_write_corrected_midi_drops_empty_and_applies_register(tmp_path: Path):
     assert load_track_map(dest, corrected_midi_dir=mid_dir)[0]["original_track"] == 2
 
 
+def test_track_map_csv_accepts_null_byte_in_track_name(tmp_path: Path):
+    src = _song_with_empty_stub(tmp_path)
+    midi = mido.MidiFile(filename=str(src), charset="utf8")
+    midi.tracks[-1][0] = mido.MetaMessage("track_name", name="Piano\x00 \"A\"", time=0)
+    midi.save(src)
+    mid_dir = tmp_path / "SPDMX" / "mid"
+    dest = mid_dir / "x.mid"
+    rows = write_corrected_midi(src, dest, mid_rel="./mid/x.mid")
+    assert rows[0]["name"] == 'Piano "A"'
+    csv_path = track_map_csv_path(mid_dir)
+    pd.DataFrame(rows, columns=TRACK_MAP_COLUMNS).to_csv(csv_path, index=False)
+    reloaded = pd.read_csv(csv_path)
+    assert reloaded.iloc[0]["name"] == 'Piano "A"'
+
+
 def test_write_corrected_midis_writes_global_track_map(tmp_path: Path):
     pdmx_root = tmp_path / "PDMX"
     pdmx_root.mkdir()
