@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import multiprocessing
 from pathlib import Path
 
 import mido
@@ -318,6 +319,35 @@ def write_corrected_midi(
     return map_rows
 
 
+def _corrected_midi_dest_rel(mid_rel: str) -> str:
+    rel = str(mid_rel).lstrip("./")
+    if rel.startswith("mid/"):
+        return rel[len("mid/") :]
+    return rel
+
+
+def _write_one_corrected_midi(
+    item: tuple[str, str, dict[int, int], str],
+) -> tuple[list[dict], bool]:
+    """Worker: ``(mid_rel, dest, programs, pdmx_root)`` → ``(rows, failed)``."""
+    from analysis.track_names import mid_path_for_row
+
+    mid_rel, dest, programs, pdmx_root = item
+    src = mid_path_for_row(mid_rel, pdmx_root)
+    if not src.is_file():
+        return [], True
+    try:
+        rows = write_corrected_midi(
+            src,
+            dest,
+            program_by_original_track=programs,
+            mid_rel=mid_rel,
+        )
+    except Exception:
+        return [], True
+    return rows, False
+
+
 def write_corrected_midis_from_register(
     register: pd.DataFrame,
     *,
@@ -326,50 +356,57 @@ def write_corrected_midis_from_register(
     jobs: int = 1,
 ) -> tuple[int, int]:
     """Write all corrected midis referenced by ``register``. Returns (ok, failed)."""
-    from analysis.track_names import mid_path_for_row
-
     pdmx_root = Path(pdmx_root)
     corrected_midi_dir = Path(corrected_midi_dir)
     corrected_midi_dir.mkdir(parents=True, exist_ok=True)
 
-    grouped = register.groupby("mid", sort=False)
+    work: list[tuple[str, str, dict[int, int], str]] = []
+    pdmx_root_s = str(pdmx_root)
+    for mid_rel, group in register.groupby("mid", sort=False):
+        dest = str(corrected_midi_dir / _corrected_midi_dest_rel(str(mid_rel)))
+        programs = {
+            int(track): int(program)
+            for track, program in zip(
+                group["track"].to_numpy(),
+                group["program_corrected"].to_numpy(),
+            )
+        }
+        work.append((str(mid_rel), dest, programs, pdmx_root_s))
+
     ok = 0
     failed = 0
     global_rows: list[dict] = []
-
-    items = list(grouped)
     from tqdm import tqdm
 
-    iterator = tqdm(items, total=len(items), desc="Writing corrected MIDI", unit="song")
+    n_jobs = max(1, int(jobs))
+    desc = f"Writing corrected MIDI (-j {n_jobs})"
+    if n_jobs <= 1:
+        results = (
+            _write_one_corrected_midi(item)
+            for item in work
+        )
+        iterator = tqdm(results, total=len(work), desc=desc, unit="song")
+    else:
+        chunksize = max(8, min(64, len(work) // (n_jobs * 4) or 8))
+        pool = multiprocessing.Pool(processes=n_jobs)
+        iterator = tqdm(
+            pool.imap_unordered(_write_one_corrected_midi, work, chunksize=chunksize),
+            total=len(work),
+            desc=desc,
+            unit="song",
+        )
 
-    for mid_rel, group in iterator:
-        src = mid_path_for_row(str(mid_rel), pdmx_root)
-        if not src.is_file():
-            failed += 1
-            continue
-        # Preserve relative layout under mid_corrected/ (strip leading ./).
-        rel = str(mid_rel).lstrip("./")
-        if rel.startswith("mid/"):
-            dest_rel = rel[len("mid/"):]
-        else:
-            dest_rel = rel
-        dest = corrected_midi_dir / dest_rel
-        programs = {
-            int(row["track"]): int(row["program_corrected"])
-            for _, row in group.iterrows()
-        }
-        try:
-            rows = write_corrected_midi(
-                src,
-                dest,
-                program_by_original_track=programs,
-                mid_rel=str(mid_rel),
-            )
-        except Exception:
-            failed += 1
-            continue
-        global_rows.extend(rows)
-        ok += 1
+    try:
+        for rows, song_failed in iterator:
+            if song_failed:
+                failed += 1
+                continue
+            global_rows.extend(rows)
+            ok += 1
+    finally:
+        if n_jobs > 1:
+            pool.close()
+            pool.join()
 
     if global_rows:
         out_csv = track_map_csv_path(corrected_midi_dir)

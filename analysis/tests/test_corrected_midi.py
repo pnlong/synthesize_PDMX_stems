@@ -119,6 +119,30 @@ def test_write_corrected_midis_writes_global_track_map(tmp_path: Path):
     assert (tmp_path / "SPDMX" / "README.md").is_file()
 
 
+def test_write_corrected_midis_uses_jobs(tmp_path: Path):
+    pdmx_root = tmp_path / "PDMX"
+    pdmx_root.mkdir()
+    rows = []
+    for name in ("QmA", "QmB"):
+        src = pdmx_root / "mid" / "0" / "0" / f"{name}.mid"
+        src.parent.mkdir(parents=True, exist_ok=True)
+        stub = _song_with_empty_stub(tmp_path)
+        stub.replace(src)
+        rows.append({"mid": f"./mid/0/0/{name}.mid", "track": 2, "program_corrected": 12})
+    pd.DataFrame({"path": ["./data/0/0/QmA.json"], "mid": ["./mid/0/0/QmA.mid"]}).to_csv(
+        pdmx_root / "PDMX.csv", index=False
+    )
+    ok, failed = write_corrected_midis_from_register(
+        pd.DataFrame(rows),
+        pdmx_root=pdmx_root,
+        corrected_midi_dir=tmp_path / "SPDMX" / "mid",
+        jobs=2,
+    )
+    assert (ok, failed) == (2, 0)
+    assert (tmp_path / "SPDMX" / "mid" / "0" / "0" / "QmA.mid").is_file()
+    assert (tmp_path / "SPDMX" / "mid" / "0" / "0" / "QmB.mid").is_file()
+
+
 def test_song_id_from_mid():
     from analysis.corrected_midi import pdmx_path_from_mid, song_id_from_mid, song_id_from_pdmx_path
 
