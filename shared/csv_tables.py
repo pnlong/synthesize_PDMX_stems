@@ -53,9 +53,17 @@ def append_rows_deduped(
             existing = pd.read_csv(csv_path, sep=",", header=0, index_col=False)
             if len(existing) > 0:
                 new_keys = _row_key_set(new_df, cols)
-                keep = [_row_key(row, cols) not in new_keys for row in existing.to_dict("records")]
+                keep = [
+                    _row_key(row, cols) not in new_keys
+                    for row in existing.to_dict("records")
+                ]
                 existing = existing[keep]
-                new_df = pd.concat([existing, new_df], ignore_index=True)
+            if len(existing) > 0:
+                # Avoid pd.concat: all-NA columns (e.g. unnamed stems) warn on pandas 2.2+.
+                new_df = pd.DataFrame(
+                    existing.to_dict("records") + new_df.to_dict("records"),
+                    columns=columns,
+                )
 
         new_df.to_csv(
             csv_path,

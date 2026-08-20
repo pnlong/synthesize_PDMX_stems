@@ -1,5 +1,7 @@
 """Tests for CSV table helpers."""
 
+import warnings
+
 import pandas as pd
 
 from shared.config import STEMS_TABLE_COLUMNS
@@ -87,6 +89,28 @@ def test_append_rows_deduped_stem_track_keeps_siblings(tmp_path):
     assert stems[stems["track"] == 0].iloc[0]["name"] == "Slakh Piano"
     assert int(stems[stems["track"] == 0].iloc[0]["program"]) == 1
     assert stems[stems["track"] == 1].iloc[0]["name"] == "Strings"
+
+
+def test_append_rows_deduped_all_na_column_no_future_warning(tmp_path):
+    csv_path = tmp_path / "stems.csv"
+    unnamed = {
+        "path": "/songs/a", "track": 0, "original_track": 0, "program": 0,
+        "is_drum": False, "name": None, "has_lyrics": False,
+        "max_velocity": 64, "velocity_scale": 0.5,
+    }
+    named = {
+        "path": "/songs/b", "track": 0, "original_track": 0, "program": 0,
+        "is_drum": False, "name": "Piano", "has_lyrics": False,
+        "max_velocity": 64, "velocity_scale": 0.5,
+    }
+    append_rows_deduped(str(csv_path), STEMS_TABLE_COLUMNS, [unnamed], key_cols=["path", "track"])
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", FutureWarning)
+        append_rows_deduped(
+            str(csv_path), STEMS_TABLE_COLUMNS, [named], key_cols=["path", "track"],
+        )
+    stems = pd.read_csv(csv_path)
+    assert len(stems) == 2
 
 
 def test_append_rows_deduped_parallel_writers(tmp_path):
