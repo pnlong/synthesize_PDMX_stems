@@ -53,10 +53,15 @@ def note_on_count(track) -> int:
 
 
 def dest_rel_from_mid_col(mid_rel: str) -> str:
-    """``./mid/a/b/Qm.mid`` → ``a/b/Qm.mid`` (path under the corrected mid tree)."""
-    text = str(mid_rel).lstrip("./")
-    if text.startswith("mid/"):
-        text = text[len("mid/"):]
+    """``./mid/a/b/Qm.mid`` or an absolute ``…/mid/a/b/Qm.mid`` → ``a/b/Qm.mid``."""
+    text = str(mid_rel).replace("\\", "/")
+    marker = f"/{SPDMX_MID_DIR_NAME}/"
+    idx = text.find(marker)
+    if idx >= 0:
+        return text[idx + len(marker) :]
+    text = text.lstrip("./")
+    if text.startswith(f"{SPDMX_MID_DIR_NAME}/"):
+        text = text[len(SPDMX_MID_DIR_NAME) + 1 :]
     return text
 
 

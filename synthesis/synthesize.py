@@ -887,6 +887,40 @@ def prepare_render_dataset(
     return dataset.reset_index(drop=True)
 
 
+def _hybrid_corrected_midi_root(args) -> Path:
+    from synthesis.dense_midi import default_corrected_midi_dir
+
+    return Path(
+        getattr(args, "corrected_midi_dir", None)
+        or default_corrected_midi_dir(args.output_dir)
+    )
+
+
+def _restrict_dataset_to_spdmx_csv(dataset: pd.DataFrame, song_ids: set[str]) -> pd.DataFrame:
+    """Keep PDMX rows whose song_id is in the released ``SPDMX.csv``."""
+    from analysis.corrected_midi import song_id_from_mid
+
+    mid_col = dataset["mid_pdmx"] if "mid_pdmx" in dataset.columns else dataset["mid"]
+    keep = mid_col.map(song_id_from_mid).isin(song_ids)
+    n_drop = int((~keep).sum())
+    if n_drop:
+        print(
+            f"Restricting to SPDMX.csv ({len(song_ids)} songs); "
+            f"dropped {n_drop} PDMX rows",
+            flush=True,
+        )
+    return dataset.loc[keep].reset_index(drop=True)
+
+
+def _spdmx_csv_song_ids(args) -> set[str] | None:
+    from analysis.corrected_midi import resolve_track_map_csv
+
+    csv_path = resolve_track_map_csv(_hybrid_corrected_midi_root(args))
+    if not csv_path.is_file():
+        return None
+    return set(pd.read_csv(csv_path, usecols=["song_id"])["song_id"].astype(str))
+
+
 def ensure_synthesis_tables(output_dir: str, args) -> None:
     """Create empty data/stems/routing/recipe CSVs when missing (or after ``--reset``)."""
     output_filepath = f"{output_dir}/{DATA_DIR_NAME}.csv"
@@ -963,6 +997,10 @@ def run_layout_pass(
 
     dataset = prepare_render_dataset(args, media_dir, register_df=register_df)
     hybrid = _hybrid_recipe(args) is not None
+    if hybrid:
+        song_ids = _spdmx_csv_song_ids(args)
+        if song_ids is not None:
+            dataset = _restrict_dataset_to_spdmx_csv(dataset, song_ids)
     print(f"Planning {len(dataset)} song directories ...", flush=True)
     dirs: list[str] = list(dataset["path_output"])
     if hybrid:
@@ -1120,11 +1158,11 @@ def run_synthesis(args, output_dir: str, *, media_dir: str | None = None):
     )
     print(f"Using dense corrected midis under {corrected_root}")
     track_maps = load_track_maps(resolve_track_map_csv(corrected_root))
+    if _hybrid_recipe(args) is not None:
+        dataset = _restrict_dataset_to_spdmx_csv(dataset, set(track_maps))
 
-    def _resolve_one(mid: str) -> tuple[str, int] | None:
+    def _resolve_one(mid: str) -> tuple[str, int]:
         song_id = song_id_from_mid(mid)
-        if song_id not in track_maps:
-            return None
         corrected = resolve_corrected_midi_path(
             mid,
             pdmx_root=original_dataset_dir,
@@ -1144,16 +1182,8 @@ def run_synthesis(args, output_dir: str, *, media_dir: str | None = None):
         jobs=_jobs(args),
         desc="Resolving corrected MIDI",
     )
-    keep = [i for i, item in enumerate(resolved) if item is not None]
-    n_skip = len(resolved) - len(keep)
-    if n_skip:
-        print(
-            f"Skipping {n_skip} songs with no SPDMX.csv rows (empty MIDI)",
-            flush=True,
-        )
-    dataset = dataset.iloc[keep].reset_index(drop=True)
-    dataset["mid"] = [resolved[i][0] for i in keep]
-    dataset["n_tracks"] = [resolved[i][1] for i in keep]
+    dataset["mid"] = [mid for mid, _ in resolved]
+    dataset["n_tracks"] = [n for _, n in resolved]
 
     _parallel_map(
         lambda path: makedirs(path, exist_ok=True),

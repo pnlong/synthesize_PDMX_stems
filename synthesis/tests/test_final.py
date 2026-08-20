@@ -108,3 +108,45 @@ def test_layout_pass_creates_song_dirs(tmp_path: Path):
     assert (Path(tables) / STEM_RECIPE_FILE_NAME).is_file()
     assert (Path(dest) / "LICENSE").is_file()
     assert (Path(dest) / "README.md").is_file()
+
+
+def test_layout_pass_restricts_to_spdmx_csv(tmp_path: Path):
+    pdmx_root = tmp_path / "PDMX"
+    pdmx_root.mkdir()
+    csv_path = pdmx_root / "PDMX.csv"
+    pd.DataFrame({
+        "path": ["./data/1/11/QmKeep.json", "./data/1/11/QmDrop.json"],
+        "mid": ["./mid/1/11/QmKeep.mid", "./mid/1/11/QmDrop.mid"],
+        "subset:all_valid": [True, True],
+        "n_tracks": [1, 1],
+    }).to_csv(csv_path, index=False)
+
+    out = tmp_path / "out"
+    dest = Path(spdmx_dataset_dir(str(out)))
+    dest.mkdir(parents=True)
+    pd.DataFrame({
+        "song_id": ["1/11/QmKeep"],
+        "path": ["./audio/1/11/QmKeep"],
+        "mid": ["./mid/1/11/QmKeep.mid"],
+        "track": [0],
+        "original_track": [0],
+        "program": [0],
+        "is_drum": [False],
+        "name": ["Piano"],
+    }).to_csv(dest / "SPDMX.csv", index=False)
+
+    args = parse_args([
+        "--only-pass", "layout",
+        "-o", str(out),
+        "-df", str(csv_path),
+        "--no-register",
+        "-j", "1",
+    ])
+    args.recipe = CategoryRecipe(
+        specs={"piano": CategorySpec("basic", False, "basic", "basic")},
+    )
+    dataset = run_layout_pass(args, production_tables_dir(str(out)), media_dir=str(dest))
+    assert len(dataset) == 1
+    assert Path(dataset.iloc[0]["path_output"]).name == "QmKeep"
+    assert (Path(dest) / "audio" / "1" / "11" / "QmKeep").is_dir()
+    assert not (Path(dest) / "audio" / "1" / "11" / "QmDrop").is_dir()

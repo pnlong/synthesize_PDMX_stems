@@ -180,6 +180,7 @@ def test_song_id_from_mid():
     from analysis.corrected_midi import pdmx_path_from_mid, song_id_from_mid, song_id_from_pdmx_path
 
     assert song_id_from_mid("./mid/8/44/Qm.mid") == "8/44/Qm"
+    assert song_id_from_mid("/deepfreeze/pnlong/PDMX/PDMX/mid/8/44/Qm.mid") == "8/44/Qm"
     assert song_id_from_pdmx_path("./data/8/44/Qm.json") == "8/44/Qm"
     assert pdmx_path_from_mid("./mid/8/44/Qm.mid") == "./data/8/44/Qm.json"
 
