@@ -23,6 +23,11 @@ from shared.config import (
 PRODUCTION_TABLES_DIR_NAME = "final"
 # One row per song: dense MIDI path + n_tracks (avoids per-song NFS stat at render start)
 MIDI_INDEX_FILE_NAME = "midi_index.csv"
+PASS_TRACK_COLUMNS = {
+    "fluidsynth": "n_fluidsynth",
+    "ddsp_piano": "n_ddsp_piano",
+    "midi_ddsp": "n_midi_ddsp",
+}
 
 
 def condition_name(render_mode: str, realify: bool = False) -> str:

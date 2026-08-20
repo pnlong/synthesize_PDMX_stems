@@ -34,7 +34,10 @@ from synthesis.synthesize import (
 )
 
 FINAL_CONDITION = "final"
-ONLY_PASSES = ("layout", "fluidsynth", "ddsp", "realify", "mix")
+ONLY_PASSES = (
+    "layout", "fluidsynth", "ddsp_piano", "midi_ddsp", "realify", "mix",
+)
+DDSP_PASSES = ("ddsp_piano", "midi_ddsp")
 
 
 def parse_args(args=None, namespace=None):
@@ -46,8 +49,9 @@ def parse_args(args=None, namespace=None):
             "and sanitized MIDI under mid/. Join SPDMX.csv to PDMX.csv on song_id. "
             "Audio format is always FLAC. "
             "Run one pass at a time with --only-pass "
-            "(layout → fluidsynth → ddsp → realify → mix). "
-            "Fluidsynth and ddsp may run in parallel; realify and mix wait until both finish."
+            "(layout → fluidsynth → ddsp_piano → midi_ddsp → realify → mix). "
+            "Fluidsynth, ddsp_piano, and midi_ddsp may run in parallel. "
+            "Realify and mix wait until Fluidsynth and both DDSP passes finish."
         ),
     )
     add_synthesis_args(
@@ -69,9 +73,9 @@ def parse_args(args=None, namespace=None):
         choices=list(ONLY_PASSES),
         required=True,
         help=(
-            "Required. One method pass: layout, fluidsynth, ddsp, "
-            "realify, or mix. Fluidsynth and ddsp may run in parallel; "
-            "realify only after both have finished."
+            "Required. One method pass: layout, fluidsynth, ddsp_piano, midi_ddsp, "
+            "realify, or mix. Fluidsynth, ddsp_piano, and midi_ddsp may run in parallel. "
+            "Realify only after Fluidsynth and both DDSP passes have finished."
         ),
     )
     parser.add_argument(
@@ -100,8 +104,10 @@ def hybrid_dirs(args) -> tuple[str, str]:
 def pass_sequence(recipe) -> tuple[str, ...]:
     """Ordered production passes for this recipe (always starts with layout)."""
     steps = ["layout", "fluidsynth"]
+    if recipe.uses_ddsp_piano():
+        steps.append("ddsp_piano")
     if recipe.uses_ddsp():
-        steps.append("ddsp")
+        steps.append("midi_ddsp")
     if recipe.uses_realify():
         steps.append("realify")
     steps.append("mix")
@@ -111,8 +117,10 @@ def pass_sequence(recipe) -> tuple[str, ...]:
 def raw_upstream_command(recipe) -> str:
     """CLI that must finish before realify or mix."""
     parts = ["uv run python -m synthesis.final --only-pass fluidsynth"]
+    if recipe.uses_ddsp_piano():
+        parts.append("uv run python -m synthesis.final --only-pass ddsp_piano")
     if recipe.uses_ddsp():
-        parts.append("uv run python -m synthesis.final --only-pass ddsp")
+        parts.append("uv run python -m synthesis.final --only-pass midi_ddsp")
     return " && ".join(parts)
 
 
@@ -157,19 +165,25 @@ def log_next_pass(recipe, only: str) -> None:
         return
     nxt = plan[idx + 1]
     extra = " -j 8" if nxt in ("fluidsynth", "mix") else ""
-    if only == "fluidsynth" and "ddsp" in plan:
+    if only == "fluidsynth" and any(p in plan for p in DDSP_PASSES):
         print(
-            "Note: --only-pass ddsp can run in another job at the same time.",
+            "Note: --only-pass ddsp_piano and --only-pass midi_ddsp can run in "
+            "other jobs at the same time as Fluidsynth (and as each other).",
             flush=True,
         )
         if "realify" in plan:
             print(
-                "Realify waits until Fluidsynth and DDSP have both exited.",
+                "Realify waits until Fluidsynth, DDSP-Piano, and MIDI-DDSP have all exited.",
                 flush=True,
             )
-    if only == "ddsp" and "realify" in plan:
+    if only == "ddsp_piano" and "midi_ddsp" in plan:
         print(
-            "Start realify only after the Fluidsynth job has also exited.",
+            "Note: --only-pass midi_ddsp can run in another job at the same time.",
+            flush=True,
+        )
+    if only in DDSP_PASSES and "realify" in plan:
+        print(
+            "Start realify only after Fluidsynth and both DDSP jobs have exited.",
             flush=True,
         )
     print(f"Next: uv run python -m synthesis.final --only-pass {nxt}{extra}", flush=True)
@@ -211,7 +225,7 @@ def main(argv=None):
 
     if only == "layout":
         run_layout_pass(args, tables_dir, media_dir=media_dir)
-    elif only in ("fluidsynth", "ddsp"):
+    elif only in ("fluidsynth", "ddsp_piano", "midi_ddsp"):
         run_synthesis(args, tables_dir, media_dir=media_dir)
     elif only == "realify":
         if not recipe.uses_realify():

@@ -147,6 +147,11 @@ class CategoryRecipe:
     def uses_ddsp(self) -> bool:
         return any(spec.method == METHOD_MIDI_DDSP for spec in self.specs.values())
 
+    def uses_ddsp_piano(self) -> bool:
+        """True when the piano listening category is MIDI-DDSP (DDSP-Piano engine)."""
+        spec = self.specs.get("piano")
+        return spec is not None and spec.method == METHOD_MIDI_DDSP
+
     def uses_realify(self) -> bool:
         return any(spec.realify for spec in self.specs.values())
 
@@ -167,6 +172,36 @@ class CategoryRecipe:
 
     def realify_categories(self) -> frozenset[str]:
         return frozenset(c for c, spec in self.specs.items() if spec.realify)
+
+
+def hybrid_pass_for_track(
+    recipe: CategoryRecipe,
+    *,
+    program: int,
+    is_drum: bool,
+    track_name: str | None = None,
+) -> str:
+    """Which hybrid pass owns this track (metadata only; no MIDI monophony check)."""
+    plan = recipe.plan_for_track(
+        program=int(program),
+        is_drum=bool(is_drum),
+        track_name=track_name,
+    )
+    if not plan.neural_ok:
+        return "fluidsynth"
+    route = route_stem(
+        program=int(program),
+        is_drum=bool(is_drum),
+        track_name=track_name,
+        check_monophony=False,
+    )
+    if route.backend == BACKEND_DDSP_PIANO:
+        if recipe.uses_ddsp_piano():
+            return "ddsp_piano"
+        return "fluidsynth"
+    if route.backend == BACKEND_MIDI_DDSP:
+        return "midi_ddsp"
+    return "fluidsynth"
 
 
 def parse_ablation_id(ablation: str) -> CategorySpec:

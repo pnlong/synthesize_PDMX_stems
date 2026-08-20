@@ -79,10 +79,21 @@ def test_pass_sequence_starts_with_layout():
         specs={"strings": CategorySpec("midi-ddsp", True, "basic", "ddsp_basic_realify")},
     )
     assert pass_sequence(no_realify) == ("layout", "fluidsynth", "mix")
-    assert pass_sequence(with_ddsp) == ("layout", "fluidsynth", "ddsp", "mix")
+    assert pass_sequence(with_ddsp) == (
+        "layout", "fluidsynth", "midi_ddsp", "mix",
+    )
     assert pass_sequence(with_realify) == ("layout", "fluidsynth", "realify", "mix")
     assert pass_sequence(with_ddsp_realify) == (
-        "layout", "fluidsynth", "ddsp", "realify", "mix",
+        "layout", "fluidsynth", "midi_ddsp", "realify", "mix",
+    )
+    with_piano_ddsp = CategoryRecipe(
+        specs={
+            "piano": CategorySpec("midi-ddsp", False, "basic", "ddsp_basic"),
+            "strings": CategorySpec("midi-ddsp", False, "basic", "ddsp_basic"),
+        },
+    )
+    assert pass_sequence(with_piano_ddsp) == (
+        "layout", "fluidsynth", "ddsp_piano", "midi_ddsp", "mix",
     )
 
 
@@ -199,6 +210,33 @@ def test_attach_corrected_midi_uses_index_without_stat(tmp_path: Path):
     assert int(out.iloc[1]["n_tracks"]) == 1
     assert out.iloc[0]["mid"].endswith("/mid/1/11/QmA.mid")
     assert (tables / MIDI_INDEX_FILE_NAME).is_file()
+    assert int(out.iloc[0]["n_fluidsynth"]) == 2
+    assert int(out.iloc[1]["n_fluidsynth"]) == 1
+
+
+def test_work_for_pass_counts_remaining_renders():
+    from synthesis.synthesize import _work_for_pass
+
+    df = pd.DataFrame({
+        "path_output": ["/a", "/b"],
+        "n_fluidsynth": [3, 0],
+        "n_ddsp_piano": [0, 1],
+        "n_midi_ddsp": [0, 4],
+    })
+    fs, fs_n = _work_for_pass(df, [0, 1], "fluidsynth")
+    assert fs == [0, 1] and fs_n == 3
+    piano, pn = _work_for_pass(df, [0, 1], "ddsp_piano")
+    assert piano == [1] and pn == 1
+    midi, mn = _work_for_pass(df, [0, 1], "midi_ddsp")
+    assert midi == [1] and mn == 4
+    recipe_index = {
+        ("/b", 0): {"backend": "midi_ddsp"},
+        ("/b", 1): {"backend": "midi_ddsp"},
+    }
+    _, remaining = _work_for_pass(
+        df, [0, 1], "midi_ddsp", stem_recipe_index=recipe_index,
+    )
+    assert remaining == 2
 
 
 def test_raw_upstream_command_includes_ddsp_when_needed():
@@ -211,7 +249,9 @@ def test_raw_upstream_command_includes_ddsp_when_needed():
     assert "ddsp" not in raw_upstream_command(fluidsynth_only)
     assert "fluidsynth" in raw_upstream_command(fluidsynth_only)
     cmd = raw_upstream_command(with_ddsp)
-    assert "--only-pass fluidsynth" in cmd and "--only-pass ddsp" in cmd
+    assert "--only-pass fluidsynth" in cmd
+    assert "--only-pass ddsp_piano" not in cmd
+    assert "--only-pass midi_ddsp" in cmd
 
 
 def test_expected_song_count_from_spdmx_csv(tmp_path: Path):

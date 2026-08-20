@@ -200,9 +200,10 @@ After the ablation listening test, edit [`recipe.yaml`](recipe.yaml) with the wi
 
 0. **layout** — mkdir `{OUTPUT_DIR}/SPDMX/audio/<shard>/<hash>/` for every valid PDMX song, plus `mid/` parent dirs. Empty `data.csv` / `stems.csv` / `stem_recipe.csv` and `midi_index.csv` (dense MIDI path + `n_tracks` per song) under `{OUTPUT_DIR}/dev/final/`.
 1. **Fluidsynth** — categories whose recipe is `basic` / `slakh` (and DDSP-ineligible fallbacks). Per-track slakh recipes vs default GM. `-j` workers.
-2. **DDSP** — categories whose recipe is `ddsp_*`: global `ddsp_piano` then `midi_ddsp`. No donor copies; Fluidsynth already filled fallbacks. May run **in parallel** with Fluidsynth (`stems.csv` / `stem_recipe.csv` / `data.csv` are lock-serialized).
-3. **SA3 realify** — only if the recipe sets `*_realify`; overwrites those stems in place. **After Fluidsynth and DDSP have both finished** (not in parallel with either). Locked preset bypasses (`realify: false`) still apply.
-4. **mix** — LUFS + velocity + peak in place. No `mixture.*`; mix = sum(stems). Same gate: all raw stems must be on disk first.
+2. **DDSP-Piano** — only if the **piano** category recipe is `ddsp_*` (acoustic-piano engine). Current `recipe.yaml` uses slakh for piano, so this pass is omitted.
+3. **MIDI-DDSP** — strings/wind/brass whose recipe is `ddsp_*`. May run **in parallel** with Fluidsynth and with DDSP-Piano when that pass exists.
+4. **SA3 realify** — only if the recipe sets `*_realify`; overwrites those stems in place. **After Fluidsynth, DDSP-Piano, and MIDI-DDSP have all finished.** Locked preset bypasses (`realify: false`) still apply.
+5. **mix** — LUFS + velocity + peak in place. No `mixture.*`; mix = sum(stems). Same gate: all raw stems must be on disk first.
 
 Without `--reset`, each method pass **resumes**: valid stems whose `stem_recipe.csv` sidecar matches the current recipe are skipped. If a stem exists but the sidecar does not match (recipe YAML changed, or a completed tree has no sidecar), the CLI lists the conflicts and asks before regenerating. Pass `-y` / `--yes` to regenerate without a prompt.
 
@@ -210,10 +211,11 @@ Without `--reset`, each method pass **resumes**: valid stems whose `stem_recipe.
 # Edit synthesis/recipe.yaml, then one pass per job (FLAC default):
 uv run python -m synthesis.final --only-pass layout
 uv run python -m synthesis.final --only-pass fluidsynth -j 8
-uv run python -m synthesis.final --only-pass ddsp
+uv run python -m synthesis.final --only-pass ddsp_piano
+uv run python -m synthesis.final --only-pass midi_ddsp
 uv run python -m synthesis.final --only-pass mix
 
-# If the recipe uses *_realify, insert before mix — after Fluidsynth AND DDSP:
+# If the recipe uses *_realify, insert before mix — after Fluidsynth, DDSP-Piano, and MIDI-DDSP:
 uv run python -m synthesis.final --only-pass realify
 
 # Recipe changed; regenerate mismatches without prompting:

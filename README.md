@@ -7,7 +7,7 @@ Turn the [PDMX](https://zenodo.org/records/13763756) symbolic music dataset into
 1. **Synthesis setup** — `python -m analysis.prepare_synthesis` (GM register + dense corrected MIDIs; **required before any ablation**)
 2. **Synthesis** — `python -m synthesis.synthesize` with `--render-mode {basic,slakh,ddsp_basic,ddsp_slakh}`
 3. **Realify** (optional) — same command with `--realify`
-4. **Full dataset** — `python -m synthesis.final --only-pass {layout,fluidsynth,ddsp,mix}` (FLAC under `{OUTPUT_DIR}/SPDMX/`)
+4. **Full dataset** — `python -m synthesis.final --only-pass {layout,fluidsynth,ddsp_piano,midi_ddsp,mix}` (FLAC under `{OUTPUT_DIR}/SPDMX/`)
 5. **Analysis** — duration stats and SA3 model recommendation
 
 ## Install
@@ -70,7 +70,8 @@ uv run python -m analysis.prepare_synthesis --subset all_valid -j 8
 
 uv run python -m synthesis.final --only-pass layout
 uv run python -m synthesis.final --only-pass fluidsynth -j 8
-uv run python -m synthesis.final --only-pass ddsp
+uv run python -m synthesis.final --only-pass ddsp_piano
+uv run python -m synthesis.final --only-pass midi_ddsp
 uv run python -m synthesis.final --only-pass mix
 ```
 

@@ -29,8 +29,10 @@ from synthesis.ddsp.env import DdspEnvError, ddsp_python_executable, ddsp_worker
 from synthesis.ddsp.pool import ddsp_oneshot_enabled, get_ddsp_pool
 from synthesis.ddsp.routing import BACKEND_DDSP_PIANO, BACKEND_MIDI_DDSP, StemRoute
 
-# Cross-process lock: serialize one-shot TF workers (models are large).
-_DDSP_LOCK_PATH = Path(os.environ.get("SPDMX_DDSP_LOCK", "/tmp/spdmx_ddsp_worker.lock"))
+# Cross-process lock for one-shot TF workers. Separate files so DDSP-Piano
+# and MIDI-DDSP jobs can run in parallel. Override with SPDMX_DDSP_LOCK.
+_DDSP_LOCK_DIR = Path(os.environ.get("SPDMX_DDSP_LOCK_DIR", "/tmp"))
+_DDSP_LOCK_OVERRIDE = os.environ.get("SPDMX_DDSP_LOCK")
 
 # Scale timeout by MIDI length (CPU is slow; GPU is faster but loads still take time).
 _DDSP_TIMEOUT_BASE_SEC = float(os.environ.get("SPDMX_DDSP_TIMEOUT_BASE", "300"))
@@ -52,13 +54,21 @@ def _worker_timeout_sec(midi_path: Path) -> float:
     return min(_DDSP_TIMEOUT_MAX_SEC, max(_DDSP_TIMEOUT_BASE_SEC, timeout))
 
 
-def _run_worker(args: list[str], *, timeout_sec: float) -> dict:
+def _ddsp_lock_path(backend: str | None) -> Path:
+    if _DDSP_LOCK_OVERRIDE:
+        return Path(_DDSP_LOCK_OVERRIDE)
+    name = backend or "all"
+    return _DDSP_LOCK_DIR / f"spdmx_ddsp_worker.{name}.lock"
+
+
+def _run_worker(args: list[str], *, timeout_sec: float, backend: str | None = None) -> dict:
     """Legacy one-shot subprocess path (also used when SPDMX_DDSP_ONESHOT=1)."""
     python = ddsp_python_executable()
     cmd = [str(python), "-m", "synthesis.ddsp.worker", *args]
     env = ddsp_worker_env()
-    _DDSP_LOCK_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with open(_DDSP_LOCK_PATH, "a+", encoding="utf-8") as lock_file:
+    lock_path = _ddsp_lock_path(backend)
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(lock_path, "a+", encoding="utf-8") as lock_file:
         fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
         try:
             proc = subprocess.run(
@@ -102,7 +112,11 @@ def _run_worker(args: list[str], *, timeout_sec: float) -> dict:
 
 def _run_via_pool_or_oneshot(payload: dict, *, cli_args: list[str], timeout_sec: float) -> dict:
     if ddsp_oneshot_enabled():
-        return _run_worker(cli_args, timeout_sec=timeout_sec)
+        return _run_worker(
+            cli_args,
+            timeout_sec=timeout_sec,
+            backend=str(payload.get("command") or ""),
+        )
     pool = get_ddsp_pool()
     status = pool.submit(payload, timeout_sec=timeout_sec)
     if not status.get("ok"):

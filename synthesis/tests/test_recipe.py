@@ -22,6 +22,7 @@ from synthesis.recipe import (
     METHOD_SLAKH,
     STEM_RECIPE_COLUMNS,
     confirm_recipe_conflicts,
+    hybrid_pass_for_track,
     load_recipe,
     parse_ablation_id,
     parse_category_spec,
@@ -163,6 +164,30 @@ def test_plan_monophonic_violin_midi_ddsp():
     )
     assert route.backend == BACKEND_MIDI_DDSP
     assert resolve_track_backend(plan, route) == "midi_ddsp"
+
+
+def test_hybrid_pass_for_track_matches_recipe_backend():
+    from synthesis.recipe import hybrid_pass_for_track
+
+    recipe = load_recipe(_leaderboard())
+    assert hybrid_pass_for_track(
+        recipe, program=0, is_drum=False, track_name="Piano",
+    ) == "fluidsynth"
+    assert hybrid_pass_for_track(
+        recipe, program=40, is_drum=False, track_name="Violin",
+    ) == "midi_ddsp"
+    assert hybrid_pass_for_track(
+        recipe, program=0, is_drum=True, track_name="Drums",
+    ) == "fluidsynth"
+
+
+def test_default_recipe_has_no_ddsp_piano_pass():
+    recipe = load_recipe(DEFAULT_RECIPE_PATH)
+    assert recipe.uses_ddsp()
+    assert not recipe.uses_ddsp_piano()
+    assert hybrid_pass_for_track(
+        recipe, program=40, is_drum=False, track_name="Piano Violin",
+    ) == "fluidsynth"
 
 
 def test_plan_polyphonic_violin_fluidsynth_fallback():
