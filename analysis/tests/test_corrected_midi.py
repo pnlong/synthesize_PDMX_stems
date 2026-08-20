@@ -135,6 +135,23 @@ def test_write_corrected_midis_writes_global_track_map(tmp_path: Path):
     assert (tmp_path / "SPDMX" / "README.md").is_file()
 
 
+def test_write_corrected_midi_skips_note_less_song(tmp_path: Path):
+    src = tmp_path / "empty.mid"
+    mid = mido.MidiFile(ticks_per_beat=480)
+    track = mido.MidiTrack()
+    track.append(mido.MetaMessage("set_tempo", tempo=500000, time=0))
+    track.append(mido.MetaMessage("end_of_track", time=0))
+    mid.tracks.append(track)
+    mid.save(src)
+
+    dest = tmp_path / "SPDMX" / "mid" / "0" / "1" / "QmEmpty.mid"
+    dest.parent.mkdir(parents=True)
+    dest.write_bytes(b"stub")
+    rows = write_corrected_midi(src, dest, mid_rel="./mid/0/1/QmEmpty.mid")
+    assert rows == []
+    assert not dest.is_file()
+
+
 def test_write_corrected_midis_uses_jobs(tmp_path: Path):
     pdmx_root = tmp_path / "PDMX"
     pdmx_root.mkdir()

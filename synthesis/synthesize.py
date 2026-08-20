@@ -1099,10 +1099,10 @@ def run_synthesis(args, output_dir: str, *, media_dir: str | None = None):
     dataset = prepare_render_dataset(args, media_dir, register_df=register_df)
 
     from analysis.corrected_midi import (
-        load_track_map,
         load_track_maps,
         resolve_corrected_midi_path,
         resolve_track_map_csv,
+        song_id_from_mid,
     )
     from synthesis.dense_midi import default_corrected_midi_dir
 
@@ -1115,7 +1115,10 @@ def run_synthesis(args, output_dir: str, *, media_dir: str | None = None):
     print(f"Using dense corrected midis under {corrected_root}")
     track_maps = load_track_maps(resolve_track_map_csv(corrected_root))
 
-    def _resolve_one(mid: str) -> tuple[str, int]:
+    def _resolve_one(mid: str) -> tuple[str, int] | None:
+        song_id = song_id_from_mid(mid)
+        if song_id not in track_maps:
+            return None
         corrected = resolve_corrected_midi_path(
             mid,
             pdmx_root=original_dataset_dir,
@@ -1127,10 +1130,7 @@ def run_synthesis(args, output_dir: str, *, media_dir: str | None = None):
                 "Generate corrected midis first:\n"
                 "  uv run python -m analysis.prepare_synthesis --subset all_valid -j 8"
             )
-        tmap = load_track_map(
-            corrected, corrected_midi_dir=corrected_root, track_maps=track_maps
-        )
-        return str(corrected), len(tmap)
+        return str(corrected), len(track_maps[song_id])
 
     resolved = _parallel_map(
         _resolve_one,
@@ -1138,8 +1138,16 @@ def run_synthesis(args, output_dir: str, *, media_dir: str | None = None):
         jobs=_jobs(args),
         desc="Resolving corrected MIDI",
     )
-    dataset["mid"] = [mid for mid, _ in resolved]
-    dataset["n_tracks"] = [n for _, n in resolved]
+    keep = [i for i, item in enumerate(resolved) if item is not None]
+    n_skip = len(resolved) - len(keep)
+    if n_skip:
+        print(
+            f"Skipping {n_skip} songs with no SPDMX.csv rows (empty MIDI)",
+            flush=True,
+        )
+    dataset = dataset.iloc[keep].reset_index(drop=True)
+    dataset["mid"] = [resolved[i][0] for i in keep]
+    dataset["n_tracks"] = [resolved[i][1] for i in keep]
 
     _parallel_map(
         lambda path: makedirs(path, exist_ok=True),

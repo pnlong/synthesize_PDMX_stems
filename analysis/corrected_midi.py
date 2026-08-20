@@ -270,6 +270,9 @@ def write_corrected_midi(
     single-track stem exports still have correct wall-clock duration. Empty
     grand-staff / conductor stubs are omitted.
 
+    Songs with no sounding notes are skipped: no dest file is written (and any
+    leftover dest is removed), and the returned row list is empty.
+
     Returns track-map rows (``TRACK_MAP_COLUMNS``). The batch writer stores them
     in a single ``SPDMX.csv``; this function does not write a per-file map.
     """
@@ -314,13 +317,10 @@ def write_corrected_midi(
         })
         dense_idx += 1
 
-    if not out.tracks:
-        # Degenerate all-empty file: keep a tempo-only stub so mido can save.
-        stub = mido.MidiTrack()
-        for meta in meta_prefix:
-            stub.append(meta.copy(time=0))
-        stub.append(mido.MetaMessage("end_of_track", time=0))
-        out.tracks.append(stub)
+    if not map_rows:
+        if dest_mid.is_file():
+            dest_mid.unlink()
+        return []
 
     dest_mid.parent.mkdir(parents=True, exist_ok=True)
     out.save(str(dest_mid))
@@ -383,6 +383,7 @@ def write_corrected_midis_from_register(
 
     ok = 0
     failed = 0
+    skipped = 0
     global_rows: list[dict] = []
     from tqdm import tqdm
 
@@ -409,6 +410,9 @@ def write_corrected_midis_from_register(
             if song_failed:
                 failed += 1
                 continue
+            if not rows:
+                skipped += 1
+                continue
             global_rows.extend(rows)
             ok += 1
     finally:
@@ -427,6 +431,11 @@ def write_corrected_midis_from_register(
         from synthesis.spdmx_release import maybe_write_spdmx_release_docs
 
         maybe_write_spdmx_release_docs(out_csv.parent)
+    if skipped:
+        print(
+            f"Skipped {skipped} songs with no sounding notes (no MIDI / SPDMX.csv rows)",
+            flush=True,
+        )
     return ok, failed
 
 
