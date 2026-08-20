@@ -936,11 +936,17 @@ def run_layout_pass(
     """
     media_dir = media_dir or output_dir
     if args.reset:
+        print(f"Reset: clearing tables under {output_dir} ...", flush=True)
         reset_synthesis_output(output_dir)
         if Path(media_dir).resolve() != Path(output_dir).resolve():
             audio_root = Path(media_dir) / SPDMX_AUDIO_DIR_NAME
             if audio_root.exists():
+                print(
+                    f"Reset: deleting {audio_root} (can take several minutes on NFS) ...",
+                    flush=True,
+                )
                 shutil.rmtree(audio_root)
+                print("Reset: audio tree removed.", flush=True)
     else:
         makedirs(output_dir, exist_ok=True)
         makedirs(media_dir, exist_ok=True)
