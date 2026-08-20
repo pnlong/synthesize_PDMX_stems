@@ -14,14 +14,19 @@ from synthesis.final import (
     pass_sequence,
     raw_upstream_command,
 )
-from synthesis.paths import ablation_raw_dir, production_tables_dir, spdmx_dataset_dir
+from synthesis.paths import (
+    MIDI_INDEX_FILE_NAME,
+    ablation_raw_dir,
+    production_tables_dir,
+    spdmx_dataset_dir,
+)
 from synthesis.recipe import (
     DEFAULT_RECIPE_PATH,
     STEM_RECIPE_FILE_NAME,
     CategoryRecipe,
     CategorySpec,
 )
-from synthesis.synthesize import run_layout_pass
+from synthesis.synthesize import attach_corrected_midi, run_layout_pass
 
 
 def test_parse_args_requires_only_pass():
@@ -158,6 +163,42 @@ def test_layout_pass_restricts_to_spdmx_csv(tmp_path: Path):
     assert Path(dataset.iloc[0]["path_output"]).name == "QmKeep"
     assert (Path(dest) / "audio" / "1" / "11" / "QmKeep").is_dir()
     assert not (Path(dest) / "audio" / "1" / "11" / "QmDrop").is_dir()
+    index_path = Path(production_tables_dir(str(out))) / MIDI_INDEX_FILE_NAME
+    assert index_path.is_file()
+    index = pd.read_csv(index_path)
+    assert list(index["song_id"]) == ["1/11/QmKeep"]
+    assert int(index.iloc[0]["n_tracks"]) == 1
+
+
+def test_attach_corrected_midi_uses_index_without_stat(tmp_path: Path):
+    dest = tmp_path / "SPDMX"
+    mid_dir = dest / "mid"
+    mid_dir.mkdir(parents=True)
+    pd.DataFrame({
+        "song_id": ["1/11/QmA", "1/11/QmA", "2/22/QmB"],
+        "path": ["./audio/1/11/QmA", "./audio/1/11/QmA", "./audio/2/22/QmB"],
+        "mid": ["./mid/1/11/QmA.mid", "./mid/1/11/QmA.mid", "./mid/2/22/QmB.mid"],
+        "track": [0, 1, 0],
+        "original_track": [0, 1, 0],
+        "program": [0, 0, 0],
+        "is_drum": [False, False, False],
+        "name": ["A", "B", "C"],
+    }).to_csv(dest / "SPDMX.csv", index=False)
+    tables = tmp_path / "dev" / "final"
+    tables.mkdir(parents=True)
+    args = parse_args(["--only-pass", "fluidsynth", "-o", str(tmp_path), "--no-register"])
+    dataset = pd.DataFrame({
+        "mid_pdmx": [
+            "/pdmx/mid/1/11/QmA.mid",
+            "/pdmx/mid/2/22/QmB.mid",
+        ],
+        "path_output": ["/audio/a", "/audio/b"],
+    })
+    out = attach_corrected_midi(dataset, args, str(tables))
+    assert int(out.iloc[0]["n_tracks"]) == 2
+    assert int(out.iloc[1]["n_tracks"]) == 1
+    assert out.iloc[0]["mid"].endswith("/mid/1/11/QmA.mid")
+    assert (tables / MIDI_INDEX_FILE_NAME).is_file()
 
 
 def test_raw_upstream_command_includes_ddsp_when_needed():

@@ -198,7 +198,7 @@ After the ablation listening test, edit [`recipe.yaml`](recipe.yaml) with the wi
 
 `python -m synthesis.final --only-pass …` renders **one** mixed stem tree (not eight ablation dirs). Passes are **one method at a time** (do not omit `--only-pass`):
 
-0. **layout** — mkdir `{OUTPUT_DIR}/SPDMX/audio/<shard>/<hash>/` for every valid PDMX song, plus `mid/` parent dirs. Empty `data.csv` / `stems.csv` / `stem_recipe.csv` under `{OUTPUT_DIR}/dev/final/`.
+0. **layout** — mkdir `{OUTPUT_DIR}/SPDMX/audio/<shard>/<hash>/` for every valid PDMX song, plus `mid/` parent dirs. Empty `data.csv` / `stems.csv` / `stem_recipe.csv` and `midi_index.csv` (dense MIDI path + `n_tracks` per song) under `{OUTPUT_DIR}/dev/final/`.
 1. **Fluidsynth** — categories whose recipe is `basic` / `slakh` (and DDSP-ineligible fallbacks). Per-track slakh recipes vs default GM. `-j` workers.
 2. **DDSP** — categories whose recipe is `ddsp_*`: global `ddsp_piano` then `midi_ddsp`. No donor copies; Fluidsynth already filled fallbacks. May run **in parallel** with Fluidsynth (`stems.csv` / `stem_recipe.csv` / `data.csv` are lock-serialized).
 3. **SA3 realify** — only if the recipe sets `*_realify`; overwrites those stems in place. **After Fluidsynth and DDSP have both finished** (not in parallel with either). Locked preset bypasses (`realify: false`) still apply.

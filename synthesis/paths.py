@@ -21,6 +21,8 @@ from shared.config import (
 
 # {OUTPUT_DIR}/dev/final/ — production data.csv / stems.csv / stem_recipe.csv
 PRODUCTION_TABLES_DIR_NAME = "final"
+# One row per song: dense MIDI path + n_tracks (avoids per-song NFS stat at render start)
+MIDI_INDEX_FILE_NAME = "midi_index.csv"
 
 
 def condition_name(render_mode: str, realify: bool = False) -> str:
