@@ -87,3 +87,27 @@ def test_append_rows_deduped_stem_track_keeps_siblings(tmp_path):
     assert stems[stems["track"] == 0].iloc[0]["name"] == "Slakh Piano"
     assert int(stems[stems["track"] == 0].iloc[0]["program"]) == 1
     assert stems[stems["track"] == 1].iloc[0]["name"] == "Strings"
+
+
+def test_append_rows_deduped_parallel_writers(tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+
+    csv_path = str(tmp_path / "stems.csv")
+
+    def _write(track: int) -> None:
+        append_rows_deduped(
+            csv_path,
+            STEMS_TABLE_COLUMNS,
+            [{
+                "path": "/songs/a", "track": track, "original_track": track, "program": track,
+                "is_drum": False, "name": f"T{track}", "has_lyrics": False,
+                "max_velocity": 64, "velocity_scale": 0.5,
+            }],
+            key_cols=["path", "track"],
+        )
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        list(pool.map(_write, range(20)))
+    stems = pd.read_csv(csv_path)
+    assert len(stems) == 20
+    assert set(stems["track"].astype(int)) == set(range(20))

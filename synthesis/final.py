@@ -5,7 +5,14 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from shared.config import FLAC_AUDIO_FORMAT, OUTPUT_DIR, SPDMX_DATASET_DIR_NAME
+import pandas as pd
+
+from shared.config import (
+    FLAC_AUDIO_FORMAT,
+    OUTPUT_DIR,
+    SPDMX_DATASET_DIR_NAME,
+    SPDMX_FILE_NAME,
+)
 from synthesis.cli_common import add_synthesis_args
 from synthesis.paths import (
     ablation_raw_dir,
@@ -39,7 +46,8 @@ def parse_args(args=None, namespace=None):
             "and sanitized MIDI under mid/. Join SPDMX.csv to PDMX.csv on song_id. "
             "Audio format is always FLAC. "
             "Run one pass at a time with --only-pass "
-            "(layout → fluidsynth → ddsp → realify → mix)."
+            "(layout → fluidsynth → ddsp → realify → mix). "
+            "Fluidsynth and ddsp may run in parallel; realify and mix wait until both finish."
         ),
     )
     add_synthesis_args(
@@ -61,8 +69,9 @@ def parse_args(args=None, namespace=None):
         choices=list(ONLY_PASSES),
         required=True,
         help=(
-            "Required. One method pass: layout (pass 0, mkdir song dirs), "
-            "fluidsynth, ddsp, realify, or mix. Do not chain methods in one job."
+            "Required. One method pass: layout, fluidsynth, ddsp, "
+            "realify, or mix. Fluidsynth and ddsp may run in parallel; "
+            "realify only after both have finished."
         ),
     )
     parser.add_argument(
@@ -99,6 +108,31 @@ def pass_sequence(recipe) -> tuple[str, ...]:
     return tuple(steps)
 
 
+def raw_upstream_command(recipe) -> str:
+    """CLI that must finish before realify or mix."""
+    parts = ["uv run python -m synthesis.final --only-pass fluidsynth"]
+    if recipe.uses_ddsp():
+        parts.append("uv run python -m synthesis.final --only-pass ddsp")
+    return " && ".join(parts)
+
+
+def expected_song_count(args, media_dir: str) -> int | None:
+    """Unique songs in SPDMX.csv, or None if that table is missing."""
+    candidates = [
+        Path(media_dir) / f"{SPDMX_FILE_NAME}.csv",
+        Path(spdmx_dataset_dir(args.output_dir)) / f"{SPDMX_FILE_NAME}.csv",
+    ]
+    seen: set[str] = set()
+    for path in candidates:
+        resolved = str(path.resolve()) if path.exists() else ""
+        if not path.is_file() or resolved in seen:
+            continue
+        seen.add(resolved)
+        songs = pd.read_csv(path, usecols=["song_id"])
+        return int(songs["song_id"].nunique())
+    return None
+
+
 def log_recipe_plan(recipe, *, tables_dir: str, media_dir: str, only: str) -> None:
     grouped = recipe.pass_categories()
     plan = pass_sequence(recipe)
@@ -123,6 +157,21 @@ def log_next_pass(recipe, only: str) -> None:
         return
     nxt = plan[idx + 1]
     extra = " -j 8" if nxt in ("fluidsynth", "mix") else ""
+    if only == "fluidsynth" and "ddsp" in plan:
+        print(
+            "Note: --only-pass ddsp can run in another job at the same time.",
+            flush=True,
+        )
+        if "realify" in plan:
+            print(
+                "Realify waits until Fluidsynth and DDSP have both exited.",
+                flush=True,
+            )
+    if only == "ddsp" and "realify" in plan:
+        print(
+            "Start realify only after the Fluidsynth job has also exited.",
+            flush=True,
+        )
     print(f"Next: uv run python -m synthesis.final --only-pass {nxt}{extra}", flush=True)
 
 
@@ -170,9 +219,9 @@ def main(argv=None):
         else:
             require_raw_synthesis(
                 tables_dir,
-                run_command="uv run python -m synthesis.final --only-pass fluidsynth && "
-                "uv run python -m synthesis.final --only-pass ddsp",
+                run_command=raw_upstream_command(recipe),
                 audio_format=audio_format,
+                expected_n_songs=expected_song_count(args, media_dir),
             )
             if not args.reset:
                 require_recipe_conflicts_ok(
@@ -185,8 +234,9 @@ def main(argv=None):
     elif only == "mix":
         require_raw_synthesis(
             tables_dir,
-            run_command="uv run python -m synthesis.final --only-pass fluidsynth",
+            run_command=raw_upstream_command(recipe),
             audio_format=audio_format,
+            expected_n_songs=expected_song_count(args, media_dir),
         )
         run_summable_mix(args, tables_dir)
 

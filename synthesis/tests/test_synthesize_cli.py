@@ -148,3 +148,15 @@ def test_synthesis_is_complete_requires_ddsp_routing_when_present(tmp_path: Path
         ablation_dir / "ddsp_routing.csv", index=False,
     )
     assert synthesis_is_complete(str(ablation_dir), DEFAULT_AUDIO_FORMAT)
+
+
+def test_synthesis_is_complete_expected_n_songs(tmp_path: Path):
+    ablation_dir = tmp_path / "basic"
+    _write_complete_ablation(ablation_dir)
+    assert synthesis_is_complete(str(ablation_dir), DEFAULT_AUDIO_FORMAT)
+    assert not synthesis_is_complete(
+        str(ablation_dir), DEFAULT_AUDIO_FORMAT, expected_n_songs=2,
+    )
+    assert synthesis_is_complete(
+        str(ablation_dir), DEFAULT_AUDIO_FORMAT, expected_n_songs=1,
+    )

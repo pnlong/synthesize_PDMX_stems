@@ -8,9 +8,11 @@ import pytest
 from shared.config import DATA_DIR_NAME, STEMS_FILE_NAME
 from synthesis.final import (
     FINAL_CONDITION,
+    expected_song_count,
     hybrid_dirs,
     parse_args,
     pass_sequence,
+    raw_upstream_command,
 )
 from synthesis.paths import ablation_raw_dir, production_tables_dir, spdmx_dataset_dir
 from synthesis.recipe import (
@@ -68,9 +70,15 @@ def test_pass_sequence_starts_with_layout():
     with_ddsp = CategoryRecipe(
         specs={"strings": CategorySpec("midi-ddsp", False, "basic", "ddsp_basic")},
     )
+    with_ddsp_realify = CategoryRecipe(
+        specs={"strings": CategorySpec("midi-ddsp", True, "basic", "ddsp_basic_realify")},
+    )
     assert pass_sequence(no_realify) == ("layout", "fluidsynth", "mix")
     assert pass_sequence(with_ddsp) == ("layout", "fluidsynth", "ddsp", "mix")
     assert pass_sequence(with_realify) == ("layout", "fluidsynth", "realify", "mix")
+    assert pass_sequence(with_ddsp_realify) == (
+        "layout", "fluidsynth", "ddsp", "realify", "mix",
+    )
 
 
 def test_layout_pass_creates_song_dirs(tmp_path: Path):
@@ -150,3 +158,27 @@ def test_layout_pass_restricts_to_spdmx_csv(tmp_path: Path):
     assert Path(dataset.iloc[0]["path_output"]).name == "QmKeep"
     assert (Path(dest) / "audio" / "1" / "11" / "QmKeep").is_dir()
     assert not (Path(dest) / "audio" / "1" / "11" / "QmDrop").is_dir()
+
+
+def test_raw_upstream_command_includes_ddsp_when_needed():
+    fluidsynth_only = CategoryRecipe(
+        specs={"piano": CategorySpec("basic", True, "basic", "basic_realify")},
+    )
+    with_ddsp = CategoryRecipe(
+        specs={"strings": CategorySpec("midi-ddsp", True, "basic", "ddsp_basic_realify")},
+    )
+    assert "ddsp" not in raw_upstream_command(fluidsynth_only)
+    assert "fluidsynth" in raw_upstream_command(fluidsynth_only)
+    cmd = raw_upstream_command(with_ddsp)
+    assert "--only-pass fluidsynth" in cmd and "--only-pass ddsp" in cmd
+
+
+def test_expected_song_count_from_spdmx_csv(tmp_path: Path):
+    dest = tmp_path / "SPDMX"
+    dest.mkdir()
+    pd.DataFrame({
+        "song_id": ["a/b/QmOne", "a/b/QmOne", "a/b/QmTwo"],
+        "track": [0, 1, 0],
+    }).to_csv(dest / "SPDMX.csv", index=False)
+    args = parse_args(["--only-pass", "realify", "-o", str(tmp_path)])
+    assert expected_song_count(args, str(dest)) == 2

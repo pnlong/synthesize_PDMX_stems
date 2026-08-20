@@ -115,6 +115,63 @@ def _hybrid_song_raw_current(
             return False
     return True
 
+
+def _song_table_row(dataset: pd.DataFrame, i: int, path_output: str, n_tracks: int) -> dict:
+    song_info = dataset.loc[i].to_dict()
+    song_info["path"] = path_output
+    song_info.pop("path_output", None)
+    song_info.pop("mid", None)
+    song_info.pop("mid_pdmx", None)
+    song_info["n_tracks"] = n_tracks
+    return song_info
+
+
+def _hybrid_routing_rows(path_output: str, stem_rows: list[dict], track_render_meta: list) -> list[dict]:
+    rows = []
+    for j, meta in enumerate(track_render_meta):
+        rows.append({
+            "path": path_output,
+            "track": j,
+            "original_track": meta.get("original_track", j),
+            "program": stem_rows[j]["program"],
+            "is_drum": stem_rows[j]["is_drum"],
+            "name": stem_rows[j]["name"],
+            "backend": meta.get("ddsp_backend") or "soundfont",
+            "instrument_key": meta.get("ddsp_instrument_key"),
+            "reason": meta.get("ddsp_reason"),
+            "n_notes": meta.get("n_notes"),
+            "source": "rendered",
+            "original_path": None,
+        })
+    return rows
+
+
+def _hybrid_pass_result(
+    *,
+    dataset: pd.DataFrame,
+    i: int,
+    path_output: str,
+    n_tracks: int,
+    song_dir,
+    audio_format: str,
+    args,
+    rendered_stem_rows: list[dict],
+    all_stem_rows: list[dict],
+    recipe_rows: list[dict],
+    track_render_meta: list,
+) -> tuple[dict | None, list[dict], list[dict], list[dict]]:
+    """Write data.csv / routing when every stem is on disk (either parallel job can finish last)."""
+    complete = song_is_complete(song_dir, n_tracks, audio_format, require_mixture=False)
+    stem_out = all_stem_rows if complete else rendered_stem_rows
+    routing = (
+        _hybrid_routing_rows(path_output, all_stem_rows, track_render_meta)
+        if complete and _needs_ddsp_routing(args)
+        else []
+    )
+    song_info = _song_table_row(dataset, i, path_output, n_tracks) if complete else None
+    return song_info, stem_out, routing, recipe_rows
+
+
 def parse_args(args=None, namespace=None):
     parser = argparse.ArgumentParser(
         prog="Synthesize",
@@ -205,9 +262,9 @@ def synthesize_song_at_index(
 
     For DDSP render modes, ``args.ddsp_pass`` selects a global phase:
     ``ddsp_piano`` / ``midi_ddsp`` only render that neural backend; ``finalize``
-    fills donor/soundfont stems and CSV rows. Hybrid final synthesis also uses
-    ``fluidsynth`` (soundfont stems only; neural tracks left for later passes).
-    Mixtures are a separate ``synthesis.mix`` pass.
+    fills donor/soundfont stems and CSV rows (ablation ``--render-mode ddsp_*``).
+    Hybrid ``synthesis.final`` uses ``fluidsynth`` and the two neural passes in
+    parallel; ``data.csv`` is written when all stems exist. Mix is separate.
     """
     from synthesis.dense_midi import resolve_synthesis_midi
 
@@ -242,8 +299,8 @@ def synthesize_song_at_index(
     stems_complete = all(
         stem_is_valid(stem_path(song_dir, j, audio_format)) for j in range(n_tracks)
     )
-    # Neural / finalize passes must enter the render block even when stems exist:
-    # neural phases skip valid stems; finalize still emits ddsp_routing rows.
+    # Phased hybrid / DDSP passes enter the render block even when stems exist so
+    # they can skip valid files and still emit CSV rows when the song is complete.
     need_to_synthesize = args.reset or not stems_complete
     if (
         uses_ddsp(getattr(args, "render_mode", "") or "")
@@ -438,7 +495,19 @@ def synthesize_song_at_index(
                 if exists(path):
                     remove(path)
             temp_dir.cleanup()
-            return None, rendered_stem_rows, [], recipe_rows
+            return _hybrid_pass_result(
+                dataset=dataset,
+                i=i,
+                path_output=path_output,
+                n_tracks=n_tracks,
+                song_dir=song_dir,
+                audio_format=audio_format,
+                args=args,
+                rendered_stem_rows=rendered_stem_rows,
+                all_stem_rows=stem_rows,
+                recipe_rows=recipe_rows,
+                track_render_meta=track_render_meta,
+            )
 
         ddsp_like = uses_ddsp(getattr(args, "render_mode", "") or "") or (
             hybrid and ddsp_pass in ("ddsp_piano", "midi_ddsp", "finalize")
@@ -506,9 +575,19 @@ def synthesize_song_at_index(
                     if exists(path):
                         remove(path)
                 temp_dir.cleanup()
-                # Stem/recipe CSVs are upserted per rendered track; song-level
-                # data.csv still waits for finalize.
-                return None, rendered_stem_rows, [], recipe_rows
+                return _hybrid_pass_result(
+                    dataset=dataset,
+                    i=i,
+                    path_output=path_output,
+                    n_tracks=n_tracks,
+                    song_dir=song_dir,
+                    audio_format=audio_format,
+                    args=args,
+                    rendered_stem_rows=rendered_stem_rows,
+                    all_stem_rows=stem_rows,
+                    recipe_rows=recipe_rows,
+                    track_render_meta=track_render_meta,
+                )
 
             # Finalize (default when ddsp_pass is None or "finalize"): non-neural stems.
             for j, track_path in enumerate(track_paths):
@@ -651,13 +730,7 @@ def synthesize_song_at_index(
             for j, waveform in enumerate(waveforms):
                 save_stem(waveform, song_dir, j, audio_format)
 
-    song_info = dataset.loc[i].to_dict()
-    song_info["path"] = path_output
-    song_info.pop("path_output", None)
-    song_info.pop("mid", None)
-    song_info.pop("mid_pdmx", None)
-    # Dense path may have rewritten n_tracks to the cleaned count.
-    song_info["n_tracks"] = n_tracks
+    song_info = _song_table_row(dataset, i, path_output, n_tracks)
     return song_info, stem_rows, routing_rows, recipe_rows
 
 
@@ -1043,7 +1116,7 @@ def _run_hybrid_synthesis(
     output_filepath: str,
     recipe_output_filepath: str | None,
 ) -> None:
-    """Fluidsynth → DDSP-Piano → MIDI-DDSP → finalize CSVs (skip unused passes)."""
+    """Fluidsynth and MIDI-DDSP write audio + locked table rows; data.csv when a song is complete."""
     from synthesis.ddsp.pool import shutdown_ddsp_pool
     from synthesis.recipe import load_stem_recipe_index
 
@@ -1051,18 +1124,11 @@ def _run_hybrid_synthesis(
     uses_neural = recipe.uses_ddsp()
     run_fluidsynth = only in (None, "fluidsynth")
     run_ddsp = uses_neural and only in (None, "ddsp")
-    run_finalize = (
-        only is None
-        or only == "ddsp"
-        or (only == "fluidsynth" and not uses_neural)
-    )
 
     def _one(pass_name: str, desc: str, write_tables: bool, pass_jobs: int) -> None:
         args.ddsp_pass = pass_name
         args.stem_recipe_index = load_stem_recipe_index(Path(output_filepath).parent)
         print(f"Hybrid pass: {pass_name} (-j {pass_jobs})", flush=True)
-        if pass_name == "finalize":
-            shutdown_ddsp_pool()
         _run_song_pool(
             dataset=dataset,
             completed_paths=completed_paths,
@@ -1080,7 +1146,7 @@ def _run_hybrid_synthesis(
             shutdown_ddsp_pool()
 
     if run_fluidsynth:
-        _one("fluidsynth", "Fluidsynth stems", False, max(1, int(args.jobs)))
+        _one("fluidsynth", "Fluidsynth stems", True, max(1, int(args.jobs)))
     if run_ddsp:
         if int(args.jobs) > 1:
             print(
@@ -1088,12 +1154,10 @@ def _run_hybrid_synthesis(
                 f"(was {args.jobs}) to avoid CUDA-after-fork kills.",
                 flush=True,
             )
-        _one("ddsp_piano", "DDSP piano stems", False, 1)
-        _one("midi_ddsp", "DDSP mono stems", False, 1)
+        _one("ddsp_piano", "DDSP piano stems", True, 1)
+        _one("midi_ddsp", "DDSP mono stems", True, 1)
     elif only == "ddsp" and not uses_neural:
         print("Hybrid DDSP pass skipped (no category uses midi-ddsp).", flush=True)
-    if run_finalize:
-        _one("finalize", "Hybrid finalize", True, max(1, int(args.jobs)))
     args.ddsp_pass = None
 
 
@@ -1332,11 +1396,13 @@ def synthesis_is_complete(
     audio_format: str,
     *,
     require_mixture: bool = False,
+    expected_n_songs: int | None = None,
 ) -> bool:
     """True when data/stems tables exist and every listed song has stem files on disk.
 
     When ``ddsp_routing.csv`` is present, every song must also have routing rows for
-    all tracks (DDSP ablations).
+    all tracks (DDSP ablations). ``expected_n_songs`` (unique songs in SPDMX.csv)
+    rejects a partial ``data.csv`` written while Fluidsynth/DDSP are still running.
     """
     source = Path(source_dir)
     data_csv = source / f"{DATA_DIR_NAME}.csv"
@@ -1347,6 +1413,8 @@ def synthesis_is_complete(
     songs = pd.read_csv(data_csv, sep=",", header=0, index_col=False)
     stems = pd.read_csv(stems_csv, sep=",", header=0, index_col=False)
     if len(songs) == 0 or len(stems) == 0:
+        return False
+    if expected_n_songs is not None and len(songs) < int(expected_n_songs):
         return False
 
     routing_csv = source / DDSP_ROUTING_FILE_NAME
@@ -1370,13 +1438,25 @@ def require_raw_synthesis(
     *,
     run_command: str,
     audio_format: str = DEFAULT_AUDIO_FORMAT,
+    expected_n_songs: int | None = None,
 ) -> None:
     """Raise if the non-realify synthesis pass has not completed successfully."""
-    if synthesis_is_complete(source_dir, audio_format, require_mixture=False):
+    if synthesis_is_complete(
+        source_dir,
+        audio_format,
+        require_mixture=False,
+        expected_n_songs=expected_n_songs,
+    ):
         return
+    detail = ""
+    if expected_n_songs is not None:
+        detail = (
+            f" Need {expected_n_songs} songs in data.csv "
+            "(Fluidsynth and DDSP must both finish first)."
+        )
     raise RuntimeError(
         "Cannot realify: raw stems are missing or incomplete at "
-        f"{source_dir}\n"
+        f"{source_dir}.{detail}\n"
         "Run the corresponding non-realify ablation first:\n"
         f"  {run_command}"
     )
