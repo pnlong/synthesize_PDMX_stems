@@ -6,7 +6,7 @@ import argparse
 import multiprocessing
 import shutil
 import tempfile
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, as_completed, wait
 from os import makedirs, remove
 from os.path import dirname, exists, expanduser
 from pathlib import Path
@@ -77,9 +77,9 @@ def _needs_ddsp_routing(args) -> bool:
 
 
 def _pool_should_spawn(args) -> bool:
-    if uses_ddsp(getattr(args, "render_mode", "") or ""):
+    if uses_ddsp(getattr(args, "render_mode", "") or "") and _hybrid_recipe(args) is None:
         return True
-    return getattr(args, "ddsp_pass", None) in ("ddsp_piano", "midi_ddsp")
+    return False
 
 
 def _hybrid_raw_current(args, song_path: str, track: int, out_stem, plan, backend: str) -> bool:
@@ -269,6 +269,8 @@ def synthesize_song_at_index(
     song_dir = Path(path_output)
     audio_format = synthesis_audio_format(args.flac)
     ddsp_pass = getattr(args, "ddsp_pass", None)
+    recipe = _hybrid_recipe(args)
+    hybrid = recipe is not None
 
     pdmx_mid = dataset.at[i, "mid_pdmx"] if "mid_pdmx" in dataset.columns else dataset.at[i, "mid"]
     pdmx_root = dirname(args.dataset_filepath)
@@ -277,8 +279,6 @@ def synthesize_song_at_index(
     )
     midi = mido.MidiFile(filename=str(midi_path), charset="utf8")
     n_tracks = len(track_map)
-    recipe = _hybrid_recipe(args)
-    hybrid = recipe is not None
 
     if (
         path_output in completed_paths
@@ -557,8 +557,11 @@ def synthesize_song_at_index(
                         idx, mid_path, route = job
                         return idx, synthesize_stem_neural(mid_path, route)
 
+                    inner = int(getattr(args, "neural_inner_workers", 0) or 0)
                     if ddsp_oneshot_enabled():
                         max_workers = 1
+                    elif inner > 0:
+                        max_workers = inner
                     else:
                         max_workers = max(1, get_ddsp_pool().size)
                     with ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -843,6 +846,20 @@ def _work_for_pass(
     return kept, total
 
 
+def _preload_track_maps(args) -> None:
+    """Load SPDMX.csv track map once on the parent thread (avoid 4× NFS stampede)."""
+    if getattr(args, "track_maps", None):
+        return
+    from analysis.corrected_midi import load_track_maps, resolve_track_map_csv
+
+    csv_path = resolve_track_map_csv(_hybrid_corrected_midi_root(args))
+    print(f"Loading track map from {csv_path} (one-time, can take a few minutes) ...", flush=True)
+    args.track_maps = load_track_maps(csv_path)
+    n_songs = len(args.track_maps)
+    n_tracks = sum(len(v) for v in args.track_maps.values())
+    print(f"Track map ready ({n_songs} songs, {n_tracks} tracks).", flush=True)
+
+
 def _init_synthesis_worker(dataset, completed_paths, args):
     global _WORKER_CTX
     _WORKER_CTX = {
@@ -861,7 +878,7 @@ def _init_synthesis_worker(dataset, completed_paths, args):
             ddsp_pass in ("ddsp_piano", "midi_ddsp")
             and not ddsp_oneshot_enabled()
         ):
-            ensure_ddsp_pool()
+            ensure_ddsp_pool(preload=ddsp_pass)
 
 
 def _synthesis_worker(i: int):
@@ -888,22 +905,85 @@ def _run_song_pool(
     recipe_output_filepath: str | None = None,
     track_total: int | None = None,
     append_only: bool = False,
+    use_threads: bool = False,
 ) -> None:
     """Run song workers once (one DDSP pass or the non-DDSP path)."""
     from synthesis.recipe import STEM_RECIPE_COLUMNS
 
     write_row = append_rows if append_only else append_rows_deduped
     write_kw = {} if append_only else {"key_cols": ["path", "track"]}
-    pool_ctx = (
-        multiprocessing.get_context("spawn")
-        if _pool_should_spawn(args)
-        else multiprocessing
-    )
     use_tracks = track_total is not None
     pbar = tqdm(
         total=int(track_total) if use_tracks else len(work_indices),
         desc=desc,
         unit="track" if use_tracks else "song",
+    )
+
+    def _consume(result) -> None:
+        song_info, stem_rows, routing_rows, recipe_rows, n_progress = result
+        pbar.update(int(n_progress) if use_tracks else 1)
+        if recipe_rows and recipe_output_filepath is not None:
+            write_row(
+                recipe_output_filepath,
+                STEM_RECIPE_COLUMNS,
+                recipe_rows,
+                **write_kw,
+            )
+            index = getattr(args, "stem_recipe_index", None)
+            if isinstance(index, dict):
+                for row in recipe_rows:
+                    index[(str(row["path"]), int(row["track"]))] = row
+        if stem_rows:
+            write_row(
+                stems_output_filepath,
+                STEMS_TABLE_COLUMNS,
+                stem_rows,
+                **write_kw,
+            )
+        if routing_rows and routing_output_filepath is not None:
+            write_row(
+                routing_output_filepath,
+                DDSP_ROUTING_COLUMNS,
+                routing_rows,
+                **write_kw,
+            )
+        if not write_tables or song_info is None:
+            return
+        append_rows_deduped(
+            output_filepath,
+            SONGS_TABLE_COLUMNS,
+            [song_info],
+        )
+
+    if use_threads:
+        _preload_track_maps(args)
+        _init_synthesis_worker(dataset, completed_paths, args)
+        workers = max(1, int(jobs))
+        pending: set = set()
+        todo = iter(work_indices)
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            def _fill() -> None:
+                while len(pending) < workers:
+                    try:
+                        idx = next(todo)
+                    except StopIteration:
+                        return
+                    pending.add(pool.submit(_synthesis_worker, idx))
+
+            _fill()
+            while pending:
+                done, pending = wait(pending, return_when=FIRST_COMPLETED)
+                pending = set(pending)
+                for fut in done:
+                    _consume(fut.result())
+                _fill()
+        pbar.close()
+        return
+
+    pool_ctx = (
+        multiprocessing.get_context("spawn")
+        if _pool_should_spawn(args)
+        else multiprocessing
     )
     with pool_ctx.Pool(
         processes=jobs,
@@ -911,41 +991,18 @@ def _run_song_pool(
         initargs=(dataset, completed_paths, args),
     ) as pool:
         for result in pool.imap(_synthesis_worker, work_indices, chunksize=CHUNK_SIZE):
-            song_info, stem_rows, routing_rows, recipe_rows, n_progress = result
-            pbar.update(int(n_progress) if use_tracks else 1)
-            if recipe_rows and recipe_output_filepath is not None:
-                write_row(
-                    recipe_output_filepath,
-                    STEM_RECIPE_COLUMNS,
-                    recipe_rows,
-                    **write_kw,
-                )
-                index = getattr(args, "stem_recipe_index", None)
-                if isinstance(index, dict):
-                    for row in recipe_rows:
-                        index[(str(row["path"]), int(row["track"]))] = row
-            if stem_rows:
-                write_row(
-                    stems_output_filepath,
-                    STEMS_TABLE_COLUMNS,
-                    stem_rows,
-                    **write_kw,
-                )
-            if routing_rows and routing_output_filepath is not None:
-                write_row(
-                    routing_output_filepath,
-                    DDSP_ROUTING_COLUMNS,
-                    routing_rows,
-                    **write_kw,
-                )
-            if not write_tables or song_info is None:
-                continue
-            append_rows_deduped(
-                output_filepath,
-                SONGS_TABLE_COLUMNS,
-                [song_info],
-            )
+            _consume(result)
     pbar.close()
+
+
+def _hybrid_neural_song_workers() -> int:
+    """Songs in flight for midi_ddsp / ddsp_piano (one thread per GPU)."""
+    from synthesis.ddsp.env import parse_ddsp_gpu_ids
+    from synthesis.ddsp.pool import ddsp_oneshot_enabled
+
+    if ddsp_oneshot_enabled():
+        return 1
+    return max(1, len(parse_ddsp_gpu_ids()))
 
 
 def _jobs(args, default: int = 1) -> int:
@@ -1382,7 +1439,7 @@ def _run_hybrid_synthesis(
     run_midi_ddsp = uses_neural and only in (None, "midi_ddsp")
     tables = Path(output_filepath).parent
 
-    def _one(pass_name: str, desc: str, pass_jobs: int) -> None:
+    def _one(pass_name: str, desc: str, pass_jobs: int, *, use_threads: bool = False) -> None:
         args.ddsp_pass = pass_name
         recipe_path = pass_recipe_csv(tables, pass_name)
         args.stem_recipe_index = load_stem_recipe_index(
@@ -1395,7 +1452,10 @@ def _run_hybrid_synthesis(
         extra = ""
         if track_total is not None:
             extra = f", {track_total} tracks left, {len(indices)} songs"
-        print(f"Hybrid pass: {pass_name} (-j {pass_jobs}{extra})", flush=True)
+        workers = (
+            f"{pass_jobs} GPUs across songs" if use_threads else f"-j {pass_jobs}"
+        )
+        print(f"Hybrid pass: {pass_name} ({workers}{extra})", flush=True)
         if not indices:
             print(f"No {pass_name} tracks to render.", flush=True)
             return
@@ -1417,6 +1477,7 @@ def _run_hybrid_synthesis(
             recipe_output_filepath=str(recipe_path),
             track_total=track_total,
             append_only=True,
+            use_threads=use_threads,
         )
         if pass_name in ("ddsp_piano", "midi_ddsp"):
             shutdown_ddsp_pool()
@@ -1424,16 +1485,19 @@ def _run_hybrid_synthesis(
     if run_fluidsynth:
         _one("fluidsynth", "Fluidsynth stems", max(1, int(args.jobs)))
     if run_ddsp_piano or run_midi_ddsp:
-        if int(args.jobs) > 1:
+        gpu_jobs = _hybrid_neural_song_workers()
+        if gpu_jobs > 1:
             print(
-                "Note: DDSP-piano / MIDI-DDSP use spawn + -j 1 "
-                f"(was {args.jobs}) to avoid CUDA-after-fork kills.",
+                f"MIDI-DDSP / DDSP-Piano: {gpu_jobs} songs in flight "
+                "(one thread per CUDA_VISIBLE_DEVICES id).",
                 flush=True,
             )
         if run_ddsp_piano:
-            _one("ddsp_piano", "DDSP-Piano stems", 1)
+            args.neural_inner_workers = 1
+            _one("ddsp_piano", "DDSP-Piano stems", gpu_jobs, use_threads=True)
         if run_midi_ddsp:
-            _one("midi_ddsp", "MIDI-DDSP stems", 1)
+            args.neural_inner_workers = 1
+            _one("midi_ddsp", "MIDI-DDSP stems", gpu_jobs, use_threads=True)
     elif only == "ddsp_piano" and not recipe.uses_ddsp_piano():
         print("Hybrid DDSP-Piano pass skipped (piano recipe is not midi-ddsp).", flush=True)
     elif only == "midi_ddsp" and not uses_neural:

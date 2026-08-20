@@ -58,6 +58,8 @@ def _midi_weights_key(weights_dir: str) -> str:
 
 
 def _load_midi_ddsp_models(weights_dir: str):
+    import time
+
     from midi_ddsp.midi_ddsp_synthesize import load_pretrained_model
 
     key = _midi_weights_key(weights_dir)
@@ -69,6 +71,11 @@ def _load_midi_ddsp_models(weights_dir: str):
             _MIDI_CACHE["synthesis_generator"],
             _MIDI_CACHE["expression_generator"],
         )
+
+    gpu = os.environ.get("CUDA_VISIBLE_DEVICES", "?")
+    t0 = time.monotonic()
+    sys.stderr.write(f"[ddsp gpu={gpu}] loading MIDI-DDSP weights...\n")
+    sys.stderr.flush()
 
     load_kwargs: dict = {}
     weights = Path(weights_dir) if weights_dir else None
@@ -88,6 +95,10 @@ def _load_midi_ddsp_models(weights_dir: str):
     _MIDI_CACHE["key"] = key
     _MIDI_CACHE["synthesis_generator"] = synthesis_generator
     _MIDI_CACHE["expression_generator"] = expression_generator
+    sys.stderr.write(
+        f"[ddsp gpu={gpu}] MIDI-DDSP weights ready in {time.monotonic() - t0:.0f}s\n"
+    )
+    sys.stderr.flush()
     return synthesis_generator, expression_generator
 
 
@@ -480,6 +491,12 @@ def _run_serve() -> int:
         sys.stdout.reconfigure(line_buffering=True)  # type: ignore[attr-defined]
     except Exception:
         pass
+    preload = os.environ.get("SPDMX_DDSP_PRELOAD", "").strip()
+    if preload == "midi_ddsp":
+        from synthesis.ddsp.config import MIDI_DDSP_WEIGHTS_DIR
+
+        weights = str(MIDI_DDSP_WEIGHTS_DIR) if MIDI_DDSP_WEIGHTS_DIR.is_dir() else ""
+        _load_midi_ddsp_models(weights)
     _emit({"ok": True, "ready": True})
     for line in sys.stdin:
         line = line.strip()

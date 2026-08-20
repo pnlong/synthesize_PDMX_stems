@@ -21,7 +21,11 @@ def test_parse_ddsp_gpu_ids_force_cpu():
     assert parse_ddsp_gpu_ids(force_cpu=True) == ["-1"]
 
 
-def test_parse_ddsp_gpu_ids_multi():
+def test_hybrid_neural_song_workers_oneshot(monkeypatch):
+    monkeypatch.setenv("SPDMX_DDSP_ONESHOT", "1")
+    from synthesis.synthesize import _hybrid_neural_song_workers
+
+    assert _hybrid_neural_song_workers() == 1
     assert parse_ddsp_gpu_ids(force_cpu=False, cuda_visible="2,3") == ["2", "3"]
 
 

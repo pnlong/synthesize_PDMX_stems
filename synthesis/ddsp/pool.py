@@ -207,15 +207,30 @@ class DdspWorkerPool:
         cls,
         *,
         gpu_ids: list[str] | None = None,
-        ready_timeout_sec: float = _READY_TIMEOUT_SEC,
+        ready_timeout_sec: float | None = None,
+        preload: str | None = None,
     ) -> "DdspWorkerPool":
         python = ddsp_python_executable()
         ids = gpu_ids if gpu_ids is not None else parse_ddsp_gpu_ids()
+        timeout = float(
+            ready_timeout_sec
+            if ready_timeout_sec is not None
+            else (1800 if preload == "midi_ddsp" else _READY_TIMEOUT_SEC)
+        )
+        preload = (preload or os.environ.get("SPDMX_DDSP_PRELOAD") or "").strip()
         workers: list[_ServeWorker] = []
+        print(
+            f"Starting {len(ids)} DDSP serve worker(s)"
+            + (f" (preload {preload})" if preload else "")
+            + "...",
+            flush=True,
+        )
         try:
             for gpu_id in ids:
                 env = ddsp_worker_env(cuda_visible_devices=gpu_id)
                 env["PYTHONUNBUFFERED"] = "1"
+                if preload:
+                    env["SPDMX_DDSP_PRELOAD"] = preload
                 proc = subprocess.Popen(
                     [str(python), "-m", "synthesis.ddsp.worker", "serve"],
                     stdin=subprocess.PIPE,
@@ -227,18 +242,25 @@ class DdspWorkerPool:
                 )
                 worker = _ServeWorker(gpu_id=gpu_id, proc=proc)
                 worker.start_io()
-                # Wait for ready banner (via drained stdout queue).
-                deadline = time.monotonic() + ready_timeout_sec
+                workers.append(worker)
+            for worker in workers:
+                print(
+                    f"Waiting for DDSP GPU {worker.gpu_id}"
+                    + (" — MIDI-DDSP weight load can take several minutes" if preload else "")
+                    + "...",
+                    flush=True,
+                )
+                deadline = time.monotonic() + timeout
                 ready = False
                 while time.monotonic() < deadline:
-                    if proc.poll() is not None:
+                    if worker.proc.poll() is not None:
                         raise RuntimeError(
-                            f"DDSP serve worker failed to start (GPU {gpu_id}): "
+                            f"DDSP serve worker failed to start (GPU {worker.gpu_id}): "
                             f"{worker.stderr_tail()}"
                         )
                     remaining = deadline - time.monotonic()
                     try:
-                        line = worker.readline(timeout_sec=min(1.0, max(0.05, remaining)))
+                        line = worker.readline(timeout_sec=min(2.0, max(0.05, remaining)))
                     except TimeoutError:
                         continue
                     try:
@@ -251,10 +273,10 @@ class DdspWorkerPool:
                 if not ready:
                     worker.shutdown()
                     raise TimeoutError(
-                        f"DDSP serve worker (GPU {gpu_id}) not ready within "
-                        f"{ready_timeout_sec:.0f}s\nstderr:\n{worker.stderr_tail()}"
+                        f"DDSP serve worker (GPU {worker.gpu_id}) not ready within "
+                        f"{timeout:.0f}s\nstderr:\n{worker.stderr_tail()}"
                     )
-                workers.append(worker)
+                print(f"DDSP GPU {worker.gpu_id} ready.", flush=True)
         except Exception:
             for w in workers:
                 w.shutdown()
@@ -288,12 +310,12 @@ class DdspWorkerPool:
             worker.shutdown()
 
 
-def get_ddsp_pool() -> DdspWorkerPool:
+def get_ddsp_pool(*, preload: str | None = None) -> DdspWorkerPool:
     """Process-global pool (started lazily)."""
     global _GLOBAL_POOL, _ATEXIT_REGISTERED
     with _GLOBAL_LOCK:
         if _GLOBAL_POOL is None or _GLOBAL_POOL._closed:
-            _GLOBAL_POOL = DdspWorkerPool.start()
+            _GLOBAL_POOL = DdspWorkerPool.start(preload=preload)
             if not _ATEXIT_REGISTERED:
                 atexit.register(shutdown_ddsp_pool)
                 _ATEXIT_REGISTERED = True
@@ -308,8 +330,8 @@ def shutdown_ddsp_pool() -> None:
             _GLOBAL_POOL = None
 
 
-def ensure_ddsp_pool() -> DdspWorkerPool | None:
+def ensure_ddsp_pool(*, preload: str | None = None) -> DdspWorkerPool | None:
     """Start the pool unless oneshot mode is enabled."""
     if ddsp_oneshot_enabled():
         return None
-    return get_ddsp_pool()
+    return get_ddsp_pool(preload=preload)

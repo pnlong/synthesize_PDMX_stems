@@ -321,7 +321,7 @@ Routing details live in [`synthesis/ddsp/routing.py`](ddsp/routing.py) (`DDSP_PI
 
 - CA2/CB2 SA3 only neural stems; fallback stems copy from A2/B2.
 - Neural models run in an isolated TF venv (`.venv-ddsp`); see SETUP Track C. Linux x86_64 only.
-- **Persistent multi-GPU pool** (default): one long-lived `worker serve` process per id in `CUDA_VISIBLE_DEVICES`. Synthesis runs **three global passes** — (1) all `ddsp_piano` stems, (2) all `midi_ddsp` stems, (3) donor/soundfont — restarting the pool between neural passes so only one TF model is hot. Within a pass, same-backend stems in a song fan out across GPUs. Song-level jobs stay at `-j 1`. `SPDMX_DDSP_ONESHOT=1` = legacy per-stem subprocesses; `SPDMX_DDSP_FORCE_CPU=1` → CPU worker.
+- **Persistent multi-GPU pool** (default): one long-lived `worker serve` process per id in `CUDA_VISIBLE_DEVICES`. Hybrid MIDI-DDSP / DDSP-Piano keep **one song thread per GPU** so tracks from different songs fill idle cards (not only stems inside one song). Ablation DDSP still uses song-level `-j 1` (spawn). `SPDMX_DDSP_ONESHOT=1` = legacy per-stem subprocesses; `SPDMX_DDSP_FORCE_CPU=1` → CPU worker.
 - Routing decisions are written to `ddsp_routing.csv` beside the ablation tables.
 - Provenance: [`THIRD_PARTY.md`](../THIRD_PARTY.md). Vocals deliberately stay on soundfont(+SA3); lyric SVS is out of scope.
 

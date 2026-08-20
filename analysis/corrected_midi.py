@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import multiprocessing
+import threading
 from pathlib import Path
 
 import mido
@@ -34,6 +35,7 @@ TRACK_MAP_COLUMNS = [
 ]
 
 _TRACK_MAPS_CACHE: dict[str, dict[str, dict[int, dict]]] = {}
+_TRACK_MAPS_LOCK = threading.Lock()
 
 _CONDUCTOR_META_TYPES = frozenset({
     "set_tempo",
@@ -161,38 +163,57 @@ def dest_rel_for_midi(midi_path: str | Path, corrected_midi_dir: str | Path) -> 
 
 
 def clear_track_map_cache() -> None:
-    _TRACK_MAPS_CACHE.clear()
+    with _TRACK_MAPS_LOCK:
+        _TRACK_MAPS_CACHE.clear()
 
 
 def load_track_maps(track_map_csv: str | Path) -> dict[str, dict[int, dict]]:
     """Load the global track map. Keys are ``song_id`` (``a/b/Qm``)."""
     path = Path(track_map_csv).resolve()
     cache_key = str(path)
-    cached = _TRACK_MAPS_CACHE.get(cache_key)
-    if cached is not None:
-        return cached
-    if not path.is_file():
-        raise FileNotFoundError(
-            f"Dense MIDI track map not found: {path}\n"
-            "Re-run: uv run python -m analysis.prepare_synthesis --subset all_valid -j 8"
-        )
-    df = pd.read_csv(path)
-    maps: dict[str, dict[int, dict]] = {}
-    for _, row in df.iterrows():
-        if "song_id" in df.columns and pd.notna(row.get("song_id")):
-            key = str(row["song_id"])
-        elif "path" in df.columns and pd.notna(row.get("path")):
-            key = song_id_from_pdmx_path(row["path"])
+    with _TRACK_MAPS_LOCK:
+        cached = _TRACK_MAPS_CACHE.get(cache_key)
+        if cached is not None:
+            return cached
+        if not path.is_file():
+            raise FileNotFoundError(
+                f"Dense MIDI track map not found: {path}\n"
+                "Re-run: uv run python -m analysis.prepare_synthesis --subset all_valid -j 8"
+            )
+        df = pd.read_csv(path)
+        maps: dict[str, dict[int, dict]] = {}
+        if "song_id" in df.columns:
+            keys = df["song_id"].astype(str).to_numpy()
+        elif "path" in df.columns:
+            keys = df["path"].map(song_id_from_pdmx_path).astype(str).to_numpy()
         else:
-            key = song_id_from_mid(row["mid"])
-        maps.setdefault(key, {})[int(row["track"])] = {
-            "original_track": int(row["original_track"]),
-            "program": int(row["program"]) if pd.notna(row.get("program")) else 0,
-            "is_drum": bool(row.get("is_drum", False)),
-            "name": None if pd.isna(row.get("name")) else str(row["name"]),
-        }
-    _TRACK_MAPS_CACHE[cache_key] = maps
-    return maps
+            keys = df["mid"].map(song_id_from_mid).astype(str).to_numpy()
+        tracks = df["track"].astype(int).to_numpy()
+        originals = df["original_track"].astype(int).to_numpy()
+        programs = (
+            df["program"].fillna(0).astype(int).to_numpy()
+            if "program" in df.columns
+            else [0] * len(df)
+        )
+        drums = (
+            df["is_drum"].fillna(False).astype(bool).to_numpy()
+            if "is_drum" in df.columns
+            else [False] * len(df)
+        )
+        if "name" in df.columns:
+            names = df["name"].tolist()
+        else:
+            names = [None] * len(df)
+        for i in range(len(df)):
+            name = names[i]
+            maps.setdefault(keys[i], {})[int(tracks[i])] = {
+                "original_track": int(originals[i]),
+                "program": int(programs[i]),
+                "is_drum": bool(drums[i]),
+                "name": None if name is None or (isinstance(name, float) and name != name) else str(name),
+            }
+        _TRACK_MAPS_CACHE[cache_key] = maps
+        return maps
 
 
 def load_track_map(

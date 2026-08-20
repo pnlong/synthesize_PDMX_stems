@@ -40,7 +40,11 @@ def resolve_synthesis_midi(
             "Generate corrected midis first:\n"
             "  uv run python -m analysis.prepare_synthesis --subset all_valid -j 8"
         )
-    return corrected, load_track_map(corrected, corrected_midi_dir=corrected_root)
+    return corrected, load_track_map(
+        corrected,
+        corrected_midi_dir=corrected_root,
+        track_maps=getattr(args, "track_maps", None),
+    )
 
 
 def stem_original_track(row: dict | object, track: int | None = None) -> int:
