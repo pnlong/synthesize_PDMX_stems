@@ -20,6 +20,7 @@ from synthesis.paths import (
     spdmx_dataset_dir,
 )
 from shared.repo_symlinks import link_ablations_in_repo
+from synthesis.pass_tables import merge_pass_tables
 from synthesis.recipe import (
     DEFAULT_RECIPE_PATH,
     load_recipe,
@@ -35,7 +36,7 @@ from synthesis.synthesize import (
 
 FINAL_CONDITION = "final"
 ONLY_PASSES = (
-    "layout", "fluidsynth", "ddsp_piano", "midi_ddsp", "realify", "mix",
+    "layout", "fluidsynth", "ddsp_piano", "midi_ddsp", "merge", "realify", "mix",
 )
 DDSP_PASSES = ("ddsp_piano", "midi_ddsp")
 
@@ -49,9 +50,9 @@ def parse_args(args=None, namespace=None):
             "and sanitized MIDI under mid/. Join SPDMX.csv to PDMX.csv on song_id. "
             "Audio format is always FLAC. "
             "Run one pass at a time with --only-pass "
-            "(layout → fluidsynth → ddsp_piano → midi_ddsp → realify → mix). "
+            "(layout → fluidsynth → ddsp_piano → midi_ddsp → mix). "
             "Fluidsynth, ddsp_piano, and midi_ddsp may run in parallel. "
-            "Realify and mix wait until Fluidsynth and both DDSP passes finish."
+            "Realify and mix merge per-pass CSVs first."
         ),
     )
     add_synthesis_args(
@@ -74,8 +75,8 @@ def parse_args(args=None, namespace=None):
         required=True,
         help=(
             "Required. One method pass: layout, fluidsynth, ddsp_piano, midi_ddsp, "
-            "realify, or mix. Fluidsynth, ddsp_piano, and midi_ddsp may run in parallel. "
-            "Realify only after Fluidsynth and both DDSP passes have finished."
+            "merge, realify, or mix. Fluidsynth, ddsp_piano, and midi_ddsp may "
+            "run in parallel. Mix/realify merge per-pass tables first."
         ),
     )
     parser.add_argument(
@@ -157,6 +158,17 @@ def log_recipe_plan(recipe, *, tables_dir: str, media_dir: str, only: str) -> No
 
 def log_next_pass(recipe, only: str) -> None:
     plan = pass_sequence(recipe)
+
+    def _extra(nxt: str) -> str:
+        return " -j 8" if nxt in ("fluidsynth", "mix") else ""
+
+    if only == "merge":
+        nxt = "realify" if recipe.uses_realify() else "mix"
+        print(
+            f"Next: uv run python -m synthesis.final --only-pass {nxt}{_extra(nxt)}",
+            flush=True,
+        )
+        return
     if only not in plan:
         return
     idx = plan.index(only)
@@ -164,7 +176,7 @@ def log_next_pass(recipe, only: str) -> None:
         print("All passes complete.", flush=True)
         return
     nxt = plan[idx + 1]
-    extra = " -j 8" if nxt in ("fluidsynth", "mix") else ""
+    extra = _extra(nxt)
     if only == "fluidsynth" and any(p in plan for p in DDSP_PASSES):
         print(
             "Note: --only-pass ddsp_piano and --only-pass midi_ddsp can run in "
@@ -227,10 +239,13 @@ def main(argv=None):
         run_layout_pass(args, tables_dir, media_dir=media_dir)
     elif only in ("fluidsynth", "ddsp_piano", "midi_ddsp"):
         run_synthesis(args, tables_dir, media_dir=media_dir)
+    elif only == "merge":
+        merge_pass_tables(tables_dir)
     elif only == "realify":
         if not recipe.uses_realify():
             print("Realify pass skipped (no category recipe sets realify).")
         else:
+            merge_pass_tables(tables_dir)
             require_raw_synthesis(
                 tables_dir,
                 run_command=raw_upstream_command(recipe),
@@ -246,6 +261,7 @@ def main(argv=None):
                 )
             run_realify_pass(args, tables_dir, tables_dir)
     elif only == "mix":
+        merge_pass_tables(tables_dir)
         require_raw_synthesis(
             tables_dir,
             run_command=raw_upstream_command(recipe),

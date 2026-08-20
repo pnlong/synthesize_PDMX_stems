@@ -75,7 +75,7 @@ uv run python -m synthesis.final --only-pass midi_ddsp
 uv run python -m synthesis.final --only-pass mix
 ```
 
-Writes FLAC stems to `{OUTPUT_DIR}/SPDMX/audio/` (PDMX `data/*.json` → a directory of `0.flac`, `1.flac`, …). Sanitized MIDIs, `SPDMX.csv`, `LICENSE`, and `README.md` come from `prepare_synthesis` / layout. Mix is `sum(stems)` (no `mixture.*`). Pipeline tables (`data.csv`, `stems.csv`) live under `{OUTPUT_DIR}/dev/final/`.
+Writes FLAC stems to `{OUTPUT_DIR}/SPDMX/audio/` (PDMX `data/*.json` → a directory of `0.flac`, `1.flac`, …). Sanitized MIDIs, `SPDMX.csv`, `LICENSE`, and `README.md` come from `prepare_synthesis` / layout. Mix is `sum(stems)` (no `mixture.*`). Pipeline tables live under `{OUTPUT_DIR}/dev/final/` (`stems.fluidsynth.csv` etc. during render; `stems.csv` / `data.csv` after mix or `--only-pass merge`).
 
 ### Per-song layout
 

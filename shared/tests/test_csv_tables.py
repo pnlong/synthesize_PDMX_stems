@@ -15,6 +15,22 @@ def test_sanitize_track_name_strips_null_bytes():
     assert sanitize_track_name(None) is None
 
 
+def test_append_rows_does_not_rewrite_existing(tmp_path):
+    from shared.csv_tables import append_rows
+
+    csv_path = str(tmp_path / "stems.fluidsynth.csv")
+    row = {
+        "path": "/songs/a", "track": 0, "original_track": 0, "program": 0,
+        "is_drum": False, "name": "Piano", "has_lyrics": False,
+        "max_velocity": 64, "velocity_scale": 0.5,
+    }
+    append_rows(csv_path, STEMS_TABLE_COLUMNS, [row])
+    append_rows(csv_path, STEMS_TABLE_COLUMNS, [{**row, "track": 1}])
+    stems = pd.read_csv(csv_path)
+    assert len(stems) == 2
+    assert set(stems["track"].astype(int)) == {0, 1}
+
+
 def test_append_rows_deduped_replaces_path(tmp_path):
     csv_path = tmp_path / "stems.csv"
     path = "/songs/a"

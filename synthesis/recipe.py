@@ -395,9 +395,12 @@ def format_realify_fingerprint(fp: tuple[str, str, str, bool] | None) -> str:
     )
 
 
-def load_stem_recipe_index(stems_dir: str | Path) -> dict[tuple[str, int], dict]:
-    """Map (song path, track) → sidecar row."""
-    path = Path(stems_dir) / STEM_RECIPE_FILE_NAME
+def load_stem_recipe_index(
+    stems_dir: str | Path,
+    filename: str = STEM_RECIPE_FILE_NAME,
+) -> dict[tuple[str, int], dict]:
+    """Map (song path, track) → sidecar row (last row wins)."""
+    path = Path(stems_dir) / filename
     if not path.is_file():
         return {}
     df = pd.read_csv(path)

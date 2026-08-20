@@ -38,7 +38,7 @@ If an older `slakh_ddsp/` tree exists, rename it to `ddsp_slakh/` (and `*_realif
                                  # written by analysis.prepare_synthesis
 ```
 
-Production bookkeeping (`data.csv`, `stems.csv`, `stem_recipe.csv`) is `{OUTPUT_DIR}/dev/final/`, not the released tree.
+Production bookkeeping (`data.csv`, `stems.csv`, `stem_recipe.csv`, plus per-pass `stems.<engine>.csv`) is `{OUTPUT_DIR}/dev/final/`, not the released tree.
 
 Ablation-style full stems (`synthesize --full`) still use `{OUTPUT_DIR}/dev/stems/` (and `stems_realify/` when `--realify` uses a separate tree).
 
@@ -199,13 +199,14 @@ After the ablation listening test, edit [`recipe.yaml`](recipe.yaml) with the wi
 `python -m synthesis.final --only-pass …` renders **one** mixed stem tree (not eight ablation dirs). Passes are **one method at a time** (do not omit `--only-pass`):
 
 0. **layout** — mkdir `{OUTPUT_DIR}/SPDMX/audio/<shard>/<hash>/` for every valid PDMX song, plus `mid/` parent dirs. Empty `data.csv` / `stems.csv` / `stem_recipe.csv` and `midi_index.csv` (dense MIDI path + `n_tracks` per song) under `{OUTPUT_DIR}/dev/final/`.
-1. **Fluidsynth** — categories whose recipe is `basic` / `slakh` (and DDSP-ineligible fallbacks). Per-track slakh recipes vs default GM. `-j` workers.
-2. **DDSP-Piano** — only if the **piano** category recipe is `ddsp_*` (acoustic-piano engine). Current `recipe.yaml` uses slakh for piano, so this pass is omitted.
-3. **MIDI-DDSP** — strings/wind/brass whose recipe is `ddsp_*`. May run **in parallel** with Fluidsynth and with DDSP-Piano when that pass exists.
-4. **SA3 realify** — only if the recipe sets `*_realify`; overwrites those stems in place. **After Fluidsynth, DDSP-Piano, and MIDI-DDSP have all finished.** Locked preset bypasses (`realify: false`) still apply.
-5. **mix** — LUFS + velocity + peak in place. No `mixture.*`; mix = sum(stems). Same gate: all raw stems must be on disk first.
+1. **Fluidsynth** — categories whose recipe is `basic` / `slakh` (and DDSP-ineligible fallbacks). Per-track slakh recipes vs default GM. `-j` workers. Progress is `stems.fluidsynth.csv` / `stem_recipe.fluidsynth.csv` (append-only).
+2. **DDSP-Piano** — only if the **piano** category recipe is `ddsp_*` (acoustic-piano engine). Current `recipe.yaml` uses slakh for piano, so this pass is omitted. Writes `stems.ddsp_piano.csv` / `stem_recipe.ddsp_piano.csv`.
+3. **MIDI-DDSP** — strings/wind/brass whose recipe is `ddsp_*`. May run **in parallel** with Fluidsynth and with DDSP-Piano when that pass exists. Writes `stems.midi_ddsp.csv` / `stem_recipe.midi_ddsp.csv`.
+4. **merge** — optional. Concatenates the per-pass CSVs into canonical `stems.csv` / `stem_recipe.csv` / `ddsp_routing.csv` and writes `data.csv` for songs whose stem count matches `midi_index.csv`. Mix and realify run this automatically. **Pass shards stay on disk** so a later re-render or recipe change can still append to them.
+5. **SA3 realify** — only if the recipe sets `*_realify`; overwrites those stems in place. **After Fluidsynth, DDSP-Piano, and MIDI-DDSP have all finished.** Locked preset bypasses (`realify: false`) still apply.
+6. **mix** — merge tables, then LUFS + velocity + peak in place. No `mixture.*`; mix = sum(stems). Same gate: all raw stems must be on disk first.
 
-Without `--reset`, each method pass **resumes**: valid stems whose `stem_recipe.csv` sidecar matches the current recipe are skipped. If a stem exists but the sidecar does not match (recipe YAML changed, or a completed tree has no sidecar), the CLI lists the conflicts and asks before regenerating. Pass `-y` / `--yes` to regenerate without a prompt.
+Without `--reset`, each method pass **resumes** from its own `stem_recipe.<pass>.csv` only. Canonical `stems.csv` / `stem_recipe.csv` / `data.csv` are merge outputs (rebuilt at mix) and are deleted when a render pass starts; the per-pass shards are not. Valid stems whose pass sidecar matches the current recipe are skipped. Pass `-y` / `--yes` after a recipe change to regenerate mismatches without a prompt.
 
 ```bash
 # Edit synthesis/recipe.yaml, then one pass per job (FLAC default):
@@ -214,6 +215,9 @@ uv run python -m synthesis.final --only-pass fluidsynth -j 8
 uv run python -m synthesis.final --only-pass ddsp_piano
 uv run python -m synthesis.final --only-pass midi_ddsp
 uv run python -m synthesis.final --only-pass mix
+
+# Optional: rebuild canonical CSVs without mixing (mix/realify already do this):
+uv run python -m synthesis.final --only-pass merge
 
 # If the recipe uses *_realify, insert before mix — after Fluidsynth, DDSP-Piano, and MIDI-DDSP:
 uv run python -m synthesis.final --only-pass realify
@@ -225,7 +229,7 @@ uv run python -m synthesis.final --only-pass fluidsynth -y -j 8
 uv run python -m synthesis.final --only-pass layout --ablation-sample
 ```
 
-`--only-pass` is required. `--full` is the default. Stems are always FLAC (`N.flac`). MIDI + `SPDMX.csv` + `LICENSE` + `README.md`: `{OUTPUT_DIR}/SPDMX/` from `prepare_synthesis` (`song_id` joins to PDMX.csv; `path`/`mid` are dataset-relative). Tables: `{OUTPUT_DIR}/dev/final/`. If the recipe sets `*_realify`, SA3 overwrites those stems in the same directory. Do not add `final` to listening `CONDITION_ORDER`. Each stem tree writes `stem_recipe.csv` beside `stems.csv` (`path`, `track`, `category`, `ablation`, `method`, `fallback`, `backend`, `realify`).
+`--only-pass` is required. `--full` is the default. Stems are always FLAC (`N.flac`). MIDI + `SPDMX.csv` + `LICENSE` + `README.md`: `{OUTPUT_DIR}/SPDMX/` from `prepare_synthesis` (`song_id` joins to PDMX.csv; `path`/`mid` are dataset-relative). Tables: `{OUTPUT_DIR}/dev/final/`. If the recipe sets `*_realify`, SA3 overwrites those stems in the same directory. Do not add `final` to listening `CONDITION_ORDER`. Render passes append `stem_recipe.<engine>.csv`; mix merges those into `stem_recipe.csv` beside `stems.csv` (`path`, `track`, `category`, `ablation`, `method`, `fallback`, `backend`, `realify`).
 
 Synthesize always uses those dense corrected MIDIs (`prepare_synthesis` is the step-0 setup).
 

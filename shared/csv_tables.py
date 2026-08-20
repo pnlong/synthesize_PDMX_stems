@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import csv
 import fcntl
 from contextlib import contextmanager
 from os.path import exists
@@ -32,6 +33,34 @@ def _csv_exclusive_lock(csv_path: str):
             yield
         finally:
             fcntl.flock(lock_f.fileno(), fcntl.LOCK_UN)
+
+
+def append_rows(csv_path: str, columns: list[str], new_rows: list[dict]) -> None:
+    """Append rows without reading the existing file (O(rows added)).
+
+    Creates a header when the file is missing or empty. Duplicate keys are
+    allowed; callers that need a unique table should merge/dedup later.
+    """
+    if not new_rows:
+        return
+    path = Path(csv_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with _csv_exclusive_lock(str(path)):
+        new_file = not path.is_file() or path.stat().st_size == 0
+        with open(path, "a", encoding="utf-8", newline="") as handle:
+            writer = csv.DictWriter(
+                handle,
+                fieldnames=columns,
+                extrasaction="ignore",
+                lineterminator="\n",
+            )
+            if new_file:
+                writer.writeheader()
+            for row in new_rows:
+                writer.writerow({
+                    col: NA_STRING if row.get(col) is None else row.get(col)
+                    for col in columns
+                })
 
 
 def append_rows_deduped(

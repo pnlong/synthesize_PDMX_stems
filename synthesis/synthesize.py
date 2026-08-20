@@ -42,7 +42,7 @@ from synthesis.audio import (
 )
 from synthesis.cli_common import add_synthesis_args, default_gm_register_path
 from synthesis.dataset import listening_sample_path, prepare_ablation_dataset, prepare_full_dataset
-from shared.csv_tables import append_rows_deduped, sanitize_track_name
+from shared.csv_tables import append_rows, append_rows_deduped, sanitize_track_name
 from synthesis.paths import (
     MIDI_INDEX_FILE_NAME,
     PASS_TRACK_COLUMNS,
@@ -128,16 +128,20 @@ def _song_table_row(dataset: pd.DataFrame, i: int, path_output: str, n_tracks: i
     return song_info
 
 
-def _hybrid_routing_rows(path_output: str, stem_rows: list[dict], track_render_meta: list) -> list[dict]:
+def _hybrid_routing_rows(
+    path_output: str, rendered_stem_rows: list[dict], track_render_meta: list,
+) -> list[dict]:
     rows = []
-    for j, meta in enumerate(track_render_meta):
+    for stem in rendered_stem_rows:
+        j = int(stem["track"])
+        meta = track_render_meta[j] if j < len(track_render_meta) else {}
         rows.append({
             "path": path_output,
             "track": j,
             "original_track": meta.get("original_track", j),
-            "program": stem_rows[j]["program"],
-            "is_drum": stem_rows[j]["is_drum"],
-            "name": stem_rows[j]["name"],
+            "program": stem["program"],
+            "is_drum": stem["is_drum"],
+            "name": stem["name"],
             "backend": meta.get("ddsp_backend") or "soundfont",
             "instrument_key": meta.get("ddsp_instrument_key"),
             "reason": meta.get("ddsp_reason"),
@@ -150,28 +154,19 @@ def _hybrid_routing_rows(path_output: str, stem_rows: list[dict], track_render_m
 
 def _hybrid_pass_result(
     *,
-    dataset: pd.DataFrame,
-    i: int,
     path_output: str,
-    n_tracks: int,
-    song_dir,
-    audio_format: str,
     args,
     rendered_stem_rows: list[dict],
-    all_stem_rows: list[dict],
     recipe_rows: list[dict],
     track_render_meta: list,
-) -> tuple[dict | None, list[dict], list[dict], list[dict]]:
-    """Write data.csv / routing when every stem is on disk (either parallel job can finish last)."""
-    complete = song_is_complete(song_dir, n_tracks, audio_format, require_mixture=False)
-    stem_out = all_stem_rows if complete else rendered_stem_rows
+) -> tuple[dict | None, list[dict], list[dict], list[dict], int]:
+    """Return this pass's new table rows. Canonical data.csv is built at merge."""
     routing = (
-        _hybrid_routing_rows(path_output, all_stem_rows, track_render_meta)
-        if complete and _needs_ddsp_routing(args)
+        _hybrid_routing_rows(path_output, rendered_stem_rows, track_render_meta)
+        if _needs_ddsp_routing(args)
         else []
     )
-    song_info = _song_table_row(dataset, i, path_output, n_tracks) if complete else None
-    return song_info, stem_out, routing, recipe_rows, len(rendered_stem_rows)
+    return None, rendered_stem_rows, routing, recipe_rows, len(rendered_stem_rows)
 
 
 def parse_args(args=None, namespace=None):
@@ -266,7 +261,7 @@ def synthesize_song_at_index(
     ``ddsp_piano`` / ``midi_ddsp`` only render that neural backend; ``finalize``
     fills donor/soundfont stems and CSV rows (ablation ``--render-mode ddsp_*``).
     Hybrid ``synthesis.final`` uses ``fluidsynth`` and the two neural passes in
-    parallel; ``data.csv`` is written when all stems exist. Mix is separate.
+    parallel. Mix merges per-pass CSVs into canonical tables.
     """
     from synthesis.dense_midi import resolve_synthesis_midi
 
@@ -511,15 +506,9 @@ def synthesize_song_at_index(
                     remove(path)
             temp_dir.cleanup()
             return _hybrid_pass_result(
-                dataset=dataset,
-                i=i,
                 path_output=path_output,
-                n_tracks=n_tracks,
-                song_dir=song_dir,
-                audio_format=audio_format,
                 args=args,
                 rendered_stem_rows=rendered_stem_rows,
-                all_stem_rows=stem_rows,
                 recipe_rows=recipe_rows,
                 track_render_meta=track_render_meta,
             )
@@ -591,15 +580,9 @@ def synthesize_song_at_index(
                         remove(path)
                 temp_dir.cleanup()
                 return _hybrid_pass_result(
-                    dataset=dataset,
-                    i=i,
                     path_output=path_output,
-                    n_tracks=n_tracks,
-                    song_dir=song_dir,
-                    audio_format=audio_format,
                     args=args,
                     rendered_stem_rows=rendered_stem_rows,
-                    all_stem_rows=stem_rows,
                     recipe_rows=recipe_rows,
                     track_render_meta=track_render_meta,
                 )
@@ -904,10 +887,13 @@ def _run_song_pool(
     write_tables: bool,
     recipe_output_filepath: str | None = None,
     track_total: int | None = None,
+    append_only: bool = False,
 ) -> None:
     """Run song workers once (one DDSP pass or the non-DDSP path)."""
     from synthesis.recipe import STEM_RECIPE_COLUMNS
 
+    write_row = append_rows if append_only else append_rows_deduped
+    write_kw = {} if append_only else {"key_cols": ["path", "track"]}
     pool_ctx = (
         multiprocessing.get_context("spawn")
         if _pool_should_spawn(args)
@@ -928,29 +914,29 @@ def _run_song_pool(
             song_info, stem_rows, routing_rows, recipe_rows, n_progress = result
             pbar.update(int(n_progress) if use_tracks else 1)
             if recipe_rows and recipe_output_filepath is not None:
-                append_rows_deduped(
+                write_row(
                     recipe_output_filepath,
                     STEM_RECIPE_COLUMNS,
                     recipe_rows,
-                    key_cols=["path", "track"],
+                    **write_kw,
                 )
                 index = getattr(args, "stem_recipe_index", None)
                 if isinstance(index, dict):
                     for row in recipe_rows:
                         index[(str(row["path"]), int(row["track"]))] = row
             if stem_rows:
-                append_rows_deduped(
+                write_row(
                     stems_output_filepath,
                     STEMS_TABLE_COLUMNS,
                     stem_rows,
-                    key_cols=["path", "track"],
+                    **write_kw,
                 )
             if routing_rows and routing_output_filepath is not None:
-                append_rows_deduped(
+                write_row(
                     routing_output_filepath,
                     DDSP_ROUTING_COLUMNS,
                     routing_rows,
-                    key_cols=["path", "track"],
+                    **write_kw,
                 )
             if not write_tables or song_info is None:
                 continue
@@ -1384,8 +1370,9 @@ def _run_hybrid_synthesis(
     output_filepath: str,
     recipe_output_filepath: str | None,
 ) -> None:
-    """Fluidsynth and MIDI-DDSP write audio + locked table rows; data.csv when a song is complete."""
+    """Fluidsynth / DDSP write per-pass CSVs; mix merges them into canonical tables."""
     from synthesis.ddsp.pool import shutdown_ddsp_pool
+    from synthesis.pass_tables import pass_recipe_csv, pass_routing_csv, pass_stems_csv
     from synthesis.recipe import load_stem_recipe_index
 
     only = getattr(args, "only_pass", None)
@@ -1393,10 +1380,14 @@ def _run_hybrid_synthesis(
     run_fluidsynth = only in (None, "fluidsynth")
     run_ddsp_piano = recipe.uses_ddsp_piano() and only in (None, "ddsp_piano")
     run_midi_ddsp = uses_neural and only in (None, "midi_ddsp")
+    tables = Path(output_filepath).parent
 
-    def _one(pass_name: str, desc: str, write_tables: bool, pass_jobs: int) -> None:
+    def _one(pass_name: str, desc: str, pass_jobs: int) -> None:
         args.ddsp_pass = pass_name
-        args.stem_recipe_index = load_stem_recipe_index(Path(output_filepath).parent)
+        recipe_path = pass_recipe_csv(tables, pass_name)
+        args.stem_recipe_index = load_stem_recipe_index(
+            tables, filename=recipe_path.name,
+        )
         indices, track_total = _work_for_pass(
             dataset, work_indices, pass_name,
             stem_recipe_index=args.stem_recipe_index,
@@ -1415,18 +1406,23 @@ def _run_hybrid_synthesis(
             work_indices=indices,
             jobs=pass_jobs,
             desc=desc,
-            stems_output_filepath=stems_output_filepath,
-            routing_output_filepath=routing_output_filepath,
+            stems_output_filepath=str(pass_stems_csv(tables, pass_name)),
+            routing_output_filepath=(
+                str(pass_routing_csv(tables, pass_name))
+                if routing_output_filepath is not None
+                else None
+            ),
             output_filepath=output_filepath,
-            write_tables=write_tables,
-            recipe_output_filepath=recipe_output_filepath,
+            write_tables=False,
+            recipe_output_filepath=str(recipe_path),
             track_total=track_total,
+            append_only=True,
         )
         if pass_name in ("ddsp_piano", "midi_ddsp"):
             shutdown_ddsp_pool()
 
     if run_fluidsynth:
-        _one("fluidsynth", "Fluidsynth stems", True, max(1, int(args.jobs)))
+        _one("fluidsynth", "Fluidsynth stems", max(1, int(args.jobs)))
     if run_ddsp_piano or run_midi_ddsp:
         if int(args.jobs) > 1:
             print(
@@ -1435,9 +1431,9 @@ def _run_hybrid_synthesis(
                 flush=True,
             )
         if run_ddsp_piano:
-            _one("ddsp_piano", "DDSP-Piano stems", True, 1)
+            _one("ddsp_piano", "DDSP-Piano stems", 1)
         if run_midi_ddsp:
-            _one("midi_ddsp", "MIDI-DDSP stems", True, 1)
+            _one("midi_ddsp", "MIDI-DDSP stems", 1)
     elif only == "ddsp_piano" and not recipe.uses_ddsp_piano():
         print("Hybrid DDSP-Piano pass skipped (piano recipe is not midi-ddsp).", flush=True)
     elif only == "midi_ddsp" and not uses_neural:
@@ -1517,6 +1513,10 @@ def run_synthesis(args, output_dir: str, *, media_dir: str | None = None):
         scan_recipe_conflicts,
     )
     recipe = _hybrid_recipe(args)
+    if recipe is not None:
+        from synthesis.pass_tables import drop_canonical_tables
+
+        drop_canonical_tables(output_dir)
     recipe_output_filepath = (
         f"{output_dir}/{STEM_RECIPE_FILE_NAME}" if recipe is not None else None
     )

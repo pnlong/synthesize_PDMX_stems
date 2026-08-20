@@ -29,6 +29,11 @@ from synthesis.recipe import (
 from synthesis.synthesize import attach_corrected_midi, run_layout_pass
 
 
+def test_parse_args_accepts_merge():
+    args = parse_args(["--only-pass", "merge"])
+    assert args.only_pass == "merge"
+
+
 def test_parse_args_requires_only_pass():
     with pytest.raises(SystemExit):
         parse_args([])
