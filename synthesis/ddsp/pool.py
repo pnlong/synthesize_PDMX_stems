@@ -80,6 +80,10 @@ class _ServeWorker:
                 line = self.proc.stderr.readline()
                 if line:
                     self._stderr_lines.append(line)
+                    # Surface worker status lines (weight load / AR patch) to the
+                    # parent terminal — otherwise they stay trapped in the pipe.
+                    if line.startswith("[ddsp"):
+                        print(line, end="", flush=True)
                     continue
                 if self.proc.poll() is not None:
                     break

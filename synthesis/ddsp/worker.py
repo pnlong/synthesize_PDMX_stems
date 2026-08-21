@@ -60,6 +60,9 @@ def _midi_weights_key(weights_dir: str) -> str:
 def _load_midi_ddsp_models(weights_dir: str):
     import time
 
+    from synthesis.ddsp.midi_ddsp_ar_patch import apply_midi_ddsp_ar_patch
+
+    apply_midi_ddsp_ar_patch()
     from midi_ddsp.midi_ddsp_synthesize import load_pretrained_model
 
     key = _midi_weights_key(weights_dir)

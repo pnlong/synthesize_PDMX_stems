@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import multiprocessing
 import shutil
+import sys
 import tempfile
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, as_completed, wait
 from os import makedirs, remove
@@ -917,6 +918,9 @@ def _run_song_pool(
         total=int(track_total) if use_tracks else len(work_indices),
         desc=desc,
         unit="track" if use_tracks else "song",
+        # stdout: many long jobs redirect stderr to /dev/null to hide TF noise.
+        file=sys.stdout,
+        dynamic_ncols=True,
     )
 
     def _consume(result) -> None:
